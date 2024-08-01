@@ -39,7 +39,7 @@ def get_product_by_article(article_number):
     connection.close()
 
     if result:
-        columns = ["id", "store_id", "article_number", "metal_type", "product_type","", "weight", "price_per_gram", "price", "min_price", "arrival_date", "quantity"]
+        columns = ["id", "article_number", "product_type", "manufacturer", "model", "metal_type",  "price_per_gram", "min_price", "размер", "weight", "price", "quantity", "arrival_date"]
         product = dict(zip(columns, result))
         return product
     else:

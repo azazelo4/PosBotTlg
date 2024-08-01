@@ -25,10 +25,10 @@ def start(message):
 
 @bot.message_handler(content_types=['contact'])
 def handle_contact(message):
+    chat_id = message.chat.id
     phone_number = message.contact.phone_number
     user_data_dict = authorize_user(phone_number)
     if user_data_dict:
-        chat_id = message.chat.id
         user_data[chat_id] = user_data_dict
         if user_data_dict['role'] == 'cashier':
             keyboard = create_cashier_buttons()
