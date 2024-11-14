@@ -2,6 +2,7 @@ from enum import Enum
 from telebot import types
 from database import get_product_by_article, record_sale
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
