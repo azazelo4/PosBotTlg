@@ -55,21 +55,21 @@ class Sale:
             except ValueError:
                 return "Пожалуйста, введите корректное числовое значение суммы продажи."
 
-            # if self.sale_price >= self.min_price:
-            keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-            button_cash = types.KeyboardButton("Нал")
-            button_non_cash = types.KeyboardButton("Безнал")
-            button_non_cash_kaspi = types.KeyboardButton("Kaspi")
-            button_cancel = types.KeyboardButton("Отмена")
-            keyboard.add(button_cash, button_non_cash, button_cancel, button_non_cash_kaspi)
-            response = "Выберите тип расчета:"
-            if message.text != 'Отмена':
-                self.payment_type = (message.text)
-            self.state = SaleState.WAITING_PAYMENT_TYPE
-            # else:
-            #     response = f"""Сумма продажи не может быть меньше минимальной цены ({self.min_price}). 
-            #     Введите корректную сумму продажи:"""
-            #     keyboard = None
+            if self.sale_price >= int(self.min_price):
+            	keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+            	button_cash = types.KeyboardButton("Нал")
+            	button_non_cash = types.KeyboardButton("Безнал")
+            	button_non_cash_kaspi = types.KeyboardButton("Kaspi")
+            	button_cancel = types.KeyboardButton("Отмена")
+            	keyboard.add(button_cash, button_non_cash, button_cancel, button_non_cash_kaspi)
+            	response = "Выберите тип расчета:"
+            	if message.text != 'Отмена':
+                	self.payment_type = (message.text)
+            	self.state = SaleState.WAITING_PAYMENT_TYPE
+            else:
+                response = f"""Сумма продажи не может быть меньше минимальной цены ({self.min_price}). 
+                Введите корректную сумму продажи:"""
+                keyboard = None
             return response, keyboard
 
     def process_waiting_payment_type(self, message, user_data):

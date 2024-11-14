@@ -46,6 +46,31 @@ def get_keyboard_by_role(chat_id):
         return create_admin_buttons()
     else:
         return None
+
+
+# Обработка кнопки "Касса" для отображения меню кассовых операций
+@bot.message_handler(func=lambda message: message.text == "Касса")
+def handle_cash_operations_menu(message):
+    chat_id = message.chat.id
+    if user_data.get(chat_id) and user_data[chat_id]['role'] in ['admin', 'cashier']:
+        bot.send_message(chat_id, "Меню кассовых операций. Выберите действие:", reply_markup=create_cash_operations_buttons())
+    else:
+        bot.send_message(chat_id, "Доступ запрещен.")
+
+@bot.message_handler(func=lambda message: message.text == "Назад")
+def go_back_to_main_menu(message):
+    chat_id = message.chat.id
+    bot.send_message(chat_id, "Возвращаемся в главное меню.", reply_markup=create_admin_buttons())
+
+@bot.message_handler(func=lambda message: message.text == "Персонал")
+def handle_staff_menu(message):
+    chat_id = message.chat.id
+    # Проверка, что пользователь — администратор
+    if user_data.get(chat_id) and user_data[chat_id]['role'] == 'admin':
+        bot.send_message(chat_id, "Меню управления персоналом. Выберите действие:", reply_markup=create_staff_management_buttons())
+    else:
+        bot.send_message(chat_id, "Доступ запрещен. Команда доступна только администраторам.")
+
 #################----------- HELP -----------#################
 @bot.message_handler(commands=['help'])
 def help_command(message):
@@ -151,6 +176,44 @@ def handle_report(message):
         bot.send_message(chat_id, "Вы не авторизованы. Пожалуйста, поделитесь своим номером телефона для авторизации, введя команду /start.")
 
 #################----------- USER ADD AND REMOVE -----------#################
+
+# Команда для добавления пользователя
+
+# Обработчик нажатия на кнопку "Добавить пользователя"
+@bot.message_handler(func=lambda message: message.text == "Добавить пользователя")
+def add_user_button(message):
+    chat_id = message.chat.id
+    if user_data.get(chat_id) and user_data[chat_id]['role'] == 'admin':
+        msg = bot.send_message(chat_id, "Введите данные нового пользователя в формате: номер_телефона роль имя")
+        bot.register_next_step_handler(msg, process_add_user)
+    else:
+        bot.send_message(chat_id, "Команда доступна только администраторам.")
+
+def process_add_user(message):
+    chat_id = message.chat.id
+    try:
+        phone_number, role, name = message.text.split()
+        add_user_to_db(phone_number, role, name)
+        bot.send_message(chat_id, f"Пользователь {name} успешно добавлен.")
+    except ValueError:
+        bot.send_message(chat_id, "Ошибка: неверный формат данных. Используйте формат: номер_телефона роль имя.")
+
+# Команда для удаления пользователя
+# Обработчик нажатия на кнопку "Удалить пользователя"
+@bot.message_handler(func=lambda message: message.text == "Удалить пользователя")
+def remove_user_button(message):
+    chat_id = message.chat.id
+    if user_data.get(chat_id) and user_data[chat_id]['role'] == 'admin':
+        msg = bot.send_message(chat_id, "Введите номер телефона пользователя для удаления:")
+        bot.register_next_step_handler(msg, process_remove_user)
+    else:
+        bot.send_message(chat_id, "Команда доступна только администраторам.")
+
+def process_remove_user(message):
+    chat_id = message.chat.id
+    phone_number = message.text
+    remove_user_from_db(phone_number)
+    bot.send_message(chat_id, f"Пользователь с номером {phone_number} успешно удалён.")
 
 #################----------- RIGTHS -----------#################
 

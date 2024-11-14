@@ -118,3 +118,24 @@ def generate_report(start_date, end_date):
 #         cursor.execute(query)
 #         cursor.close()
 #         connection.close()
+
+
+# Функция для добавления пользователя в базу данных
+def add_user_to_db(phone_number, role, name):
+    connection = create_connection()
+    cursor = connection.cursor()
+    query = "INSERT INTO users (phone_number, role, name) VALUES (%s, %s, %s)"
+    cursor.execute(query, (phone_number, role, name))
+    connection.commit()
+    cursor.close()
+    connection.close()
+
+# Функция для удаления пользователя из базы данных
+def remove_user_from_db(phone_number):
+    connection = create_connection()
+    cursor = connection.cursor()
+    query = "DELETE FROM users WHERE phone_number = %s"
+    cursor.execute(query, (phone_number,))
+    connection.commit()
+    cursor.close()
+    connection.close()
