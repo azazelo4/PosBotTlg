@@ -1,6 +1,9 @@
 import mysql.connector
 from config import DB_HOST, DB_USER, DB_PASS, DB_NAME
 from mysql.connector import Error
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Create a database connection
 def create_connection():
@@ -31,19 +34,29 @@ def get_user_by_phone(phone_number):
 # Get a product by its article number
 def get_product_by_article(article_number):
     connection = create_connection()
-    cursor = connection.cursor()
-    query = "SELECT * FROM products WHERE article_number LIKE %s"
-    cursor.execute(query, (article_number,))
-    result = cursor.fetchone()
-    cursor.close()
-    connection.close()
-
-    if result:
-        columns = ["id", "article_number", "product_type", "manufacturer", "model", "metal_type",  "price_per_gram", "min_price", "размер", "weight", "price", "quantity", "arrival_date"]
-        product = dict(zip(columns, result))
-        return product
-    else:
+    cursor = connection.cursor(buffered=True)
+    try:
+        logger.debug(f"Выполнение запроса для поиска продукта с артикулом: {article_number}")
+        query = "SELECT * FROM products WHERE article_number LIKE %s"
+        cursor.execute(query, (article_number,))
+        result = cursor.fetchone()
+        
+        if result:
+            columns = ["id", "article_number", "product_type", "manufacturer", "model", 
+                       "metal_type", "price_per_gram", "min_price", "размер", 
+                       "weight", "price", "quantity", "arrival_date"]
+            product = dict(zip(columns, result))
+            logger.info(f"Продукт найден: {product}")
+            return product
+        else:
+            logger.warning(f"Продукт с артикулом {article_number} не найден.")
+            return None
+    except Exception as e:
+        logger.exception("Ошибка при выполнении запроса к базе данных.")
         return None
+    finally:
+        cursor.close()
+        connection.close()
 
 
 # Get a store by its ID

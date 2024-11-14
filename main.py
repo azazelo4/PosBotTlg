@@ -8,6 +8,18 @@ from database import *
 from report import Report
 import io
 from datetime import date
+import logging
+
+logging.basicConfig(
+    level=logging.DEBUG,  # Уровень отладки
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("/var/log/pos_bot.log"),  # Путь к файлу логов
+        logging.StreamHandler()  # Вывод в консоль
+    ]
+)
+
+logger = logging.getLogger(__name__)
 
 
 bot = telebot.TeleBot(TOKEN)

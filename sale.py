@@ -1,6 +1,17 @@
 from enum import Enum
 from telebot import types
 from database import get_product_by_article, record_sale
+import logging
+
+logger = logging.getLogger(__name__)
+
+def parse_price(price_str):
+    # Оставляем только цифры и десятичные разделители, заменяем запятую на точку
+    cleaned_price = re.sub(r"[^\d.,]", "", price_str).replace(",", ".")
+    try:
+        return float(cleaned_price)
+    except ValueError:
+        return None  # Вернём None, если не удаётся преобразовать
 
 class SaleState(Enum):
     WAITING_ARTICLE = 1
@@ -19,15 +30,26 @@ class Sale:
         self.user_data = user_data
 
     def process_waiting_article(self, message, user_data):
+        logger.debug(f"Обработка артикула: {message.text} для пользователя: {user_data}")
         if message.text == 'Отмена':
             self.reset()
-            return None
+            logger.info("Процесс продажи отменен пользователем.")
+            return "Операция отменена."
         else:
             self.article = message.text
             try:
+                # Пытаемся получить продукт по артикулу
                 self.product = get_product_by_article(self.article)
                 if self.product:
-                    self.min_price = self.product['min_price']
+                    # Проверка на наличие минимальной цены
+                    self.min_price = parse_price(self.product['min_price'])
+                    logger.info(f"Товар найден: {self.product['product_type']}, минимальная цена: {self.min_price}")
+
+                    if self.min_price is None:
+                        logger.error("Ошибка: минимальная цена не может быть обработана.")
+                        return "Ошибка данных: некорректное значение минимальной цены."
+                    
+                    # Возвращаем успешное сообщение
                     response = f"""
                     Артикул найден. \n
                     Изделие: {self.product['product_type']}\n
@@ -40,36 +62,38 @@ class Sale:
                     Введите сумму продажи:"""
                     self.state = SaleState.WAITING_SALE_PRICE
                 else:
+                    logger.warning("Артикул не найден.")
                     response = "Артикул не найден. Пожалуйста, введите корректный артикул:"
-            except:
+            except Exception as e:
+                # Логируем исключение с подробной информацией
+                logger.exception(f"Ошибка при обработке артикула: {self.article}")
                 response = "Произошла ошибка. Попробуйте еще раз."
         return response
 
     def process_waiting_sale_price(self, message, user_data):
         if message.text == 'Отмена':
             self.reset()
-            return None
+            return "Операция отменена.", None
         else:
             try:
-                self.sale_price = int(message.text)
+                    self.sale_price = int(message.text)
             except ValueError:
-                return "Пожалуйста, введите корректное числовое значение суммы продажи."
+                return "Пожалуйста, введите корректное числовое значение суммы продажи.", None
 
             if self.sale_price >= int(self.min_price):
-            	keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-            	button_cash = types.KeyboardButton("Нал")
-            	button_non_cash = types.KeyboardButton("Безнал")
-            	button_non_cash_kaspi = types.KeyboardButton("Kaspi")
-            	button_cancel = types.KeyboardButton("Отмена")
-            	keyboard.add(button_cash, button_non_cash, button_cancel, button_non_cash_kaspi)
-            	response = "Выберите тип расчета:"
-            	if message.text != 'Отмена':
-                	self.payment_type = (message.text)
-            	self.state = SaleState.WAITING_PAYMENT_TYPE
+                keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+                button_cash = types.KeyboardButton("Нал")
+                button_non_cash = types.KeyboardButton("Безнал")
+                button_non_cash_kaspi = types.KeyboardButton("Kaspi")
+                button_cancel = types.KeyboardButton("Отмена")
+                keyboard.add(button_cash, button_non_cash, button_non_cash_kaspi, button_cancel)
+            
+                response = "Выберите тип расчета:"
+                self.state = SaleState.WAITING_PAYMENT_TYPE
             else:
-                response = f"""Сумма продажи не может быть меньше минимальной цены ({self.min_price}). 
-                Введите корректную сумму продажи:"""
+                response = f"Сумма продажи не может быть меньше минимальной цены ({self.min_price}). Введите корректную сумму продажи:"
                 keyboard = None
+
             return response, keyboard
 
     def process_waiting_payment_type(self, message, user_data):
