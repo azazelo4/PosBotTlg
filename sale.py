@@ -35,7 +35,7 @@ class Sale:
         if message.text == 'Отмена':
             self.reset()
             logger.info("Процесс продажи отменен пользователем.")
-            return "Операция отменена."
+            return None
         else:
             self.article = message.text
             try:
@@ -74,7 +74,7 @@ class Sale:
     def process_waiting_sale_price(self, message, user_data):
         if message.text == 'Отмена':
             self.reset()
-            return "Операция отменена.", None
+            return None
         else:
             try:
                     self.sale_price = int(message.text)

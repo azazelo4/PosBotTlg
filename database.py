@@ -24,12 +24,26 @@ def create_connection():
 def get_user_by_phone(phone_number):
     connection = create_connection()
     cursor = connection.cursor()
-    query = "SELECT * FROM users WHERE phone_number = %s"
-    cursor.execute(query, (phone_number,))
-    user = cursor.fetchone()
-    cursor.close()
-    connection.close()
-    return user
+    try:
+        # Выполняем запрос, получая все столбцы
+        query = "SELECT * FROM users WHERE phone_number = %s"
+        cursor.execute(query, (phone_number,))
+        result = cursor.fetchone()
+
+        if result:
+            # Извлекаем имена столбцов из cursor.description
+            columns = [desc[0] for desc in cursor.description]
+            user_data = dict(zip(columns, result))  # Преобразуем результат в словарь
+            logger.debug(f"Результат запроса для {phone_number}: {user_data}")
+            return user_data  # Возвращаем словарь
+        else:
+            logger.debug(f"Пользователь с телефоном {phone_number} не найден.")
+            return None
+    finally:
+        cursor.close()
+        connection.close()
+
+
 
 # Get a product by its article number
 def get_product_by_article(article_number):
@@ -137,18 +151,54 @@ def generate_report(start_date, end_date):
 def add_user_to_db(phone_number, role, name):
     connection = create_connection()
     cursor = connection.cursor()
-    query = "INSERT INTO users (phone_number, role, name) VALUES (%s, %s, %s)"
-    cursor.execute(query, (phone_number, role, name))
-    connection.commit()
-    cursor.close()
-    connection.close()
+
+    # Проверка, существует ли пользователь с таким номером телефона
+    select_query = "SELECT id, is_active FROM users WHERE phone_number = %s"
+    cursor.execute(select_query, (phone_number,))
+    result = cursor.fetchone()
+
+    if result:
+        user_id, is_active = result
+        if is_active == 0:
+            # Если пользователь существует, но неактивен, активируем его
+            update_query = "UPDATE users SET is_active = 1, role = %s, name = %s WHERE id = %s"
+            cursor.execute(update_query, (role, name, user_id))
+            connection.commit()
+            cursor.close()
+            connection.close()
+            return "Пользователь активирован повторно."
+        else:
+            cursor.close()
+            connection.close()
+            return "Пользователь уже существует и активен."
+    else:
+        # Добавление нового пользователя, если он не существует
+        insert_query = "INSERT INTO users (phone_number, role, name, is_active) VALUES (%s, %s, %s, 1)"
+        cursor.execute(insert_query, (phone_number, role, name))
+        connection.commit()
+        cursor.close()
+        connection.close()
+        return "Пользователь добавлен успешно."
 
 # Функция для удаления пользователя из базы данных
-def remove_user_from_db(phone_number):
+def deactivate_user_in_db(phone_number):
     connection = create_connection()
     cursor = connection.cursor()
-    query = "DELETE FROM users WHERE phone_number = %s"
-    cursor.execute(query, (phone_number,))
-    connection.commit()
+
+    # Проверка, существует ли пользователь с таким номером телефона
+    select_query = "SELECT id FROM users WHERE phone_number = %s AND is_active = 1"
+    cursor.execute(select_query, (phone_number,))
+    result = cursor.fetchone()
+
+    if result:
+        # Деактивация пользователя
+        update_query = "UPDATE users SET is_active = 0 WHERE phone_number = %s"
+        cursor.execute(update_query, (phone_number,))
+        connection.commit()
+        response = "Пользователь деактивирован."
+    else:
+        response = "Пользователь не найден или уже деактивирован."
+
     cursor.close()
     connection.close()
+    return response

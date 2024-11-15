@@ -39,16 +39,33 @@ def start(message):
 def handle_contact(message):
     chat_id = message.chat.id
     phone_number = message.contact.phone_number
-    user_data_dict = authorize_user(phone_number)
-    if user_data_dict:
+
+    # Получаем данные пользователя и возможную ошибку
+    user_data_dict, error = authorize_user(phone_number)
+
+    if error:
+        # Если есть ошибка, отправляем сообщение об ошибке
+        bot.send_message(chat_id, error)
+    elif user_data_dict:
+        # Сохраняем данные авторизованного пользователя
         user_data[chat_id] = user_data_dict
+
+        # Определяем клавиатуру в зависимости от роли
         if user_data_dict['role'] == 'cashier':
             keyboard = create_cashier_buttons()
         elif user_data_dict['role'] == 'admin':
             keyboard = create_admin_buttons()
-        bot.send_message(chat_id, f"Здравствуйте, {user_data_dict['name']}! Вы авторизованы как {user_data_dict['role']}. для справки введите команду /help", reply_markup=keyboard)
+
+        # Приветственное сообщение
+        bot.send_message(
+            chat_id,
+            f"Здравствуйте, {user_data_dict['name']}! Вы авторизованы как {user_data_dict['role']}. Для справки введите команду /help.",
+            reply_markup=keyboard
+        )
     else:
-        bot.send_message(chat_id, "Номер телефона не найден. Пожалуйста, обратитесь к администратору.")
+        # На случай, если ничего не возвращено
+        bot.send_message(chat_id, "Произошла ошибка при авторизации. Попробуйте еще раз.")
+
 
 def get_keyboard_by_role(chat_id):
     role = user_data[chat_id]['role']
@@ -72,7 +89,20 @@ def handle_cash_operations_menu(message):
 @bot.message_handler(func=lambda message: message.text == "Назад")
 def go_back_to_main_menu(message):
     chat_id = message.chat.id
-    bot.send_message(chat_id, "Возвращаемся в главное меню.", reply_markup=create_admin_buttons())
+
+    # Проверяем авторизацию пользователя
+    user = user_data.get(chat_id)
+    if not user or user.get('is_active') == 0:
+        # Создаем клавиатуру с кнопкой "Поделиться номером"
+        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        share_contact_button = types.KeyboardButton("Поделиться номером", request_contact=True)
+        keyboard.add(share_contact_button)
+
+        bot.send_message(chat_id, "Вы не авторизованы или ваш аккаунт деактивирован. Пожалуйста, поделитесь своим номером для авторизации.", reply_markup=keyboard)
+        return
+
+    # Если пользователь авторизован, возвращаем главное меню
+    bot.send_message(chat_id, "Возвращаемся в главное меню.", reply_markup=get_keyboard_by_role(chat_id))
 
 @bot.message_handler(func=lambda message: message.text == "Персонал")
 def handle_staff_menu(message):
@@ -189,8 +219,6 @@ def handle_report(message):
 
 #################----------- USER ADD AND REMOVE -----------#################
 
-# Команда для добавления пользователя
-
 # Обработчик нажатия на кнопку "Добавить пользователя"
 @bot.message_handler(func=lambda message: message.text == "Добавить пользователя")
 def add_user_button(message):
@@ -204,13 +232,14 @@ def add_user_button(message):
 def process_add_user(message):
     chat_id = message.chat.id
     try:
+        if message.text == 'Отмена':
+            return None, go_back_to_main_menu
         phone_number, role, name = message.text.split()
         add_user_to_db(phone_number, role, name)
         bot.send_message(chat_id, f"Пользователь {name} успешно добавлен.")
     except ValueError:
         bot.send_message(chat_id, "Ошибка: неверный формат данных. Используйте формат: номер_телефона роль имя.")
 
-# Команда для удаления пользователя
 # Обработчик нажатия на кнопку "Удалить пользователя"
 @bot.message_handler(func=lambda message: message.text == "Удалить пользователя")
 def remove_user_button(message):
@@ -224,8 +253,8 @@ def remove_user_button(message):
 def process_remove_user(message):
     chat_id = message.chat.id
     phone_number = message.text
-    remove_user_from_db(phone_number)
-    bot.send_message(chat_id, f"Пользователь с номером {phone_number} успешно удалён.")
+    deactivate_user_in_db(phone_number)
+    bot.send_message(chat_id, f"Пользователь с номером {phone_number} успешно деактивирован.")
 
 #################----------- RIGTHS -----------#################
 
