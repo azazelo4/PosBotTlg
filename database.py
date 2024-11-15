@@ -202,3 +202,16 @@ def deactivate_user_in_db(phone_number):
     cursor.close()
     connection.close()
     return response
+
+def get_deactivated_users():
+    connection = create_connection()
+    cursor = connection.cursor()
+    try:
+        # Получаем список пользователей, у которых is_active = 0
+        query = "SELECT id FROM users WHERE is_active = 0"
+        cursor.execute(query)
+        result = cursor.fetchall()
+        return [row[0] for row in result]  # Возвращаем список ID деактивированных пользователей
+    finally:
+        cursor.close()
+        connection.close()

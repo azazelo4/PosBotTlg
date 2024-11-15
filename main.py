@@ -9,6 +9,8 @@ from report import Report
 import io
 from datetime import date
 import logging
+import threading
+import time
 
 logging.basicConfig(
     level=logging.DEBUG,  # Уровень отладки
@@ -256,6 +258,19 @@ def process_remove_user(message):
     deactivate_user_in_db(phone_number)
     bot.send_message(chat_id, f"Пользователь с номером {phone_number} успешно деактивирован.")
 
+def check_user_status():
+    while True:
+        # Получаем список деактивированных пользователей
+        deactivated_users = get_deactivated_users()
+
+        # Удаляем деактивированных пользователей из user_data
+        for chat_id, user in list(user_data.items()):
+            if user['id'] in deactivated_users:
+                del user_data[chat_id]
+                bot.send_message(chat_id, "Ваш аккаунт был деактивирован. Пожалуйста, обратитесь к администратору.")
+        
+        time.sleep(60)  # Проверяем каждые 60 секунд
+
 #################----------- RIGTHS -----------#################
 
 #################----------- ADD GOODS -----------#################
@@ -265,4 +280,5 @@ def process_remove_user(message):
 #################----------- END -----------#################
 
 if __name__ == '__main__':
+    threading.Thread(target=check_user_status, daemon=True).start()
     bot.polling(none_stop=True)
