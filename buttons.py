@@ -24,8 +24,9 @@ def create_staff_management_buttons():
     button_remove_user = types.KeyboardButton("Удалить пользователя")
     button_rights = types.KeyboardButton("Права")
     button_back = types.KeyboardButton("Назад")
+    button_cancel = types.KeyboardButton("Отмена")
     # Кнопки добавления, удаления пользователя, управления правами и возврата
-    keyboard.add(button_add_user, button_remove_user, button_rights, button_back)
+    keyboard.add(button_add_user, button_remove_user, button_rights, button_back, button_cancel)
     return keyboard
 
 def create_cash_operations_buttons():
@@ -36,5 +37,6 @@ def create_cash_operations_buttons():
     button_buyback = types.KeyboardButton("Скупка")
     button_reports = types.KeyboardButton("Отчеты")
     button_back = types.KeyboardButton("Назад")
-    keyboard.add(button_sale, button_return, button_trade_in, button_buyback, button_reports, button_back)
+    button_cancel = types.KeyboardButton("Отмена")
+    keyboard.add(button_sale, button_return, button_trade_in, button_buyback, button_reports, button_back, button_cancel)
     return keyboard

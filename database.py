@@ -3,6 +3,7 @@ from config import DB_HOST, DB_USER, DB_PASS, DB_NAME
 from mysql.connector import Error
 import logging
 
+
 logger = logging.getLogger(__name__)
 
 # Create a database connection
@@ -43,7 +44,18 @@ def get_user_by_phone(phone_number):
         cursor.close()
         connection.close()
 
-
+def get_all_users():
+    connection = create_connection()
+    cursor = connection.cursor()
+    try:
+        query = "SELECT phone_number, name, role FROM users WHERE is_active = 1"
+        cursor.execute(query)
+        result = cursor.fetchall()
+        users = [{"id": row[0], "name": row[1], "role": row[2]} for row in result]
+        return users
+    finally:
+        cursor.close()
+        connection.close()
 
 # Get a product by its article number
 def get_product_by_article(article_number):
@@ -215,3 +227,40 @@ def get_deactivated_users():
     finally:
         cursor.close()
         connection.close()
+
+def check_role_changes():
+    connection = create_connection()
+    cursor = connection.cursor()
+    try:
+        # Запрашиваем текущие данные пользователей
+        query = "SELECT id, role FROM users"
+        cursor.execute(query)
+        current_roles = {row[0]: row[1] for row in cursor.fetchall()}  # Формат: {id: role}
+
+        # Проверяем изменения в ролях
+        global role_cache
+        for user_id, current_role in current_roles.items():
+            if user_id in role_cache:
+                # Если роль изменилась, обновляем user_data
+                if role_cache[user_id] != current_role:
+                    role_cache[user_id] = current_role
+                    for chat_id, user in user_data.items():
+                        if user['id'] == user_id:
+                            user['role'] = current_role
+                            bot.send_message(
+                                chat_id,
+                                f"Ваша роль была изменена на '{current_role}'."
+                            )
+            else:
+                # Если пользователь новый, добавляем в кэш
+                role_cache[user_id] = current_role
+
+        # Удаляем пользователей из кэша, которых больше нет в базе
+        for user_id in list(role_cache.keys()):
+            if user_id not in current_roles:
+                del role_cache[user_id]
+
+    finally:
+        cursor.close()
+        connection.close()
+

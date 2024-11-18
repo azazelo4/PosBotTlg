@@ -11,6 +11,11 @@ from datetime import date
 import logging
 import threading
 import time
+from user_management import configure_user_management
+from database import get_all_users, change_user_role
+
+# Настраиваем зависимости
+configure_user_management(get_all_users, change_user_role)
 
 logging.basicConfig(
     level=logging.DEBUG,  # Уровень отладки
@@ -221,56 +226,75 @@ def handle_report(message):
 
 #################----------- USER ADD AND REMOVE -----------#################
 
-# Обработчик нажатия на кнопку "Добавить пользователя"
-@bot.message_handler(func=lambda message: message.text == "Добавить пользователя")
-def add_user_button(message):
-    chat_id = message.chat.id
-    if user_data.get(chat_id) and user_data[chat_id]['role'] == 'admin':
-        msg = bot.send_message(chat_id, "Введите данные нового пользователя в формате: номер_телефона роль имя")
-        bot.register_next_step_handler(msg, process_add_user)
-    else:
-        bot.send_message(chat_id, "Команда доступна только администраторам.")
+# # Обработчик нажатия на кнопку "Добавить пользователя"
+# @bot.message_handler(func=lambda message: message.text == "Добавить пользователя")
+# def add_user_button(message):
+#     chat_id = message.chat.id
+#     if user_data.get(chat_id) and user_data[chat_id]['role'] == 'admin':
+#         msg = bot.send_message(chat_id, "Введите данные нового пользователя в формате: номер_телефона роль имя")
+#         bot.register_next_step_handler(msg, process_add_user)
+#     else:
+#         bot.send_message(chat_id, "Команда доступна только администраторам.")
 
-def process_add_user(message):
-    chat_id = message.chat.id
-    try:
-        if message.text == 'Отмена':
-            return None, go_back_to_main_menu
-        phone_number, role, name = message.text.split()
-        add_user_to_db(phone_number, role, name)
-        bot.send_message(chat_id, f"Пользователь {name} успешно добавлен.")
-    except ValueError:
-        bot.send_message(chat_id, "Ошибка: неверный формат данных. Используйте формат: номер_телефона роль имя.")
+# def process_add_user(message):
+#     chat_id = message.chat.id
+#     try:
+#         if message.text == 'Отмена':
+#             return None, go_back_to_main_menu
+#         phone_number, role, name = message.text.split()
+#         add_user_to_db(phone_number, role, name)
+#         bot.send_message(chat_id, f"Пользователь {name} успешно добавлен.")
+#     except ValueError:
+#         bot.send_message(chat_id, "Ошибка: неверный формат данных. Используйте формат: номер_телефона роль имя.")
 
-# Обработчик нажатия на кнопку "Удалить пользователя"
-@bot.message_handler(func=lambda message: message.text == "Удалить пользователя")
-def remove_user_button(message):
-    chat_id = message.chat.id
-    if user_data.get(chat_id) and user_data[chat_id]['role'] == 'admin':
-        msg = bot.send_message(chat_id, "Введите номер телефона пользователя для удаления:")
-        bot.register_next_step_handler(msg, process_remove_user)
-    else:
-        bot.send_message(chat_id, "Команда доступна только администраторам.")
+# # Обработчик нажатия на кнопку "Удалить пользователя"
+# @bot.message_handler(func=lambda message: message.text == "Удалить пользователя")
+# def remove_user_button(message):
+#     chat_id = message.chat.id
+#     if user_data.get(chat_id) and user_data[chat_id]['role'] == 'admin':
+#         msg = bot.send_message(chat_id, "Введите номер телефона пользователя для удаления:")
+#         bot.register_next_step_handler(msg, process_remove_user)
+#     else:
+#         bot.send_message(chat_id, "Команда доступна только администраторам.")
 
-def process_remove_user(message):
-    chat_id = message.chat.id
-    phone_number = message.text
-    deactivate_user_in_db(phone_number)
-    bot.send_message(chat_id, f"Пользователь с номером {phone_number} успешно деактивирован.")
+# def process_remove_user(message):
+#     chat_id = message.chat.id
+#     phone_number = message.text
+#     deactivate_user_in_db(phone_number)
+#     bot.send_message(chat_id, f"Пользователь с номером {phone_number} успешно деактивирован.")
 
-def check_user_status():
-    while True:
-        # Получаем список деактивированных пользователей
-        deactivated_users = get_deactivated_users()
+# def check_user_status():
+#     while True:
+#         # Получаем список деактивированных пользователей
+#         deactivated_users = get_deactivated_users()
 
-        # Удаляем деактивированных пользователей из user_data
-        for chat_id, user in list(user_data.items()):
-            if user['id'] in deactivated_users:
-                del user_data[chat_id]
-                bot.send_message(chat_id, "Ваш аккаунт был деактивирован. Пожалуйста, обратитесь к администратору.")
+#         # Удаляем деактивированных пользователей из user_data
+#         for chat_id, user in list(user_data.items()):
+#             if user['id'] in deactivated_users:
+#                 del user_data[chat_id]
+#                 bot.send_message(chat_id, "Ваш аккаунт был деактивирован. Пожалуйста, обратитесь к администратору.")
         
-        time.sleep(60)  # Проверяем каждые 60 секунд
+#         time.sleep(60)  # Проверяем каждые 60 секунд
 
+# def role_monitor():
+#     while True:
+#         try:
+#             check_role_changes()
+#         except Exception as e:
+#             print(f"Ошибка при проверке ролей: {e}")
+#         time.sleep(60)
+
+@bot.message_handler(func=lambda message: message.text == "Персонал")
+def handle_rights_menu(message):
+    handle_role_management(message.chat.id)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("select_user_"))
+def callback_select_user(call):
+    handle_select_user(call)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("change_role_"))
+def callback_change_role(call):
+    handle_change_role(call)
 #################----------- RIGTHS -----------#################
 
 #################----------- ADD GOODS -----------#################

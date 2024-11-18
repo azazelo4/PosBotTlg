@@ -13,3 +13,4 @@ def authorize_user(phone_number):
     else:
         logger.warning(f"Пользователь с телефоном {phone_number} не найден.")
         return None, "Пользователь не найден."
+

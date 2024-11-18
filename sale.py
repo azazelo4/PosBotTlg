@@ -7,12 +7,24 @@ import re
 logger = logging.getLogger(__name__)
 
 def parse_price(price_str):
-    # Оставляем только цифры и десятичные разделители, заменяем запятую на точку
-    cleaned_price = re.sub(r"[^\d.,]", "", price_str).replace(",", ".")
+    # Удаляем все символы, кроме цифр, точек и запятых
+    cleaned_price = re.sub(r"[^\d.,]", "", price_str)
+
+    # Если запятая используется как десятичный разделитель
+    if ',' in cleaned_price and '.' in cleaned_price:
+        # Если есть и `,` и `.`, предполагаем, что `,` — десятичный разделитель
+        cleaned_price = cleaned_price.replace('.', '').replace(',', '.')
+    elif cleaned_price.count(',') == 1 and cleaned_price.count('.') == 0:
+        # Если есть только одна запятая, заменяем её на точку
+        cleaned_price = cleaned_price.replace(',', '.')
+    else:
+        # Удаляем все точки как разделители тысяч
+        cleaned_price = cleaned_price.replace('.', '')
+
     try:
         return float(cleaned_price)
     except ValueError:
-        return None  # Вернём None, если не удаётся преобразовать
+        return None  # Возвращаем None, если не удалось преобразовать
 
 class SaleState(Enum):
     WAITING_ARTICLE = 1
