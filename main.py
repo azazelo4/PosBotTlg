@@ -47,30 +47,28 @@ def handle_contact(message):
     chat_id = message.chat.id
     phone_number = message.contact.phone_number
 
-    # Получаем данные пользователя и возможную ошибку
-    user_data_dict, error = authorize_user(phone_number)
+    try:
+        user_data_dict, error = authorize_user(phone_number)
 
-    if error:
-        # Если есть ошибка, отправляем сообщение об ошибке
-        bot.send_message(chat_id, error)
-    elif user_data_dict:
-        # Сохраняем данные авторизованного пользователя
-        user_data[chat_id] = user_data_dict
+        if error:
+            bot.send_message(chat_id, error)
+        elif user_data_dict:
+            user_data[chat_id] = user_data_dict
 
-        # Определяем клавиатуру в зависимости от роли
-        if user_data_dict['role'] == 'cashier':
-            keyboard = create_cashier_buttons()
-        elif user_data_dict['role'] == 'admin':
-            keyboard = create_admin_buttons()
+            if user_data_dict['role'] == 'cashier':
+                keyboard = create_cashier_buttons()
+            elif user_data_dict['role'] == 'admin':
+                keyboard = create_admin_buttons()
 
-        # Приветственное сообщение
-        bot.send_message(
-            chat_id,
-            f"Здравствуйте, {user_data_dict['name']}! Вы авторизованы как {user_data_dict['role']}. Для справки введите команду /help.",
-            reply_markup=keyboard
-        )
-    else:
-        # На случай, если ничего не возвращено
+            bot.send_message(
+                chat_id,
+                f"Здравствуйте, {user_data_dict['name']}! Вы авторизованы как {user_data_dict['role']}. Для справки введите команду /help.",
+                reply_markup=keyboard
+            )
+        else:
+            bot.send_message(chat_id, "Произошла ошибка при авторизации. Попробуйте еще раз.")
+    except Exception as e:
+        logger.exception("Ошибка при авторизации пользователя.")
         bot.send_message(chat_id, "Произошла ошибка при авторизации. Попробуйте еще раз.")
 
 
@@ -158,20 +156,22 @@ def start_sale(message):
     
 def process_sale_step(message, chat_id, user_data):
     sale = sale_handler.get(chat_id, None)
-    chat_id = message.chat.id
-    result = sale.process_step(message, user_data)
-    if result is None or (sale.state == SaleState.WAITING_ARTICLE and result == "Продажа подтверждена."):
-        sale.reset()
-        del sale_handler[chat_id]
-        keyboard = get_keyboard_by_role(chat_id)
-        bot.send_message(chat_id, "Продажа отменена." if result is None else result, reply_markup=keyboard)
-    else:
-        if isinstance(result, tuple):
-            response, keyboard = result
+    try:
+        result = sale.process_step(message, user_data)
+        if result is None or (sale.state == SaleState.WAITING_ARTICLE and result == "Продажа подтверждена."):
+            sale.reset()
+            del sale_handler[chat_id]
+            keyboard = get_keyboard_by_role(chat_id)
+            bot.send_message(chat_id, "Продажа отменена." if result is None else result, reply_markup=keyboard)
         else:
-            response, keyboard = result, get_keyboard_by_role(chat_id)
-        bot.send_message(chat_id, response, reply_markup=keyboard)
-
+            if isinstance(result, tuple):
+                response, keyboard = result
+            else:
+                response, keyboard = result, get_keyboard_by_role(chat_id)
+            bot.send_message(chat_id, response, reply_markup=keyboard)
+    except Exception as e:
+        logger.exception("Ошибка при обработке шага продажи.")
+        bot.send_message(chat_id, "Произошла ошибка при обработке продажи. Попробуйте еще раз.")
 
 @bot.message_handler(func=lambda message: sale_handler.get(message.chat.id) is not None and sale_handler[message.chat.id].state == SaleState.WAITING_ARTICLE)
 def process_article(message):

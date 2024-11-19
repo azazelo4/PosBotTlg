@@ -17,8 +17,7 @@ def create_connection():
             database=DB_NAME
         )
     except Error as e:
-        print(f"The error '{e}' occurred")
-
+        logger.exception(f"The error '{e}' occurred")
     return connection
 
 # Get a user by their phone number
@@ -40,6 +39,9 @@ def get_user_by_phone(phone_number):
         else:
             logger.debug(f"Пользователь с телефоном {phone_number} не найден.")
             return None
+    except Exception as e:
+        logger.exception("Ошибка при выполнении запроса к базе данных.")
+        return None
     finally:
         cursor.close()
         connection.close()
@@ -100,14 +102,18 @@ def get_store_by_id(store_id):
 def record_sale(product_id, store_id, user_id, sale_price, payment_type):
     connection = create_connection()
     cursor = connection.cursor()
-    insert_query = """INSERT INTO sales (product_id, store_id, user_id, sale_date, sold_price, payment_type) 
-    VALUES (%s, %s, %s, NOW(), %s, %s)"""
-    cursor.execute(insert_query, (product_id, store_id, user_id, sale_price, payment_type))
-    update_query = """UPDATE products SET quantity = quantity - 1 WHERE id = %s"""
-    cursor.execute(update_query, (product_id,))
-    connection.commit()
-    cursor.close()
-    connection.close()
+    try:
+        insert_query = """INSERT INTO sales (product_id, store_id, user_id, sale_date, sold_price, payment_type) 
+        VALUES (%s, %s, %s, NOW(), %s, %s)"""
+        cursor.execute(insert_query, (product_id, store_id, user_id, sale_price, payment_type))
+        update_query = """UPDATE products SET quantity = quantity - 1 WHERE id = %s"""
+        cursor.execute(update_query, (product_id,))
+        connection.commit()
+    except Exception as e:
+        logger.exception("Ошибка при записи продажи в базу данных.")
+    finally:
+        cursor.close()
+        connection.close()
 
 # Get the minimum price of a product
 def get_min_price(product):

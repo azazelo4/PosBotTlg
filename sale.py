@@ -127,14 +127,18 @@ class Sale:
         user_id = self.user_data.get('id', None)
         store_id = self.user_data.get('store_id')
         if user_id is not None:
-            if message.text == "Подтвердить":
-                #store_id = self.user_data.get('store_id')
-                record_sale(self.product['id'], store_id, user_id, self.sale_price, self.payment_type)
-                self.reset()
-                response = "Продажа подтверждена."
-            else:
-                self.reset()
-                return None
+            try:
+                if message.text == "Подтвердить":
+                    #store_id = self.user_data.get('store_id')
+                    record_sale(self.product['id'], store_id, user_id, self.sale_price, self.payment_type)
+                    self.reset()
+                    response = "Продажа подтверждена."
+                else:
+                    self.reset()
+                    return None
+            except Exception as e:
+                logger.exception("Ошибка при подтверждении продажи.")
+                response = "Произошла ошибка при подтверждении продажи. Попробуйте еще раз."
         else:
             response = "Ошибка: пользователь не авторизован."
         return response

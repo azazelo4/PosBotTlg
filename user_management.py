@@ -1,5 +1,6 @@
 # user_management.py
 from telebot import types
+from main import user_data, bot  # Ensure these are imported correctly
 
 get_all_users_function = None
 change_user_role_function = None
@@ -21,9 +22,13 @@ def handle_role_management(chat_id):
         return
 
     # Получаем список пользователей
-    users = get_all_users_function()
-    if not users:
-        bot.send_message(chat_id, "Пользователи не найдены.")
+    try:
+        users = get_all_users_function()
+        if not users:
+            bot.send_message(chat_id, "Пользователи не найдены.")
+            return
+    except Exception as e:
+        bot.send_message(chat_id, f"Ошибка при получении пользователей: {str(e)}")
         return
 
     # Создаем клавиатуру с пользователями

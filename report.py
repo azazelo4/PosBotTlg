@@ -49,7 +49,7 @@ class Report:
                 return "Неверный формат даты. Пожалуйста, введите дату в формате ГГГГ-ММ-ДД"
         elif self.report_type == 'custom_end':
             try:
-                self.end_date = datetime.datetime.strptime(message.text, "%Y-%m-%D").date()
+                self.end_date = datetime.datetime.strptime(message.text, "%Y-%m-%d").date()
                 report_data = generate_report(self.start_date, self.end_date)
                 wb = self.generate_excel_report(report_data)
                 response = "Отчет готов."
