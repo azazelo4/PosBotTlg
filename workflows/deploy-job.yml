@@ -10,32 +10,30 @@ jobs:
     runs-on: self-hosted
 
     steps:
-      # Checkout the code from the repository
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-      # Build the Docker image locally
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install aiogram telebot
+
       - name: Build Docker image
         run: |
-          docker build -t my-python-app:latest .
+          docker build -t newvm_image .
 
-      # Run the Docker container
+      - name: Stop and remove existing container
+        run: |
+          if [ "$(docker ps -q -f name=newvm_container)" ]; then
+            docker stop newvm_container
+            docker rm newvm_container
+          fi
+
       - name: Run Docker container
         run: |
-          docker run -d --name my-python-container \
-            my-python-app:latest
-
-      # Verify container is running
-      - name: Verify container status
-        run: |
-          docker ps | grep my-python-container
-
-      - name: Verify application logs
-        run: |
-          docker logs my-python-container
-
-      - name: Cleanup old containers (optional)
-        run: |
-          docker stop my-python-container || true
-          docker rm my-python-container || true
-          echo "Old container cleaned up"
+          docker run -d --name newvm_container --restart unless-stopped -p 8000:8000 newvm_image
