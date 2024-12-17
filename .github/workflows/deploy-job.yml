@@ -14,27 +14,21 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
-
-      - name: Install dependencies
+      - name: Install Docker Compose
         run: |
-          python -m pip install --upgrade pip
-          pip install aiogram telebot
-
-      - name: Build Docker image
-        run: |
-          docker build -t newvm_image .
-
-      - name: Stop and remove existing container
-        run: |
-          if [ "$(docker ps -q -f name=newvm_container)" ]; then
-            docker stop newvm_container
-            docker rm newvm_container
+          if ! [ -x "$(command -v docker-compose)" ]; then
+            sudo curl -L "https://github.com/docker/compose/releases/download/v2.26.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+            sudo chmod +x /usr/local/bin/docker-compose
           fi
 
-      - name: Run Docker container
+      - name: Stop existing containers
         run: |
-          docker run -d --name newvm_container --restart unless-stopped -p 8000:8000 newvm_image
+          docker-compose down || true
+      
+      - name: Deploy with Docker Compose
+        run: |
+          docker-compose up -d --build .
+
+      - name: Verify services
+        run: |
+          docker ps
