@@ -8,7 +8,7 @@ WORKDIR /app
 RUN python3 -m venv venv
 
 # Активируем виртуальное окружение и устанавливаем зависимости
-RUN ./venv/bin/pip install --no-cache-dir aiogram telebot pymysql
+RUN ./venv/bin/pip install --no-cache-dir aiogram telebot pymysql mysql-connector-python
 
 # Копируем код приложения
 COPY . /app
