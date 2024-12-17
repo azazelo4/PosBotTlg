@@ -1,18 +1,17 @@
-FROM ubuntu:latest
+FROM python:3.10
 
-# Обновляем пакеты и устанавливаем Python и pip
-RUN apt-get update && \
-    apt-get install -y python3 python3-pip && \
-    rm -rf /var/lib/apt/lists/*
+# Устанавливаем системные зависимости
+RUN apt-get update && apt-get install -y python3-venv && rm -rf /var/lib/apt/lists/*
 
-# Устанавливаем необходимые библиотеки Python
-RUN pip3 install --no-cache-dir aiogram telebot
-
-# Создаём рабочую директорию
+# Создаём виртуальное окружение
 WORKDIR /app
+RUN python3 -m venv venv
 
-# Копируем все файлы в образ
+# Активируем виртуальное окружение и устанавливаем зависимости
+RUN ./venv/bin/pip install --no-cache-dir aiogram telebot
+
+# Копируем код приложения
 COPY . /app
 
-# Команда для запуска вашего приложения
-CMD ["python3", "main.py"]
+# Указываем точку входа
+CMD ["./venv/bin/python", "main.py"]
