@@ -11,15 +11,16 @@ services:
       - .env
 
   db:
-    image: mariadb:latest
+    image: mysql:latest
+    container_name: mysql-db
+    #container_name: mariadb
     restart: always
-    container_name: mariadb
     env_file:
       - .env
     volumes:
       - db_data:/var/lib/mysql
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
-    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_general_ci
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_0900_ai_ci
     ports:
       - "3306:3306"
 
