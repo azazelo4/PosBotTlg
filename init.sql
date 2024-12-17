@@ -67,6 +67,9 @@ CREATE TABLE `products_bac` (
   CONSTRAINT `products_bac_ibfk_1` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+INSERT INTO `products_bac` (`id`, `store_id`, `article_number`, `metal_type`, `product_type`, `model`, `weight`, `price_per_gram`, `price`, `min_price`, `arrival_date`, `quantity`, `manufacturer`, `commentaries`) VALUES
+(2,	1,	'12345678',	'бижутерия',	'набор',	'кольцо',	21,	21000,	441000,	350000,	'2023-03-27',	-2,	'',	0),
+(3,	3,	'2-1234',	'серебро',	'цепь',	'кольцо',	1,	1,	1,	1,	'2023-04-25',	12,	'',	0);
 
 DROP TABLE IF EXISTS `sales`;
 CREATE TABLE `sales` (
@@ -96,6 +99,10 @@ CREATE TABLE `stores` (
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+INSERT INTO `stores` (`id`, `name`) VALUES
+(1,	'Кайнар'),
+(2,	'ОС'),
+(3,	'ЦУМ');
 
 DROP TABLE IF EXISTS `users`;
 CREATE TABLE `users` (
@@ -110,5 +117,13 @@ CREATE TABLE `users` (
   CONSTRAINT `users_ibfk_1` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+INSERT INTO `users` (`id`, `store_id`, `phone_number`, `role`, `name`, `is_active`) VALUES
+(1,	3,	'77775295987',	'admin',	'Акжол',	1),
+(2,	1,	'77054783366',	'admin',	'Али',	1),
+(3,	1,	'77077066581',	'admin',	'Айгерим',	1),
+(5,	3,	'77772866086',	'admin',	'Лиана',	1),
+(6,	1,	'77052068113',	'cashier',	'Елена',	1),
+(7,	2,	'77778994490',	'cashier',	'Альмира',	1),
+(12,	1,	'77066395987',	'admin',	'test',	1);
 
--- 2024-12-17 21:30:48
+-- 2024-12-17 21:29:20
