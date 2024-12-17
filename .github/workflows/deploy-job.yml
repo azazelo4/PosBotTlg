@@ -3,7 +3,7 @@ name: Deploy to Self-Hosted Runner with Docker
 on:
   push:
     branches:
-      - main
+      - POS-Bot
   workflow_dispatch:
 
 jobs:
