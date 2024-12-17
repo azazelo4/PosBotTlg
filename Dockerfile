@@ -6,7 +6,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Устанавливаем необходимые библиотеки Python
-RUN pip3 install --no-cache-dir aiogram telebot io
+RUN pip3 install --no-cache-dir aiogram telebot
 
 # Создаём рабочую директорию
 WORKDIR /app
