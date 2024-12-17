@@ -1,6 +1,6 @@
 # user_management.py
 from telebot import types
-from main import user_data, bot  # Ensure these are imported correctly
+#from main import user_data, bot  # Ensure these are imported correctly
 
 get_all_users_function = None
 change_user_role_function = None

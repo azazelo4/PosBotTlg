@@ -11,20 +11,20 @@ from datetime import date
 import logging
 import threading
 import time
-from user_management import configure_user_management
-from database import get_all_users, change_user_role
+#from user_management import configure_user_management
+#from database import get_all_users, change_user_role
 
 # Настраиваем зависимости
-configure_user_management(get_all_users, change_user_role)
+#configure_user_management(get_all_users, change_user_role)
 
-logging.basicConfig(
-    level=logging.DEBUG,  # Уровень отладки
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("/var/log/pos_bot.log"),  # Путь к файлу логов
-        logging.StreamHandler()  # Вывод в консоль
-    ]
-)
+# logging.basicConfig(
+#     level=logging.DEBUG,  # Уровень отладки
+#     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+#     handlers=[
+#         logging.FileHandler("/var/log/pos_bot.log"),  # Путь к файлу логов
+#         logging.StreamHandler()  # Вывод в консоль
+#     ]
+# )
 
 logger = logging.getLogger(__name__)
 
@@ -304,5 +304,4 @@ def callback_change_role(call):
 #################----------- END -----------#################
 
 if __name__ == '__main__':
-    threading.Thread(target=check_user_status, daemon=True).start()
     bot.polling(none_stop=True)

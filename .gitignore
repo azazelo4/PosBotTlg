@@ -4,10 +4,10 @@ __pycache__/
 *$py.class
 *.ps1
 *.yaml
-*.yml
 # C extensions
 *.so
 *.json
+*.csv
 
 # Distribution / packaging
 .Python
