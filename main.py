@@ -9,8 +9,8 @@ from report import Report
 import io
 from datetime import date
 import logging
-import threading
-import time
+#import threading
+#import time
 #from user_management import configure_user_management
 #from database import get_all_users, change_user_role
 
