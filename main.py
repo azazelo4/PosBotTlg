@@ -1,123 +1,16 @@
 import telebot
 from telebot import types
 from config import TOKEN
-from auth import authorize_user
 from buttons import *
-from database import *
 from report import Report
+from handlers.start_handler import bot, user_data
 from handlers.sales_handler import register_sales_handlers
+from handlers.help_handler import help_command
 import io
 from datetime import date
 import logging
 
 logger = logging.getLogger(__name__)
-
-bot = telebot.TeleBot(TOKEN)
-
-user_data = {}
-
-#################----------- START -----------#################
-@bot.message_handler(commands=['start'])
-def start(message):
-    chat_id = message.chat.id
-    keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    button_phone = telebot.types.KeyboardButton(text="Поделиться номером", request_contact=True)
-    keyboard.add(button_phone)
-    bot.send_message(chat_id, "Пожалуйста, поделитесь своим номером телефона для авторизации:", reply_markup=keyboard)
-
-@bot.message_handler(content_types=['contact'])
-def handle_contact(message):
-    chat_id = message.chat.id
-    phone_number = message.contact.phone_number
-
-    try:
-        user_data_dict, error = authorize_user(phone_number)
-
-        if error:
-            bot.send_message(chat_id, error)
-        elif user_data_dict:
-            user_data[chat_id] = user_data_dict
-
-            if user_data_dict['role'] == 'cashier':
-                keyboard = create_cashier_buttons()
-            elif user_data_dict['role'] == 'admin':
-                keyboard = create_admin_buttons()
-
-            bot.send_message(
-                chat_id,
-                f"Здравствуйте, {user_data_dict['name']}! Вы авторизованы как {user_data_dict['role']}. Для справки введите команду /help.",
-                reply_markup=keyboard
-            )
-        else:
-            bot.send_message(chat_id, "Произошла ошибка при авторизации. Попробуйте еще раз.")
-    except Exception as e:
-        logger.exception("Ошибка при авторизации пользователя.")
-        bot.send_message(chat_id, "Произошла ошибка при авторизации. Попробуйте еще раз.")
-
-def get_keyboard_by_role(chat_id):
-    role = user_data[chat_id]['role']
-    if role == 'cashier':
-        return create_cashier_buttons()
-    elif role == 'admin':
-        return create_admin_buttons()
-    else:
-        return None
-
-# Обработка кнопки "Касса" для отображения меню кассовых операций
-@bot.message_handler(func=lambda message: message.text == "Касса")
-def handle_cash_operations_menu(message):
-    chat_id = message.chat.id
-    if user_data.get(chat_id) and user_data[chat_id]['role'] in ['admin', 'cashier']:
-        bot.send_message(chat_id, "Меню кассовых операций. Выберите действие:", reply_markup=create_cash_operations_buttons())
-    else:
-        bot.send_message(chat_id, "Доступ запрещен.")
-
-@bot.message_handler(func=lambda message: message.text == "Назад")
-def go_back_to_main_menu(message):
-    chat_id = message.chat.id
-
-    user = user_data.get(chat_id)
-    if not user or user.get('is_active') == 0:
-        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-        share_contact_button = types.KeyboardButton("Поделиться номером", request_contact=True)
-        keyboard.add(share_contact_button)
-
-        bot.send_message(chat_id, "Вы не авторизованы или ваш аккаунт деактивирован. Пожалуйста, поделитесь своим номером для авторизации.", reply_markup=keyboard)
-        return
-
-    bot.send_message(chat_id, "Возвращаемся в главное меню.", reply_markup=get_keyboard_by_role(chat_id))
-
-@bot.message_handler(func=lambda message: message.text == "Персонал")
-def handle_staff_menu(message):
-    chat_id = message.chat.id
-    if user_data.get(chat_id) and user_data[chat_id]['role'] == 'admin':
-        bot.send_message(chat_id, "Меню управления персоналом. Выберите действие:", reply_markup=create_staff_management_buttons())
-    else:
-        bot.send_message(chat_id, "Доступ запрещен. Команда доступна только администраторам.")
-
-#################----------- HELP -----------#################
-@bot.message_handler(commands=['help'])
-def help_command(message):
-    help_text = """
-    Бот в разработке и все здесь только для тестирования
-    Доступные команды:
-    /start - начать диалог с ботом, запросить номер телефона для авторизации
-    /help - отобразить список доступных команд
-
-    Как работать:
-    Продажа - начать процесс продажи товара 
-    введите тестовый артикул 12345678 или 2-1234, 
-    сумму продажи 
-    выберите тип оплаты - нал или безнал
-    подтвердите продажу выбором подтвердить или отменить
-
-    можно нажать отмена на любом шаге.
-
-    Для администраторов:
-    (в разработке)
-    """
-
-    bot.send_message(message.chat.id, help_text)
 
 #################----------- REPORT -----------#################
 report_handler = {} 
