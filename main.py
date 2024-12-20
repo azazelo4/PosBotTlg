@@ -1,7 +1,7 @@
 import telebot
 from telebot import types
 from config import TOKEN
-from buttons import *
+from buttons import create_cash_operations_buttons, create_staff_management_buttons
 from report import Report
 from handlers.start_handler import bot, user_data
 from handlers.sales_handler import register_sales_handlers
@@ -11,6 +11,46 @@ from datetime import date
 import logging
 
 logger = logging.getLogger(__name__)
+
+def get_keyboard_by_role(chat_id):
+    role = user_data[chat_id]['role']
+    if role == 'cashier':
+        return create_cash_operations_buttons()
+    elif role == 'admin':
+        return create_staff_management_buttons()
+    else:
+        return None
+
+@bot.message_handler(func=lambda message: message.text == "Касса")
+def handle_cash_operations_menu(message):
+    chat_id = message.chat.id
+    if user_data.get(chat_id) and user_data[chat_id]['role'] in ['admin', 'cashier']:
+        bot.send_message(chat_id, "Меню кассовых операций. Выберите действие:", reply_markup=create_cash_operations_buttons())
+    else:
+        bot.send_message(chat_id, "Доступ запрещен.")
+
+@bot.message_handler(func=lambda message: message.text == "Назад")
+def go_back_to_main_menu(message):
+    chat_id = message.chat.id
+
+    user = user_data.get(chat_id)
+    if not user or user.get('is_active') == 0:
+        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        share_contact_button = types.KeyboardButton("Поделиться номером", request_contact=True)
+        keyboard.add(share_contact_button)
+
+        bot.send_message(chat_id, "Вы не авторизованы или ваш аккаунт деактивирован. Пожалуйста, поделитесь своим номером для авторизации.", reply_markup=keyboard)
+        return
+
+    bot.send_message(chat_id, "Возвращаемся в главное меню.", reply_markup=get_keyboard_by_role(chat_id))
+
+@bot.message_handler(func=lambda message: message.text == "Персонал")
+def handle_staff_menu(message):
+    chat_id = message.chat.id
+    if user_data.get(chat_id) and user_data[chat_id]['role'] == 'admin':
+        bot.send_message(chat_id, "Меню управления персоналом. Выберите действие:", reply_markup=create_staff_management_buttons())
+    else:
+        bot.send_message(chat_id, "Доступ запрещен. Команда доступна только администраторам.")
 
 #################----------- REPORT -----------#################
 report_handler = {} 
