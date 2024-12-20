@@ -43,16 +43,26 @@ jobs:
 
       - name: Add current user to docker group
         run: |
-          sudo usermod -aG docker $USER
-          newgrp docker
+          if ! groups $USER | grep &>/dev/null '\bdocker\b'; then
+            sudo usermod -aG docker $USER
+            newgrp docker
+          else
+            echo "User is already in the docker group"
+          fi
 
       - name: Stop existing containers
         run: |
-          docker-compose down || true
-      
+          existing_containers=$(docker ps -q --filter "name=PosBotTest")
+          if [ -n "$existing_containers" ]; then
+            docker stop $existing_containers
+            docker rm $existing_containers
+          else
+            echo "No existing containers to stop"
+          fi
+
       - name: Deploy with Docker Compose
         run: |
-          docker-compose up -d --build 
+          docker-compose up -d --build
 
       - name: Verify services
         run: |
