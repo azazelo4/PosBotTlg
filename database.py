@@ -70,9 +70,7 @@ def get_product_by_article(article_number):
         result = cursor.fetchone()
         
         if result:
-            columns = ["id", "article_number", "product_type", "manufacturer", "model", 
-                       "metal_type", "price_per_gram", "min_price", "размер", 
-                       "weight", "price", "quantity", "arrival_date"]
+            columns = ["id", "store_id", "article_number", "metal_type", "product_type", "model", "weight", "price_per_gram", "price", "min_price", "arrival_date", "quantity", "manufacturer"]
             product = dict(zip(columns, result))
             logger.info(f"Продукт найден: {product}")
             return product
