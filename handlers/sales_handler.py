@@ -72,7 +72,7 @@ class Sale:
                     Цена за грамм: {self.product['price_per_gram']}.\n
                     Остаток: {self.product['quantity']}\n
                     Производитель: {self.product['manufacturer']}\n
-                    Комментарии: {self.product['comments']}\n
+                    Комментарии: {self.product['commentaries']}\n
                     Цена: {self.product['price']}\n
                     Минимальная цена: {self.min_price}\n
                     Введите сумму продажи:"""
