@@ -4,6 +4,7 @@ from report import Report
 from handlers.start_handler import bot, user_data
 from handlers.sales_handler import register_sales_handlers
 from handlers.help_handler import help_command
+from user_management import configure_user_management, handle_select_user, handle_change_role
 import io
 from datetime import date
 import logging
@@ -105,4 +106,5 @@ def callback_change_role(call):
 
 if __name__ == '__main__':
     register_sales_handlers(bot, user_data)
+    configure_user_management(get_all_users, lambda user_id, role: change_user_role_function(user_id, role))
     bot.polling(none_stop=True)

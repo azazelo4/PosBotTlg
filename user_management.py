@@ -1,6 +1,6 @@
 # user_management.py
 from telebot import types
-#from main import user_data, bot  # Ensure these are imported correctly
+from main import bot, user_data, get_all_users_function, change_user_role_function
 
 get_all_users_function = None
 change_user_role_function = None
@@ -41,4 +41,23 @@ def handle_role_management(chat_id):
 
     bot.send_message(chat_id, "Выберите пользователя для изменения роли:", reply_markup=keyboard)
 
-# Остальные функции аналогично
+def handle_select_user(call):
+    user_id = call.data.split("_")[-1]
+    keyboard = types.InlineKeyboardMarkup()
+    roles = ['admin', 'cashier']
+    for role in roles:
+        keyboard.add(types.InlineKeyboardButton(
+            text=role.capitalize(),
+            callback_data=f"change_role_{user_id}_{role}"
+        ))
+    bot.send_message(call.message.chat.id, "Выберите новую роль:", reply_markup=keyboard)
+
+def handle_change_role(call):
+    parts = call.data.split("_")
+    user_id = parts[2]
+    new_role = parts[3]
+    try:
+        change_user_role_function(user_id, new_role)
+        bot.send_message(call.message.chat.id, "Роль пользователя обновлена.")
+    except Exception as e:
+        bot.send_message(call.message.chat.id, f"Ошибка при изменении роли: {str(e)}")
