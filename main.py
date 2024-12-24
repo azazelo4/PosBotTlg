@@ -107,4 +107,5 @@ def callback_change_role(call):
 
 if __name__ == '__main__':
     register_sales_handlers(bot, user_data)
+    help_command(bot, user_data)
     bot.polling(none_stop=True)

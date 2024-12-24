@@ -1,8 +1,3 @@
-import telebot
-from config import TOKEN
-
-bot = telebot.TeleBot(TOKEN)
-
 @bot.message_handler(commands=['help'])
 def help_command(message):
     help_text = """
