@@ -1,6 +1,6 @@
 # user_management.py
 from telebot import types
-from main import bot, user_data, get_all_users_function, change_user_role_function
+from state import bot, user_data
 
 get_all_users_function = None
 change_user_role_function = None

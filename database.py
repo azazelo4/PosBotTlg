@@ -268,3 +268,19 @@ def check_role_changes():
         cursor.close()
         connection.close()
 
+# Define change_user_role_function
+def change_user_role_function(user_id, new_role):
+    connection = create_connection()
+    cursor = connection.cursor()
+    try:
+        query = "UPDATE users SET role = %s WHERE id = %s"
+        cursor.execute(query, (new_role, user_id))
+        connection.commit()
+        logger.info(f"User ID {user_id} role updated to {new_role}.")
+    except Exception as e:
+        logger.exception("Ошибка при изменении роли пользователя.")
+        raise e
+    finally:
+        cursor.close()
+        connection.close()
+
