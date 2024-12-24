@@ -69,9 +69,12 @@ class Sale:
                     Металл: {self.product['metal_type']}\n
                     Модель: {self.product['model']}\n
                     Вес: {self.product['weight']}\n
-                    Размер: {self.product['размер']}.\n
+                    Цена за грамм: {self.product['price_per_gram']}.\n
                     Остаток: {self.product['quantity']}\n
+                    Производитель: {self.product['manufacturer']}\n
+                    Комментарии: {self.product['comments']}\n
                     Цена: {self.product['price']}\n
+                    Минимальная цена: {self.min_price}\n
                     Введите сумму продажи:"""
                     self.state = SaleState.WAITING_SALE_PRICE
                 else:
