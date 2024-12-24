@@ -5,7 +5,7 @@ from enum import Enum
 from telebot import types
 from database import get_product_by_article, record_sale
 from buttons import create_cashier_buttons, create_admin_buttons
-from state import user_data
+from state import user_data, user_state  # Import user_state
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +159,9 @@ class Sale:
         self.product = None
         self.min_price = None
 
+        # Reset user state to MAIN_MENU
+        self.user_data['state'] = 'MAIN_MENU'
+
 sale_handler = {}
 
 def register_sales_handlers(bot_instance, global_user_data):
@@ -170,6 +173,7 @@ def register_sales_handlers(bot_instance, global_user_data):
         chat_id = message.chat.id
         if chat_id in global_user_data:
             sale_handler[chat_id] = Sale(global_user_data[chat_id])
+            user_state[chat_id] = 'SALES_PROCESS'
             bot.send_message(chat_id, "Введите артикул товара:")
         else:
             bot.send_message(chat_id, "Вы не авторизованы. Пожалуйста, поделитесь своим номером телефона для авторизации, введя команду /start.")
@@ -181,6 +185,7 @@ def register_sales_handlers(bot_instance, global_user_data):
             if result is None or (sale.state == SaleState.WAITING_ARTICLE and result == "Продажа подтверждена."):
                 sale.reset()
                 del sale_handler[chat_id]
+                user_state[chat_id] = 'MAIN_MENU'
                 keyboard = get_keyboard_by_role(chat_id)
                 bot.send_message(chat_id, "Продажа отменена." if result is None else result, reply_markup=keyboard)
             else:
@@ -210,6 +215,11 @@ def register_sales_handlers(bot_instance, global_user_data):
 
     @bot.message_handler(func=lambda message: sale_handler.get(message.chat.id) is not None and sale_handler[message.chat.id].state == SaleState.CONFIRM_SALE)
     def confirm_sale(message):
+        chat_id = message.chat.id
+        process_sale_step(message, chat_id, global_user_data.get(chat_id))
+
+    @bot.message_handler(func=lambda message: user_state.get(message.chat.id) == 'SALES_PROCESS')
+    def handle_sales(message):
         chat_id = message.chat.id
         process_sale_step(message, chat_id, global_user_data.get(chat_id))
 

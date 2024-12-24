@@ -9,7 +9,7 @@ from database import get_all_users, change_user_role_function
 import io
 from datetime import date
 import logging
-from state import bot, user_data  # Import bot and user_data from state.py
+from state import bot, user_data, user_state  # Import bot, user_data, and user_state from state.py
 
 logger = logging.getLogger(__name__)
 
@@ -33,17 +33,22 @@ def handle_cash_operations_menu(message):
 @bot.message_handler(func=lambda message: message.text == "Назад")
 def go_back_to_main_menu(message):
     chat_id = message.chat.id
+    current_state = user_state.get(chat_id, 'MAIN_MENU')  # Default state
 
-    user = user_data.get(chat_id)
-    if not user or user.get('is_active') == 0:
-        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-        share_contact_button = types.KeyboardButton("Поделиться номером", request_contact=True)
-        keyboard.add(share_contact_button)
+    if current_state == 'USER_MANAGEMENT':
+        user_state[chat_id] = 'MAIN_MENU'
+        bot.send_message(chat_id, "Возвращаемся в главное меню.", reply_markup=get_keyboard_by_role(chat_id))
+    else:
+        user = user_data.get(chat_id)
+        if not user or user.get('is_active') == 0:
+            keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+            share_contact_button = types.KeyboardButton("Поделиться номером", request_contact=True)
+            keyboard.add(share_contact_button)
 
-        bot.send_message(chat_id, "Вы не авторизованы или ваш аккаунт деактивирован. Пожалуйста, поделитесь своим номером для авторизации.", reply_markup=keyboard)
-        return
+            bot.send_message(chat_id, "Вы не авторизованы или ваш аккаунт деактивирован. Пожалуйста, поделитесь своим номером для авторизации.", reply_markup=keyboard)
+            return
 
-    bot.send_message(chat_id, "Возвращаемся в главное меню.", reply_markup=get_keyboard_by_role(chat_id))
+        bot.send_message(chat_id, "Возвращаемся в главное меню.", reply_markup=get_keyboard_by_role(chat_id))
 
 @bot.message_handler(func=lambda message: message.text == "Персонал")
 def handle_staff_menu(message):
