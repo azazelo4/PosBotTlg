@@ -1,6 +1,4 @@
-import telebot
 from telebot import types
-from config import TOKEN
 from buttons import create_cash_operations_buttons, create_staff_management_buttons
 from report import Report
 from handlers.start_handler import bot, user_data
