@@ -4,11 +4,11 @@ from config import TOKEN
 from auth import authorize_user
 from buttons import create_cashier_buttons, create_admin_buttons
 import logging
+from state import user_data
 
 logger = logging.getLogger(__name__)
 
 bot = telebot.TeleBot(TOKEN)
-user_data = {}
 
 @bot.message_handler(commands=['start'])
 def start(message):
