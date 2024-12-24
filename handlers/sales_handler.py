@@ -10,6 +10,14 @@ from state import user_data
 logger = logging.getLogger(__name__)
 
 def parse_price(price_str):
+    # 1) Защита от None
+    if price_str is None:
+        return None
+    
+    # 2) Приводим к строке, если это число
+    if not isinstance(price_str, str):
+        price_str = str(price_str)
+
     cleaned_price = re.sub(r"[^\d.,]", "", price_str)
     if ',' in cleaned_price and '.' in cleaned_price:
         cleaned_price = cleaned_price.replace('.', '').replace(',', '.')
@@ -17,6 +25,7 @@ def parse_price(price_str):
         cleaned_price = cleaned_price.replace(',', '.')
     else:
         cleaned_price = cleaned_price.replace('.', '')
+
     try:
         return float(cleaned_price)
     except ValueError:
