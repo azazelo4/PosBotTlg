@@ -62,10 +62,13 @@ def handle_change_role(call):
     parts = call.data.split("_")
     user_id = parts[2]
     new_role = parts[3]
-# If there are additional nested menus, manage their states here
+    # If there are additional nested menus, manage their states here
     try:
         change_user_role_function(user_id, new_role)
         bot.send_message(call.message.chat.id, "Роль пользователя обновлена.")
+        # Reset user state to MAIN_MENU
+        chat_id = call.message.chat.id
+        user_state[chat_id] = 'MAIN_MENU'
     except Exception as e:
         bot.send_message(call.message.chat.id, f"Ошибка при изменении роли: {str(e)}")
 

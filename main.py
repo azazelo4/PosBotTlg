@@ -1,6 +1,6 @@
 from telebot import types
-from buttons import create_cash_operations_buttons, create_admin_buttons, create_staff_management_buttons
-from report import Report
+from buttons import create_cash_operations_buttons, create_staff_management_buttons
+from handlers.report_handler import register_report_handlers  # Import report handler
 from handlers.start_handler import bot, user_data
 from handlers.sales_handler import register_sales_handlers
 from handlers.help_handler import help_command
@@ -9,7 +9,6 @@ from database import get_all_users, change_user_role_function
 import io
 from datetime import date
 import logging
-from state import bot, user_data, user_state  # Import bot, user_data, and user_state from state.py
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +17,7 @@ def get_keyboard_by_role(chat_id):
     if role == 'cashier':
         return create_cash_operations_buttons()
     elif role == 'admin':
-        return create_admin_buttons()
+        return create_staff_management_buttons()
     else:
         return None
 
@@ -33,20 +32,15 @@ def handle_cash_operations_menu(message):
 @bot.message_handler(func=lambda message: message.text == "Назад")
 def go_back_to_main_menu(message):
     chat_id = message.chat.id
-    current_state = user_state.get(chat_id, 'MAIN_MENU')  # Default state
 
-    if current_state == 'USER_MANAGEMENT':
-        user_state[chat_id] = 'MAIN_MENU'
-        bot.send_message(chat_id, "Возвращаемся в главное меню.", reply_markup=get_keyboard_by_role(chat_id))
-    else:
-        user = user_data.get(chat_id)
-        if not user or user.get('is_active') == 0:
-            keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-            share_contact_button = types.KeyboardButton("Поделиться номером", request_contact=True)
-            keyboard.add(share_contact_button)
+    user = user_data.get(chat_id)
+    if not user or user.get('is_active') == 0:
+        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        share_contact_button = types.KeyboardButton("Поделиться номером", request_contact=True)
+        keyboard.add(share_contact_button)
 
-            bot.send_message(chat_id, "Вы не авторизованы или ваш аккаунт деактивирован. Пожалуйста, поделитесь своим номером для авторизации.", reply_markup=keyboard)
-            return
+        bot.send_message(chat_id, "Вы не авторизованы или ваш аккаунт деактивирован. Пожалуйста, поделитесь своим номером для авторизации.", reply_markup=keyboard)
+        return
 
     bot.send_message(chat_id, "Возвращаемся в главное меню.", reply_markup=get_keyboard_by_role(chat_id))
 
@@ -57,37 +51,6 @@ def handle_staff_menu(message):
         bot.send_message(chat_id, "Меню управления персоналом. Выберите действие:", reply_markup=create_staff_management_buttons())
     else:
         bot.send_message(chat_id, "Доступ запрещен. Команда доступна только администраторам.")
-
-#################----------- REPORT -----------#################
-report_handler = {} 
-
-@bot.message_handler(func=lambda message: message.text == 'Отчеты')
-def handle_report(message):
-    chat_id = message.chat.id
-    if chat_id in user_data:
-        if chat_id not in report_handler:
-            report_handler[chat_id] = Report()
-        report = report_handler[chat_id]
-        
-        if message.text == "Отчеты" or report.report_type is not None:
-            response = report.process_message(message, chat_id)
-            if response:
-                if isinstance(response, tuple):
-                    report_file, report_message, report_keyboard = response
-                    if report_file is not None:
-                        with io.BytesIO(report_file.getvalue()) as file:
-                            filename = f"report_{date.today().isoformat()}.xlsx"
-                            bot.send_document(message.chat.id, file, filename = filename)
-                    if report_keyboard:
-                        bot.send_message(message.chat.id, report_message, reply_markup=report_keyboard)
-                    else:
-                        bot.send_message(message.chat.id, report_message)
-                else:
-                    bot.send_message(message.chat.id, response)
-        else:
-            bot.send_message(chat_id, "Введите команду, например /start или Отчеты.")
-    else:
-        bot.send_message(chat_id, "Вы не авторизованы. Пожалуйста, поделитесь своим номером телефона для авторизации, введя команду /start.")
 
 #################----------- USER ADD AND REMOVE -----------#################
 
@@ -103,7 +66,7 @@ def callback_select_user(call):
 def callback_change_role(call):
     handle_change_role(call)
 
-#################----------- RIGTHS -----------#################
+#################----------- RIGHTS -----------#################
 
 #################----------- ADD GOODS -----------#################
 
@@ -113,5 +76,6 @@ def callback_change_role(call):
 
 if __name__ == '__main__':
     register_sales_handlers(bot, user_data)
+    register_report_handlers(bot, user_data)  # Register report handlers
     configure_user_management(get_all_users, change_user_role_function)
     bot.polling(none_stop=True)
