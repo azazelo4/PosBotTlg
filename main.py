@@ -1,3 +1,4 @@
+import logging
 from telebot import types
 from buttons import create_cash_operations_buttons, create_staff_management_buttons, create_admin_buttons
 from handlers.report_handler import register_report_handlers
@@ -5,7 +6,16 @@ from handlers.start_handler import bot, user_data
 from handlers.sales_handler import register_sales_handlers
 from user_management import configure_user_management, handle_select_user, handle_change_role
 from database import get_all_users, change_user_role_function
-import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,  # Set to DEBUG to capture all levels of logs
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("app_debug.log"),  # Log to a file named app_debug.log
+        logging.StreamHandler()  # Also output logs to the console
+    ]
+)
 
 logger = logging.getLogger(__name__)
 
