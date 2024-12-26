@@ -18,7 +18,7 @@ def get_keyboard_by_role(chat_id):
     if role == 'cashier':
         return create_cash_operations_buttons()
     elif role == 'admin':
-        return create_staff_management_buttons()
+        return create_admin_buttons()
     else:
         return None
 
@@ -48,7 +48,7 @@ def go_back_to_main_menu(message):
             bot.send_message(chat_id, "Вы не авторизованы или ваш аккаунт деактивирован. Пожалуйста, поделитесь своим номером для авторизации.", reply_markup=keyboard)
             return
 
-        bot.send_message(chat_id, "Возвращаемся в главное меню.", reply_markup=get_keyboard_by_role(chat_id))
+    bot.send_message(chat_id, "Возвращаемся в главное меню.", reply_markup=get_keyboard_by_role(chat_id))
 
 @bot.message_handler(func=lambda message: message.text == "Персонал")
 def handle_staff_menu(message):
