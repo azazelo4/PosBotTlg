@@ -13,7 +13,6 @@ def parse_price(price_str):
     # 1) Защита от None
     if price_str is None:
         return None
-    
     # 2) Приводим к строке, если это число
     if not isinstance(price_str, str):
         price_str = str(price_str)
@@ -165,53 +164,53 @@ def register_sales_handlers(bot_instance, global_user_data):
     global bot
     bot = bot_instance
     
-    @bot.message_handler(func=lambda m: sale_handler.get(m.chat.id) is None and m.text == 'Продажа')
-    def start_sale(message):
-        chat_id = message.chat.id
-        if chat_id in global_user_data:
-            sale_handler[chat_id] = Sale(global_user_data[chat_id])
-            bot.send_message(chat_id, "Введите артикул товара:")
-        else:
-            bot.send_message(chat_id, "Вы не авторизованы. Пожалуйста, поделитесь своим номером телефона для авторизации, введя команду /start.")
+    # @bot.message_handler(func=lambda m: sale_handler.get(m.chat.id) is None and m.text == 'Продажа')
+    # def start_sale(message):
+    #     chat_id = message.chat.id
+    #     if chat_id in global_user_data:
+    #         sale_handler[chat_id] = Sale(global_user_data[chat_id])
+    #         bot.send_message(chat_id, "Введите артикул товара:")
+    #     else:
+    #         bot.send_message(chat_id, "Вы не авторизованы. Пожалуйста, поделитесь своим номером телефона для авторизации, введя команду /start.")
     
-    def process_sale_step(message, chat_id, user_data_dict):
-        sale = sale_handler.get(chat_id, None)
-        try:
-            result = sale.process_step(message, user_data_dict)
-            if result is None or (sale.state == SaleState.WAITING_ARTICLE and result == "Продажа подтверждена."):
-                sale.reset()
-                del sale_handler[chat_id]
-                keyboard = get_keyboard_by_role(chat_id)
-                bot.send_message(chat_id, "Продажа отменена." if result is None else result, reply_markup=keyboard)
-            else:
-                if isinstance(result, tuple):
-                    response, keyboard = result
-                else:
-                    response, keyboard = result, get_keyboard_by_role(chat_id)
-                bot.send_message(chat_id, response, reply_markup=keyboard)
-        except Exception as e:
-            logger.exception("Ошибка при обработке шага продажи.")
-            bot.send_message(chat_id, "Произошла ошибка при обработке продажи. Попробуйте еще раз.")
+    # def process_sale_step(message, chat_id, user_data_dict):
+    #     sale = sale_handler.get(chat_id, None)
+    #     try:
+    #         result = sale.process_step(message, user_data_dict)
+    #         if result is None or (sale.state == SaleState.WAITING_ARTICLE and result == "Продажа подтверждена."):
+    #             sale.reset()
+    #             del sale_handler[chat_id]
+    #             keyboard = get_keyboard_by_role(chat_id)
+    #             bot.send_message(chat_id, "Продажа отменена." if result is None else result, reply_markup=keyboard)
+    #         else:
+    #             if isinstance(result, tuple):
+    #                 response, keyboard = result
+    #             else:
+    #                 response, keyboard = result, get_keyboard_by_role(chat_id)
+    #             bot.send_message(chat_id, response, reply_markup=keyboard)
+    #     except Exception as e:
+    #         logger.exception("Ошибка при обработке шага продажи.")
+    #         bot.send_message(chat_id, "Произошла ошибка при обработке продажи. Попробуйте еще раз.")
 
-    @bot.message_handler(func=lambda message: sale_handler.get(message.chat.id) is not None and sale_handler[message.chat.id].state == SaleState.WAITING_ARTICLE)
-    def process_article(message):
-        chat_id = message.chat.id
-        process_sale_step(message, chat_id, global_user_data.get(chat_id))
+    # @bot.message_handler(func=lambda message: sale_handler.get(message.chat.id) is not None and sale_handler[message.chat.id].state == SaleState.WAITING_ARTICLE)
+    # def process_article(message):
+    #     chat_id = message.chat.id
+    #     process_sale_step(message, chat_id, global_user_data.get(chat_id))
 
-    @bot.message_handler(func=lambda message: sale_handler.get(message.chat.id) is not None and sale_handler[message.chat.id].state == SaleState.WAITING_SALE_PRICE)
-    def process_sale_price(message):
-        chat_id = message.chat.id
-        process_sale_step(message, chat_id, global_user_data.get(chat_id))
+    # @bot.message_handler(func=lambda message: sale_handler.get(message.chat.id) is not None and sale_handler[message.chat.id].state == SaleState.WAITING_SALE_PRICE)
+    # def process_sale_price(message):
+    #     chat_id = message.chat.id
+    #     process_sale_step(message, chat_id, global_user_data.get(chat_id))
 
-    @bot.message_handler(func=lambda message: sale_handler.get(message.chat.id) is not None and sale_handler[message.chat.id].state == SaleState.WAITING_PAYMENT_TYPE)
-    def process_payment_type(message):
-        chat_id = message.chat.id
-        process_sale_step(message, chat_id, global_user_data.get(chat_id))
+    # @bot.message_handler(func=lambda message: sale_handler.get(message.chat.id) is not None and sale_handler[message.chat.id].state == SaleState.WAITING_PAYMENT_TYPE)
+    # def process_payment_type(message):
+    #     chat_id = message.chat.id
+    #     process_sale_step(message, chat_id, global_user_data.get(chat_id))
 
-    @bot.message_handler(func=lambda message: sale_handler.get(message.chat.id) is not None and sale_handler[message.chat.id].state == SaleState.CONFIRM_SALE)
-    def confirm_sale(message):
-        chat_id = message.chat.id
-        process_sale_step(message, chat_id, global_user_data.get(chat_id))
+    # @bot.message_handler(func=lambda message: sale_handler.get(message.chat.id) is not None and sale_handler[message.chat.id].state == SaleState.CONFIRM_SALE)
+    # def confirm_sale(message):
+    #     chat_id = message.chat.id
+    #     process_sale_step(message, chat_id, global_user_data.get(chat_id))
 
 def get_keyboard_by_role(chat_id):
     role = user_data[chat_id]['role']

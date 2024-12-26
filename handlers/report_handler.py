@@ -6,10 +6,16 @@ import logging
 import openpyxl
 import datetime
 from database import generate_report
+from enum import Enum
 
 logger = logging.getLogger(__name__)
 
 report_handler = {}
+
+class ReportState(Enum):
+    WAITING_REPORT_Type = 1
+    WAITING_DATE = 2
+    SEND_REPORT = 3
 
 class Report:
     WAITING_ARTICLE = 1
@@ -30,6 +36,7 @@ class Report:
             logger.debug("Resetting report state.")
             return None, None, None
         else:
+            self.state = ReportState.WAITING_REPORT_Type
             if message.text == 'Отчеты':
                 keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
                 button_daily = types.KeyboardButton("Ежедневный")
@@ -47,48 +54,50 @@ class Report:
                 logger.debug("User canceled the report generation.")
                 return "Отменено.", None, None
             
-    def process_report_generationg(self, message, chat_id):  
-        if message.text == 'назад':
+    def process_report_generationg(self, message, chat_id):
+        if message.text == 'назад' :
             self.reset()
             logger.debug("Resetting report state.")
             return None, None, None
-        else:  
-            if message.text in ["Ежедневный", "Еженедельный", "Ежемесячный"]:
-                self.report_type = message.text
-                logger.debug(f"Report type selected: {self.report_type}")
-                start_date, end_date = self.get_report_dates(self.report_type)
-                logger.debug(f"Generating report from {start_date} to {end_date}")
-                report_data = generate_report(start_date, end_date)
-                wb = self.generate_excel_report(report_data)
-                response = "Отчет готов."
-                logger.debug("Report generated successfully.")
-                self.reset()
-                return wb, response, None
-            elif message.text == "Другой":
-                self.report_type = 'custom_start'
-                logger.debug("User selected custom report. Prompting for start date.")
-                return "Введите дату начала отчета в формате ГГГГ-ММ-ДД:", None, None
-            elif self.report_type == 'custom_start':
-                try:
-                    self.start_date = datetime.datetime.strptime(message.text, "%Y-%m-%d").date()
-                    self.report_type = 'custom_end'
-                    logger.debug(f"Start date set to {self.start_date}. Prompting for end date.")
-                    return "Введите дату окончания отчета в формате ГГГГ-ММ-ДД:", None, None
-                except ValueError:
-                    logger.warning(f"Invalid start date format received: {message.text}")
-                    return "Неверный формат даты. Пожалуйста, введите дату в формате ГГГГ-ММ-ДД:", None, None
-            elif self.report_type == 'custom_end':
-                try:
-                    self.end_date = datetime.datetime.strptime(message.text, "%Y-%m-%d").date()
-                    logger.debug(f"End date set to {self.end_date}. Generating custom report.")
-                    report_data = generate_report(self.start_date, self.end_date)
+            
+        else:
+            if self.report_type == 'start':
+                if message.text in ["Ежедневный", "Еженедельный", "Ежемесячный"]:
+                    self.report_type = message.text
+                    logger.debug(f"Report type selected: {self.report_type}")
+                    start_date, end_date = self.get_report_dates(self.report_type)
+                    logger.debug(f"Generating report from {start_date} to {end_date}")
+                    report_data = generate_report(start_date, end_date)
                     wb = self.generate_excel_report(report_data)
                     response = "Отчет готов."
+                    logger.debug("Report generated successfully.")
                     self.reset()
-                    logger.debug("Custom report generated successfully.")
                     return wb, response, None
-                except ValueError:
-                    logger.warning(f"Invalid end date format received: {message.text}")
+                elif message.text == "Другой":
+                    self.report_type = 'custom_start'
+                    logger.debug("User selected custom report. Prompting for start date.")
+                    return "Введите дату начала отчета в формате ГГГГ-ММ-ДД:", None, None
+                elif self.report_type == 'custom_start':
+                    try:
+                        self.start_date = datetime.datetime.strptime(message.text, "%Y-%m-%d").date()
+                        self.report_type = 'custom_end'
+                        logger.debug(f"Start date set to {self.start_date}. Prompting for end date.")
+                        return "Введите дату окончания отчета в формате ГГГГ-ММ-ДД:", None, None
+                    except ValueError:
+                        logger.warning(f"Invalid start date format received: {message.text}")
+                        return "Неверный формат даты. Пожалуйста, введите дату в формате ГГГГ-ММ-ДД:", None, None
+                elif self.report_type == 'custom_end':
+                    try:
+                        self.end_date = datetime.datetime.strptime(message.text, "%Y-%m-%d").date()
+                        logger.debug(f"End date set to {self.end_date}. Generating custom report.")
+                        report_data = generate_report(self.start_date, self.end_date)
+                        wb = self.generate_excel_report(report_data)
+                        response = "Отчет готов."
+                        self.reset()
+                        logger.debug("Custom report generated successfully.")
+                        return wb, response, None
+                    except ValueError:
+                        logger.warning(f"Invalid end date format received: {message.text}")
                     return "Неверный формат даты. Пожалуйста, введите дату в формате ГГГГ-ММ-ДД:", None, None
             else:
                 logger.error(f"Unexpected state encountered: {self.report_type}")
