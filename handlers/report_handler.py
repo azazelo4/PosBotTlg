@@ -12,13 +12,12 @@ logger = logging.getLogger(__name__)
 report_handler = {}
 
 class Report:
+    WAITING_ARTICLE = 1
+    WAITING_SALE_PRICE = 2
+    WAITING_PAYMENT_TYPE = 3
+    CONFIRM_SALE = 4
+
     def __init__(self):
-        self.today = datetime.date.today()
-        self.start_date = None
-        self.end_date = None
-        self.report_type = None
-    
-    def reset(self):
         self.today = datetime.date.today()
         self.start_date = None
         self.end_date = None
@@ -47,7 +46,14 @@ class Report:
                 self.reset()
                 logger.debug("User canceled the report generation.")
                 return "Отменено.", None, None
-            elif message.text in ["Ежедневный", "Еженедельный", "Ежемесячный"]:
+            
+    def process_report_generationg(self, message, chat_id):  
+        if message.text == 'назад':
+            self.reset()
+            logger.debug("Resetting report state.")
+            return None, None, None
+        else:  
+            if message.text in ["Ежедневный", "Еженедельный", "Ежемесячный"]:
                 self.report_type = message.text
                 logger.debug(f"Report type selected: {self.report_type}")
                 start_date, end_date = self.get_report_dates(self.report_type)
