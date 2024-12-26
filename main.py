@@ -1,13 +1,10 @@
 from telebot import types
 from buttons import create_cash_operations_buttons, create_staff_management_buttons, create_admin_buttons
-from handlers.report_handler import register_report_handlers  # Import report handler
+from handlers.report_handler import register_report_handlers
 from handlers.start_handler import bot, user_data
 from handlers.sales_handler import register_sales_handlers
-from handlers.help_handler import help_command
 from user_management import configure_user_management, handle_select_user, handle_change_role
 from database import get_all_users, change_user_role_function
-import io
-from datetime import date
 import logging
 
 logger = logging.getLogger(__name__)
@@ -27,7 +24,10 @@ def handle_cash_operations_menu(message):
     if user_data.get(chat_id) and user_data[chat_id]['role'] in ['admin', 'cashier']:
         bot.send_message(chat_id, "Меню кассовых операций. Выберите действие:", reply_markup=create_cash_operations_buttons())
     else:
-        bot.send_message(chat_id, "Доступ запрещен.")
+        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        share_contact_button = types.KeyboardButton("Поделиться номером", request_contact=True)
+        keyboard.add(share_contact_button)
+        bot.send_message(chat_id, "Доступ запрещен.", reply_markup=keyboard)
 
 @bot.message_handler(func=lambda message: message.text == "Назад")
 def go_back_to_main_menu(message):
@@ -37,10 +37,8 @@ def go_back_to_main_menu(message):
         keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
         share_contact_button = types.KeyboardButton("Поделиться номером", request_contact=True)
         keyboard.add(share_contact_button)
-
         bot.send_message(chat_id, "Вы не авторизованы или ваш аккаунт деактивирован. Пожалуйста, поделитесь своим номером для авторизации.", reply_markup=keyboard)
         return
-
     bot.send_message(chat_id, "Возвращаемся в главное меню.", reply_markup=get_keyboard_by_role(chat_id))
 
 @bot.message_handler(func=lambda message: message.text == "Персонал")

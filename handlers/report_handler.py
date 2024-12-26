@@ -17,6 +17,12 @@ class Report:
         self.start_date = None
         self.end_date = None
         self.report_type = None
+    
+    def reset(self):
+        self.today = datetime.date.today()
+        self.start_date = None
+        self.end_date = None
+        self.report_type = None
 
     def process_message(self, message, chat_id):
         if message.text == 'назад':
@@ -30,7 +36,8 @@ class Report:
                 button_monthly = types.KeyboardButton("Ежемесячный")
                 button_custom = types.KeyboardButton("Другой")
                 button_cancel = types.KeyboardButton("Отмена")
-                keyboard.add(button_daily, button_weekly, button_monthly, button_custom, button_cancel)
+                button_back = types.KeyboardButton("Назад")
+                keyboard.add(button_daily, button_weekly, button_monthly, button_custom, button_cancel, button_back)
                 self.report_type = 'start'
                 return None, "Выберите тип отчета:", keyboard
             elif message.text == 'Отмена':
@@ -45,11 +52,15 @@ class Report:
                 self.reset()
                 return wb, response, None
             elif message.text == "Другой":
-                self.report_type = 'custom'
-                self.start_date = datetime.datetime.strptime(message.text, "%Y-%m-%d").date()
+                self.report_type = 'custom_start'
                 return "Введите дату начала отчета в формате ГГГГ-ММ-ДД:", None, None
-            elif self.report_type == 'custom_end':
-                return "Введите дату окончания отчета в формате ГГГГ-ММ-ДД:", None, None
+            elif self.report_type == 'custom_start':
+                try:
+                    self.start_date = datetime.datetime.strptime(message.text, "%Y-%m-%d").date()
+                    self.report_type = 'custom_end'
+                    return "Введите дату окончания отчета в формате ГГГГ-ММ-ДД:", None, None
+                except ValueError:
+                    return "Неверный формат даты. Пожалуйста, введите дату в формате ГГГГ-ММ-ДД:", None, None
             elif self.report_type == 'custom_end':
                 try:
                     self.end_date = datetime.datetime.strptime(message.text, "%Y-%m-%d").date()
@@ -59,7 +70,7 @@ class Report:
                     self.reset()
                     return wb, response, None
                 except ValueError:
-                        return "Неверный формат даты. Пожалуйста, введите дату в формате ГГГГ-ММ-ДД:", None, None
+                    return "Неверный формат даты. Пожалуйста, введите дату в формате ГГГГ-ММ-ДД:", None, None
             else:
                 return "Неожиданное состояние.", None, None
 
@@ -127,4 +138,7 @@ def register_report_handlers(bot_instance, global_user_data):
                     else:
                         bot.send_message(chat_id, response)
         else:
-            bot.send_message(chat_id, "Вы не авторизованы. Пожалуйста, поделитесь своим номером телефона для авторизации, введя команду /start.")
+            keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+            share_contact_button = types.KeyboardButton("Поделиться номером", request_contact=True)
+            keyboard.add(share_contact_button)
+            bot.send_message(chat_id, "Доступ запрещен.", reply_markup=keyboard)
