@@ -1,5 +1,5 @@
 from telebot import types
-from buttons import create_cash_operations_buttons, create_staff_management_buttons
+from buttons import create_cash_operations_buttons, create_staff_management_buttons, create_admin_buttons
 from handlers.report_handler import register_report_handlers  # Import report handler
 from handlers.start_handler import bot, user_data
 from handlers.sales_handler import register_sales_handlers
@@ -17,7 +17,7 @@ def get_keyboard_by_role(chat_id):
     if role == 'cashier':
         return create_cash_operations_buttons()
     elif role == 'admin':
-        return create_staff_management_buttons()
+        return create_admin_buttons()
     else:
         return None
 
@@ -32,7 +32,6 @@ def handle_cash_operations_menu(message):
 @bot.message_handler(func=lambda message: message.text == "Назад")
 def go_back_to_main_menu(message):
     chat_id = message.chat.id
-
     user = user_data.get(chat_id)
     if not user or user.get('is_active') == 0:
         keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)

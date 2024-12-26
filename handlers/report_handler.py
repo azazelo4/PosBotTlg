@@ -19,18 +19,21 @@ class Report:
         self.report_type = None
 
     def process_message(self, message, chat_id):
-        if message.text == 'Отчеты':
-            keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-            button_daily = types.KeyboardButton("Ежедневный")
-            button_weekly = types.KeyboardButton("Еженедельный")
-            button_monthly = types.KeyboardButton("Ежемесячный")
-            button_custom = types.KeyboardButton("Другой")
-            button_cancel = types.KeyboardButton("Отмена")
-            keyboard.add(button_daily, button_weekly, button_monthly, button_custom, button_cancel)
-            self.report_type = 'start'
-            return None, "Выберите тип отчета:", keyboard
-        elif self.report_type == 'start':
-            if message.text == 'Отмена':
+        if message.text == 'назад':
+            self.reset()
+            return None, None, None
+        else:
+            if message.text == 'Отчеты':
+                keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+                button_daily = types.KeyboardButton("Ежедневный")
+                button_weekly = types.KeyboardButton("Еженедельный")
+                button_monthly = types.KeyboardButton("Ежемесячный")
+                button_custom = types.KeyboardButton("Другой")
+                button_cancel = types.KeyboardButton("Отмена")
+                keyboard.add(button_daily, button_weekly, button_monthly, button_custom, button_cancel)
+                self.report_type = 'start'
+                return None, "Выберите тип отчета:", keyboard
+            elif message.text == 'Отмена':
                 self.reset()
                 return "Отменено.", None, None
             elif message.text in ["Ежедневный", "Еженедельный", "Ежемесячный"]:
@@ -43,28 +46,22 @@ class Report:
                 return wb, response, None
             elif message.text == "Другой":
                 self.report_type = 'custom'
-                return "Введите дату начала отчета в формате ГГГГ-ММ-ДД:", None, None
-            else:
-                return "Пожалуйста, выберите тип отчета:", None, None
-        elif self.report_type == 'custom':
-            try:
                 self.start_date = datetime.datetime.strptime(message.text, "%Y-%m-%d").date()
-                self.report_type = 'custom_end'
+                return "Введите дату начала отчета в формате ГГГГ-ММ-ДД:", None, None
+            elif self.report_type == 'custom_end':
                 return "Введите дату окончания отчета в формате ГГГГ-ММ-ДД:", None, None
-            except ValueError:
-                return "Неверный формат даты. Пожалуйста, введите дату в формате ГГГГ-ММ-ДД:", None, None
-        elif self.report_type == 'custom_end':
-            try:
-                self.end_date = datetime.datetime.strptime(message.text, "%Y-%m-%d").date()
-                report_data = generate_report(self.start_date, self.end_date)
-                wb = self.generate_excel_report(report_data)
-                response = "Отчет готов."
-                self.reset()
-                return wb, response, None
-            except ValueError:
-                return "Неверный формат даты. Пожалуйста, введите дату в формате ГГГГ-ММ-ДД:", None, None
-        else:
-            return "Неожиданное состояние.", None, None
+            elif self.report_type == 'custom_end':
+                try:
+                    self.end_date = datetime.datetime.strptime(message.text, "%Y-%m-%d").date()
+                    report_data = generate_report(self.start_date, self.end_date)
+                    wb = self.generate_excel_report(report_data)
+                    response = "Отчет готов."
+                    self.reset()
+                    return wb, response, None
+                except ValueError:
+                        return "Неверный формат даты. Пожалуйста, введите дату в формате ГГГГ-ММ-ДД:", None, None
+            else:
+                return "Неожиданное состояние.", None, None
 
     def reset(self):
         self.start_date = None
