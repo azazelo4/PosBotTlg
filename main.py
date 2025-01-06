@@ -84,5 +84,5 @@ def callback_change_role(call):
 if __name__ == '__main__':
     register_sales_handlers(bot, user_data)
     register_report_handlers(bot, user_data)  # Register report handlers
-    configure_user_management(get_all_users, change_user_role_function)
+    configure_user_management(bot, user_data, get_all_users, change_user_role_function)
     bot.polling(none_stop=True)
