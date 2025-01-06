@@ -4,7 +4,6 @@ from buttons import create_cash_operations_buttons, create_staff_management_butt
 from handlers.report_handler import register_report_handlers
 from handlers.start_handler import bot, user_data
 from handlers.sales_handler import register_sales_handlers
-from user_management import configure_user_management, handle_select_user, handle_change_role
 from database import get_all_users, change_user_role_function
 
 # Configure logging
@@ -61,9 +60,20 @@ def handle_staff_menu(message):
 
 #################----------- USER ADD AND REMOVE -----------#################
 
-@bot.message_handler(func=lambda message: message.text == "Персонал")
-def handle_rights_menu(message):
-    handle_role_management(message.chat.id)
+#################----------- RIGHTS -----------#################
+
+# Register handlers
+@bot.message_handler(func=lambda message: message.text == "Добавить пользователя")
+def handle_add_user(message):
+    add_user_handler(message)
+
+@bot.message_handler(func=lambda message: message.text == "Удалить пользователя")
+def handle_delete_user(message):
+    delete_user_handler(message)
+
+@bot.message_handler(func=lambda message: message.text == "Права")
+def handle_role_management(message):
+    role_management_handler(message)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("select_user_"))
 def callback_select_user(call):
@@ -73,7 +83,6 @@ def callback_select_user(call):
 def callback_change_role(call):
     handle_change_role(call)
 
-#################----------- RIGHTS -----------#################
 
 #################----------- ADD GOODS -----------#################
 
@@ -85,4 +94,5 @@ if __name__ == '__main__':
     register_sales_handlers(bot, user_data)
     register_report_handlers(bot, user_data)  # Register report handlers
     configure_user_management(bot, user_data, get_all_users, change_user_role_function)
+    logger.debug("Starting bot polling...")
     bot.polling(none_stop=True)

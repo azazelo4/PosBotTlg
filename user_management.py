@@ -100,6 +100,23 @@ def handle_select_user(call):
         logger.exception(f"Error in handle_select_user: {str(e)}")
         bot.answer_callback_query(call.id, "Произошла ошибка")
 
+@bot.message_handler(func=lambda message: user_state.get(message.chat.id) == 'ADDING_USER')
+def process_add_user_data(message):
+    chat_id = message.chat.id
+    try:
+        data = message.text.split(", ")
+        if len(data) != 2:
+            bot.send_message(chat_id, "Неверный формат данных. Введите в формате: Имя, Телефон.")
+            return
+        name, phone = data
+        response = add_user_to_db(phone, "cashier", name)
+        bot.send_message(chat_id, response)
+        user_state[chat_id] = None
+    except Exception as e:
+        logger.exception("Error adding user.")
+        bot.send_message(chat_id, "Произошла ошибка. Попробуйте снова.")
+
+
 def handle_change_role(call):
     chat_id = call.message.chat.id
     try:
@@ -133,12 +150,14 @@ def add_user_handler(message):
     chat_id = message.chat.id
     bot.send_message(chat_id, "Введите данные нового пользователя (например: Имя, Телефон):")
     user_state[chat_id] = 'ADDING_USER'
+    return
 
 @bot.message_handler(func=lambda message: message.text == "Удалить пользователя")
 def delete_user_handler(message):
     chat_id = message.chat.id
     bot.send_message(chat_id, "Введите идентификатор пользователя, которого вы хотите удалить:")
     user_state[chat_id] = 'DELETING_USER'
+    return
 
 @bot.message_handler(func=lambda message: message.text == "Права")
 def role_management_handler(message):
