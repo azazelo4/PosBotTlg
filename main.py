@@ -12,6 +12,7 @@ from user_management import (
     handle_select_user,
     handle_change_role,
     configure_user_management,
+    UserManagement
 )
 
 # Configure logging
@@ -98,7 +99,18 @@ def callback_change_role(call):
 
 #################----------- END -----------#################
 
+def __main__():
+    user_management = UserManagement(bot, user_data, get_all_users, change_user_role_function)
+    user_management.configure_handlers()
+    register_sales_handlers(bot, user_data)
+    register_report_handlers(bot, user_data)  # Register report handlers
+    configure_user_management(bot, user_data, get_all_users, change_user_role_function)
+    logger.debug("Starting bot polling...")
+    bot.polling(none_stop=True)
+
 if __name__ == '__main__':
+    user_management = UserManagement(bot, user_data, get_all_users, change_user_role_function)
+    user_management.configure_handlers()
     register_sales_handlers(bot, user_data)
     register_report_handlers(bot, user_data)  # Register report handlers
     configure_user_management(bot, user_data, get_all_users, change_user_role_function)

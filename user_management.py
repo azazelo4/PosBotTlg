@@ -9,44 +9,62 @@ user_management = {}
 get_all_users_function = None
 change_user_role_function = None
 
+class UserManagement:
+    def __init__(self, bot_instance, global_user_data, get_users_func, change_role_func):
+        self.bot = bot_instance
+        self.get_all_users_function = get_users_func
+        self.change_user_role_function = change_role_func
+        self.user_management = {}
+        self.logger = logging.getLogger(__name__)
+
+    def configure_handlers(self):
+        @self.bot.message_handler(func=lambda m: self.user_management.get(m.chat.id) is None and m.text == 'Персонал')
+        def start_management(message):
+            chat_id = message.chat.id
+            if chat_id in user_data:
+                self.user_management[chat_id] = UserManagementSession(user_data[chat_id], user_state, self.bot, self.get_all_users_function, self.change_user_role_function, self.logger)
+                self.bot.send_message(chat_id, "выберите действие:")
+            else:
+                self.bot.send_message(chat_id, "Вы не авторизованы. Пожалуйста, поделитесь своим номером телефона для авторизации, введя команду /start.")
+
 def configure_user_management(bot_instance, global_user_data, get_users_func, change_role_func):
     global bot, get_all_users_function, change_user_role_function
     bot = bot_instance
     get_all_users_function = get_users_func
     change_user_role_function = change_role_func
 
-    @bot.message_handler(func=lambda m: user_management.get(m.chat.id) is None and m.text == 'Персонал')
-    def start_management(message):
-        chat_id = message.chat.id
-        if chat_id in global_user_data:
-            user_management[chat_id] = UserManagement(global_user_data[chat_id], user_state)
-            bot.send_message(chat_id, "выберите действие:")
-        else:
-            bot.send_message(chat_id, "Вы не авторизованы. Пожалуйста, поделитесь своим номером телефона для авторизации, введя команду /start.")
+    user_management_instance = UserManagement(bot_instance, global_user_data, get_users_func, change_role_func)
+    user_management_instance.configure_handlers()
 
-class UserManagement:
-    def __init__(self, user_data, user_state):
+class UserManagementSession:
+    def __init__(self, user_data, user_state, bot, get_all_users_function, change_user_role_function, logger):
         self.state = None
         self.users = []
         self.user_roles = {}
         self.selected_user = None
+        self.user_data = user_data
+        self.user_state = user_state
+        self.bot = bot
+        self.get_all_users_function = get_all_users_function
+        self.change_user_role_function = change_user_role_function
+        self.logger = logger
 
     def handle_role_management(self, chat_id, user_data, user_state):
-        logger.debug(f"Handling role management for chat_id: {chat_id}")
+        self.logger.debug(f"Handling role management for chat_id: {chat_id}")
         user_state[chat_id] = 'USER_MANAGEMENT'
 
         user = user_data.get(chat_id)
         if not user or user.get('role') != 'admin':
-            logger.warning(f"Unauthorized access attempt by chat_id: {chat_id}")
-            bot.send_message(chat_id, "У вас недостаточно прав для управления ролями.")
+            self.logger.warning(f"Unauthorized access attempt by chat_id: {chat_id}")
+            self.bot.send_message(chat_id, "У вас недостаточно прав для управления ролями.")
             user_state[chat_id] = None
             return
 
         try:
-            users = get_all_users_function()
+            users = self.get_all_users_function()
             if not users:
-                logger.info("No users found in the system")
-                bot.send_message(chat_id, "Пользователи не найдены.")
+                self.logger.info("No users found in the system")
+                self.bot.send_message(chat_id, "Пользователи не найдены.")
                 user_state[chat_id] = None
                 return
 
@@ -59,12 +77,12 @@ class UserManagement:
         # Add back button
             keyboard.add(types.InlineKeyboardButton(text="Назад", callback_data="back_to_main"))
         
-            bot.send_message(chat_id, "Выберите пользователя для изменения роли:", reply_markup=keyboard)
-            logger.debug(f"Displayed user list for chat_id: {chat_id}")
+            self.bot.send_message(chat_id, "Выберите пользователя для изменения роли:", reply_markup=keyboard)
+            self.logger.debug(f"Displayed user list for chat_id: {chat_id}")
 
         except Exception as e:
-            logger.exception(f"Error in handle_role_management: {str(e)}")
-            bot.send_message(chat_id, f"Произошла ошибка при получении списка пользователей")
+            self.logger.exception(f"Error in handle_role_management: {str(e)}")
+            self.bot.send_message(chat_id, f"Произошла ошибка при получении списка пользователей")
             user_state[chat_id] = None
 
 def handle_select_user(call):
