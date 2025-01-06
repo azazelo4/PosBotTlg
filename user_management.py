@@ -127,3 +127,12 @@ def handle_change_role(call):
         logger.exception(f"Error in handle_change_role: {str(e)}")
         bot.answer_callback_query(call.id, "Произошла ошибка при изменении роли")
         user_state[chat_id] = None
+
+# At the bottom of your script or in the bot initialization code
+@bot.callback_query_handler(func=lambda call: call.data.startswith("select_user_"))
+def handle_select_user_callback(call):
+    handle_select_user(call)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("change_role_") or call.data == "back_to_main")
+def handle_change_role_callback(call):
+    handle_change_role(call)
