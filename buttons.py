@@ -25,7 +25,6 @@ def create_staff_management_buttons():
     button_rights = types.KeyboardButton("Права")
     button_back = types.KeyboardButton("Назад")
     button_cancel = types.KeyboardButton("Отмена")
-    # Кнопки добавления, удаления пользователя, управления правами и возврата
     keyboard.add(button_add_user, button_remove_user, button_rights, button_back, button_cancel)
     return keyboard
 
