@@ -128,6 +128,28 @@ def handle_change_role(call):
         bot.answer_callback_query(call.id, "Произошла ошибка при изменении роли")
         user_state[chat_id] = None
 
+@bot.message_handler(func=lambda message: message.text == "Добавить пользователя")
+def add_user_handler(message):
+    chat_id = message.chat.id
+    bot.send_message(chat_id, "Введите данные нового пользователя (например: Имя, Телефон):")
+    user_state[chat_id] = 'ADDING_USER'
+
+@bot.message_handler(func=lambda message: message.text == "Удалить пользователя")
+def delete_user_handler(message):
+    chat_id = message.chat.id
+    bot.send_message(chat_id, "Введите идентификатор пользователя, которого вы хотите удалить:")
+    user_state[chat_id] = 'DELETING_USER'
+
+@bot.message_handler(func=lambda message: message.text == "Права")
+def role_management_handler(message):
+    chat_id = message.chat.id
+    user_management_instance = user_management.get(chat_id)
+    if user_management_instance:
+        user_management_instance.handle_role_management(chat_id, user_data, user_state)
+    else:
+        bot.send_message(chat_id, "Ошибка: Не удалось инициализировать управление ролями.")
+
+
 # At the bottom of your script or in the bot initialization code
 @bot.callback_query_handler(func=lambda call: call.data.startswith("select_user_"))
 def handle_select_user_callback(call):
