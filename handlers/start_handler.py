@@ -38,7 +38,7 @@ def handle_contact(message):
 
             bot.send_message(
                 chat_id,
-                f"Здравствуйте, {user_data_dict['name']}! Вы авторизованы как {user_data_dict['role']}. Для справки введите команду /help.",
+                f"Здравствуйте,{user_data_dict['surename']} {user_data_dict['name']}! (удалить отображение роли) Вы авторизованы как {user_data_dict['role']}. Для справки введите команду /help.",
                 reply_markup=keyboard
             )
         else:
