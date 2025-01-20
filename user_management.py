@@ -1,5 +1,5 @@
 from telebot import types
-from database import add_user_to_db, get_all_users, change_user_role_function
+from database import add_user_to_db
 import logging
 
 logger = logging.getLogger(__name__)
@@ -16,6 +16,42 @@ class UserManagement:
     def configure_handlers(self):
         @self.bot.message_handler(func=lambda m: m.text == 'Персонал')
         def start_management(message):
+            chat_id = message.chat.id
+            if chat_id in self.user_data and self.user_data[chat_id].get('role') == 'admin':
+                self.handle_role_management(chat_id)
+            else:
+                self.bot.send_message(chat_id, "У вас недостаточно прав для этой операции.")
+
+        @self.bot.message_handler(func=lambda message: self.user_state.get(message.chat.id) == 'ADDING_USER')
+        def process_add_user_data(message):
+            chat_id = message.chat.id
+            try:
+                data = message.text.split(", ")
+                if len(data) != 2:
+                    self.bot.send_message(chat_id, "Неверный формат данных. Введите в формате: Имя, Телефон.")
+                    return
+                name, phone = data
+                response = add_user_to_db(phone, "cashier", name)
+                self.bot.send_message(chat_id, response)
+                self.user_state[chat_id] = None
+            except Exception as e:
+                self.logger.exception("Error adding user.")
+                self.bot.send_message(chat_id, "Произошла ошибка. Попробуйте снова.")
+
+        @self.bot.message_handler(func=lambda message: message.text == "Добавить пользователя")
+        def add_user_handler(message):
+            chat_id = message.chat.id
+            self.bot.send_message(chat_id, "Введите данные нового пользователя (например: Имя, Телефон):")
+            self.user_state[chat_id] = 'ADDING_USER'
+
+        @self.bot.message_handler(func=lambda message: message.text == "Удалить пользователя")
+        def delete_user_handler(message):
+            chat_id = message.chat.id
+            self.bot.send_message(chat_id, "Введите идентификатор пользователя, которого вы хотите удалить:")
+            self.user_state[chat_id] = 'DELETING_USER'
+
+        @self.bot.message_handler(func=lambda message: message.text == "Права")
+        def role_management_handler(message):
             chat_id = message.chat.id
             if chat_id in self.user_data and self.user_data[chat_id].get('role') == 'admin':
                 self.handle_role_management(chat_id)
@@ -116,42 +152,4 @@ def configure_user_management(bot_instance, global_user_data, get_users_func, ch
     user_management_instance = UserManagement(bot_instance, global_user_data, get_users_func, change_role_func)
     user_management_instance.configure_handlers()
     user_management_instance.register_callback_handlers()
-
-@bot.message_handler(func=lambda message: user_state.get(message.chat.id) == 'ADDING_USER')
-def process_add_user_data(message):
-    chat_id = message.chat.id
-    try:
-        data = message.text.split(", ")
-        if len(data) != 2:
-            bot.send_message(chat_id, "Неверный формат данных. Введите в формате: Имя, Телефон.")
-            return
-        name, phone = data
-        response = add_user_to_db(phone, "cashier", name)
-        bot.send_message(chat_id, response)
-        user_state[chat_id] = None
-    except Exception as e:
-        logger.exception("Error adding user.")
-        bot.send_message(chat_id, "Произошла ошибка. Попробуйте снова.")
-
-@bot.message_handler(func=lambda message: message.text == "Добавить пользователя")
-def add_user_handler(message):
-    chat_id = message.chat.id
-    bot.send_message(chat_id, "Введите данные нового пользователя (например: Имя, Телефон):")
-    user_state[chat_id] = 'ADDING_USER'
-    return
-
-@bot.message_handler(func=lambda message: message.text == "Удалить пользователя")
-def delete_user_handler(message):
-    chat_id = message.chat.id
-    bot.send_message(chat_id, "Введите идентификатор пользователя, которого вы хотите удалить:")
-    user_state[chat_id] = 'DELETING_USER'
-    return
-
-@bot.message_handler(func=lambda message: message.text == "Права")
-def role_management_handler(message):
-    chat_id = message.chat.id
-    user_management_instance = user_management.get(chat_id)
-    if user_management_instance:
-        user_management_instance.handle_role_management(chat_id, user_data, user_state)
-    else:
-        bot.send_message(chat_id, "Ошибка: Не удалось инициализировать управление ролями.")
+    return user_management_instance
