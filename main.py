@@ -6,11 +6,6 @@ from handlers.start_handler import bot, user_data
 from handlers.sales_handler import register_sales_handlers
 from database import get_all_users, change_user_role_function
 from user_management import (
-    add_user_handler,
-    delete_user_handler,
-    role_management_handler,
-    handle_select_user,
-    handle_change_role,
     configure_user_management,
     UserManagement
 )
