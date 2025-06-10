@@ -1,7 +1,9 @@
 from telebot import types
 from state import bot # Import the shared bot instance
+import logging # Import the logging module
 
 # No local bot instance here
+logger = logging.getLogger(__name__) # Define the logger instance
 
 def help_command_handler(message: types.Message):
     help_text = """
