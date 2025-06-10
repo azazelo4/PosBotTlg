@@ -124,9 +124,22 @@ def record_sale(product_id, store_id, user_id, sale_price, payment_type):
         cursor.execute(insert_query, (product_id, store_id, user_id, sale_price, payment_type))
         logger.debug(f"Insert query executed: {insert_query} with values ({product_id}, {store_id}, {user_id}, {sale_price}, {payment_type})")
         
-        product = get_product_by_article(get_product_article_by_id(product_id)) # Need to get article to update quantity
-        if product:
-             update_product_quantity(product['article_number'], -1) # Decrease quantity by 1
+        # product = get_product_by_article(get_product_article_by_id(product_id)) # This makes an extra DB call
+        # It's better to pass the article_number directly if known, or fetch it once.
+        # For simplicity, assuming product_id is sufficient if update_product_quantity can use it or another function can map it.
+        # The original get_product_by_article needs an article_number, not id.
+        # Let's assume record_sale is called after we already have the product object (which includes article_number).
+        # We need to ensure update_product_quantity is called with article_number.
+        
+        # To get article_number from product_id efficiently:
+        article_num_to_update = get_product_article_by_id(product_id)
+        if article_num_to_update:
+             update_product_quantity(article_num_to_update, -1) # Decrease quantity by 1
+        else:
+            logger.error(f"Could not find article_number for product_id {product_id} to update quantity.")
+            # Decide on error handling: rollback or proceed without quantity update? For now, proceeding.
+            # connection.rollback()
+            # return # Or raise error
 
         connection.commit()
     except Exception as e:
@@ -156,7 +169,7 @@ def get_product_article_by_id(product_id):
     return article
 
 # Get the minimum price of a product
-def get_min_price(product_article): # Changed to accept article
+def get_min_price(product_article): 
     logger.debug(f"Fetching minimum price for product article: {product_article}")
     connection = create_connection()
     cursor = connection.cursor()
@@ -181,26 +194,46 @@ def get_min_price(product_article): # Changed to accept article
 def generate_report(start_date, end_date):
     logger.debug(f"Generating report from {start_date} to {end_date}")
     connection = create_connection()
-    cursor = connection.cursor()
+    # Using dictionary=True can be helpful here to access columns by name
+    # but the current report_handler.py processes tuples by index.
+    # For now, keeping it as tuples and ensuring correct order.
+    cursor = connection.cursor() 
     report_data = []
     try:
+        # Add more product fields to the SELECT statement
+        # Ensure the order of columns matches the expected order in report_handler.py
         query = """
-                SELECT p.product_type, p.model, u.name as user_name, st.name as store_name, s.sold_price, s.sale_date, s.payment_type
+                SELECT 
+                    s.id as sale_id, 
+                    s.sale_date, 
+                    s.sold_price, 
+                    s.payment_type,
+                    p.article_number, 
+                    p.product_type, 
+                    p.model, 
+                    p.metal_type,
+                    p.weight,
+                    p.price_per_gram,
+                    p.price as product_original_price, 
+                    p.manufacturer,
+                    p.commentaries,
+                    -- Add other product columns you need, e.g., p.size
+                    u.name as user_name, 
+                    st.name as store_name
                 FROM sales s
                 JOIN products p ON s.product_id = p.id
                 JOIN users u ON s.user_id = u.id
                 JOIN stores st ON s.store_id = st.id
                 WHERE s.sale_date BETWEEN %s AND %s
-                GROUP BY s.id, p.product_type, p.model, u.name, st.name, s.sold_price, s.sale_date, s.payment_type;
-                """ # Added aliases and GROUP BY s.id for distinct sales
+                ORDER BY s.sale_date, s.id; 
+                """ # Removed GROUP BY as we want individual sales with product details. Added ORDER BY.
         logger.debug(f"Executing report query: {query}")
         cursor.execute(query, (start_date, end_date))
-        report_data = cursor.fetchall() # Assuming default tuple rows
-        # If dictionary cursor is preferred for reports:
-        # report_data = [dict(zip([col[0] for col in cursor.description], row)) for row in cursor.fetchall()]
-        logger.debug(f"Report data retrieved: {report_data}")
+        report_data = cursor.fetchall() 
+        logger.debug(f"Report data retrieved (count: {len(report_data)}): {report_data[:5]}...") # Log first 5 rows
     except Exception as e:
         logger.exception("Error generating report.")
+        # report_data will remain []
     finally:
         if connection and connection.is_connected():
             cursor.close()
@@ -286,7 +319,7 @@ def change_user_role_function(user_id, new_role):
     except Exception as e:
         logger.exception("Ошибка при изменении роли пользователя.")
         if connection: connection.rollback()
-        raise e # Re-raise after logging and rollback
+        raise e 
     finally:
         if connection and connection.is_connected():
             cursor.close()
@@ -301,13 +334,12 @@ def update_product_quantity(product_article, quantity_change):
     cursor = connection.cursor()
     success = False
     try:
-        # Check current quantity to prevent negative stock if decreasing
         if quantity_change < 0:
             cursor.execute("SELECT quantity FROM products WHERE article_number = %s", (product_article,))
-            current_quantity = cursor.fetchone()
-            if current_quantity and current_quantity[0] < abs(quantity_change):
-                logger.warning(f"Not enough stock for {product_article} to decrease by {abs(quantity_change)}. Current: {current_quantity[0]}")
-                return False # Or raise an error
+            current_quantity_result = cursor.fetchone()
+            if current_quantity_result and current_quantity_result[0] < abs(quantity_change):
+                logger.warning(f"Not enough stock for {product_article} to decrease by {abs(quantity_change)}. Current: {current_quantity_result[0]}")
+                return False 
 
         query = "UPDATE products SET quantity = quantity + %s WHERE article_number = %s"
         cursor.execute(query, (quantity_change, product_article))
@@ -329,8 +361,6 @@ def create_buyback_record(product_article, price, payment_type, user_id, store_i
     cursor = connection.cursor()
     buyback_id = None
     try:
-        # Assuming a 'buybacks' table: id, product_article, buyback_price, payment_type, buyback_date, user_id, store_id
-        # And that product_article is a foreign key or just the article string
         query = """
         INSERT INTO buybacks (product_article, buyback_price, payment_type, user_id, store_id, buyback_date)
         VALUES (%s, %s, %s, %s, %s, NOW())
@@ -338,7 +368,6 @@ def create_buyback_record(product_article, price, payment_type, user_id, store_i
         cursor.execute(query, (product_article, price, payment_type, user_id, store_id))
         buyback_id = cursor.lastrowid
         
-        # Increase product quantity
         if not update_product_quantity(product_article, 1):
             logger.error(f"Failed to update quantity for buyback of {product_article}. Rolling back buyback record.")
             connection.rollback()
@@ -358,10 +387,9 @@ def create_buyback_record(product_article, price, payment_type, user_id, store_i
 def get_sale_and_product_details_by_sale_id(sale_id):
     logger.debug(f"Fetching sale and product details for sale_id: {sale_id}")
     connection = create_connection()
-    cursor = connection.cursor(dictionary=True) # Use dictionary cursor
+    cursor = connection.cursor(dictionary=True) 
     details = None
     try:
-        # Assuming sales.id is the order_id
         query = """
         SELECT s.id as sale_id, s.sold_price, s.payment_type as sale_payment_type, s.sale_date,
                p.id as product_id, p.article_number, p.model as product_model, p.product_type
@@ -389,7 +417,6 @@ def create_return_record(sale_id, product_article, return_price, payment_type, u
     cursor = connection.cursor()
     return_id = None
     try:
-        # Assuming a 'returns' table: id, original_sale_id, product_article, return_price, payment_type, return_date, user_id, store_id
         query = """
         INSERT INTO returns (original_sale_id, product_article, return_price, payment_type, user_id, store_id, return_date)
         VALUES (%s, %s, %s, %s, %s, %s, NOW())
@@ -397,7 +424,7 @@ def create_return_record(sale_id, product_article, return_price, payment_type, u
         cursor.execute(query, (sale_id, product_article, return_price, payment_type, user_id, store_id))
         return_id = cursor.lastrowid
 
-        if not update_product_quantity(product_article, 1): # Increase stock
+        if not update_product_quantity(product_article, 1): 
             logger.error(f"Failed to update quantity for return of {product_article}. Rolling back return record.")
             connection.rollback()
             return None
@@ -419,7 +446,6 @@ def create_trade_in_record(old_product_article, new_product_article, price_diffe
     cursor = connection.cursor()
     trade_in_id = None
     try:
-        # Assuming 'trade_ins' table: id, old_product_article, new_product_article, price_difference, payment_type_difference, trade_in_date, user_id, store_id
         query = """
         INSERT INTO trade_ins (old_product_article, new_product_article, price_difference, payment_type_difference, user_id, store_id, trade_in_date)
         VALUES (%s, %s, %s, %s, %s, %s, NOW())
@@ -427,16 +453,13 @@ def create_trade_in_record(old_product_article, new_product_article, price_diffe
         cursor.execute(query, (old_product_article, new_product_article, price_difference, payment_type_difference, user_id, store_id))
         trade_in_id = cursor.lastrowid
 
-        # Update stock for old product (returned)
         if not update_product_quantity(old_product_article, 1):
              logger.error(f"Failed to update quantity for trade-in (old item: {old_product_article}). Rolling back trade-in.")
              connection.rollback()
              return None
-        # Update stock for new product (sold)
         if not update_product_quantity(new_product_article, -1):
             logger.error(f"Failed to update quantity for trade-in (new item: {new_product_article}). Rolling back trade-in and old item stock.")
-            # Attempt to roll back the first stock update if possible, or handle inconsistency
-            update_product_quantity(old_product_article, -1) # Revert old product stock
+            update_product_quantity(old_product_article, -1) 
             connection.rollback()
             return None
             
@@ -445,54 +468,8 @@ def create_trade_in_record(old_product_article, new_product_article, price_diffe
     except Error as e:
         logger.error(f"Error creating trade-in record: {e}")
         if connection: connection.rollback()
-        # Potentially revert stock changes if partially successful before error
-        # This part can be complex to make fully atomic without 2PC
     finally:
         if connection and connection.is_connected():
             cursor.close()
             connection.close()
     return trade_in_id
-
-# Ensure tables 'buybacks', 'returns', 'trade_ins' exist in your DB with appropriate columns.
-# Example DDL (adjust as needed):
-"""
-CREATE TABLE IF NOT EXISTS buybacks (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    product_article VARCHAR(255) NOT NULL,
-    buyback_price DECIMAL(10, 2) NOT NULL,
-    payment_type VARCHAR(50),
-    user_id INT,
-    store_id INT,
-    buyback_date DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id),
-    FOREIGN KEY (store_id) REFERENCES stores(id)
-    -- FOREIGN KEY (product_article) REFERENCES products(article_number) -- If articles are unique and you want FK constraint
-);
-
-CREATE TABLE IF NOT EXISTS returns (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    original_sale_id INT NOT NULL,
-    product_article VARCHAR(255) NOT NULL,
-    return_price DECIMAL(10, 2) NOT NULL,
-    payment_type VARCHAR(50),
-    user_id INT,
-    store_id INT,
-    return_date DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (original_sale_id) REFERENCES sales(id),
-    FOREIGN KEY (user_id) REFERENCES users(id),
-    FOREIGN KEY (store_id) REFERENCES stores(id)
-);
-
-CREATE TABLE IF NOT EXISTS trade_ins (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    old_product_article VARCHAR(255) NOT NULL,
-    new_product_article VARCHAR(255) NOT NULL,
-    price_difference DECIMAL(10, 2) NOT NULL, -- Positive if customer pays, negative if bot pays
-    payment_type_difference VARCHAR(50), -- How the difference was settled
-    user_id INT,
-    store_id INT,
-    trade_in_date DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id),
-    FOREIGN KEY (store_id) REFERENCES stores(id)
-);
-"""
