@@ -6,7 +6,7 @@ import logging
 import openpyxl
 from database import generate_report
 from buttons import create_cancel_markup, create_cash_operations_buttons
-import mysql.connector # <--- IMPORT ADDED HERE
+# import mysql.connector # Not strictly needed if we don't use mysql.connector.custom specific types
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ class Report:
         self.current_internal_state = REPORT_STATE_IDLE
         if self.global_user_state.get(self.chat_id, "").startswith("REPORT_"):
             self.global_user_state.pop(self.chat_id, None)
-        if self.chat_id in report_handler: 
+        if self.chat_id in report_handler:
              del report_handler[self.chat_id]
 
 
@@ -109,11 +109,11 @@ class Report:
             start_dt = self.today
             end_dt = self.today
         elif report_type_str == "Еженедельный":
-            start_dt = self.today - timedelta(days=self.today.weekday()) 
-            end_dt = start_dt + timedelta(days=6) 
+            start_dt = self.today - timedelta(days=self.today.weekday())
+            end_dt = start_dt + timedelta(days=6)
         elif report_type_str == "Ежемесячный":
-            start_dt = self.today.replace(day=1) 
-            next_month = self.today.replace(day=28) + timedelta(days=4)  
+            start_dt = self.today.replace(day=1)
+            next_month = self.today.replace(day=28) + timedelta(days=4)
             end_dt = next_month - timedelta(days=next_month.day)
         elif report_type_str == "Другой":
             start_dt = self.start_date_val
@@ -127,7 +127,7 @@ class Report:
             'ID Продажи', 'Дата продажи', 'Сумма продажи', 'Тип расчета',
             'Артикул', 'Тип товара', 'Модель', 'Тип металла',
             'Вес', 'Цена за грамм', 'Цена товара (перв.)', 'Производитель',
-            'Комментарии', 
+            'Комментарии',
             'Продавец', 'Магазин'
         ]
         sheet.append(headers)
@@ -136,12 +136,8 @@ class Report:
             sheet.append(["Нет данных за выбранный период."])
         else:
             for row_tuple in report_data_list:
-                processed_row = list(row_tuple) 
-                
-                # Ensure correct number of elements from DB matches expected headers
-                # If there's a mismatch, this loop will error or produce misaligned data.
-                # For now, assuming db returns exactly 15 columns in the defined order.
-                
+                processed_row = list(row_tuple)
+
                 # Format datetime objects (assuming sale_date is at index 1)
                 if len(processed_row) > 1:
                     if isinstance(processed_row[1], datetime):
@@ -149,19 +145,23 @@ class Report:
                     elif isinstance(processed_row[1], date):
                          processed_row[1] = processed_row[1].strftime('%Y-%m-%d')
 
-                # Convert Decimal to float and None to empty string
+                # Convert non-standard types (like Decimal) to float or string, and None to empty string
                 for i, cell_value in enumerate(processed_row):
-                    if isinstance(cell_value, mysql.connector.custom.Decimal): 
+                    # Check for Decimal type more generally or rely on database returning standard types
+                    # For a generic Decimal check (from any library, like Python's decimal.Decimal or a DB driver's):
+                    if hasattr(cell_value, 'as_tuple') and hasattr(cell_value, 'quantize'): # Heuristic for Decimal
                         processed_row[i] = float(cell_value)
-                    elif cell_value is None: 
+                    elif not isinstance(cell_value, (str, int, float, bool, date, datetime)) and cell_value is not None:
+                        # If it's not a standard type openpyxl likes, convert to string as a fallback
+                        logger.debug(f"Converting non-standard type {type(cell_value)} to string for Excel: {cell_value}")
+                        processed_row[i] = str(cell_value)
+                    elif cell_value is None:
                         processed_row[i] = ""
                 
-                # Check if processed_row length matches header length before appending
                 if len(processed_row) == len(headers):
                     sheet.append(processed_row)
                 else:
                     logger.warning(f"Chat {self.chat_id}: Mismatch between data row length ({len(processed_row)}) and header length ({len(headers)}). Row: {processed_row}")
-                    # Append with padding or log error, for now, appending what we have up to header length
                     sheet.append(processed_row[:len(headers)])
 
 
@@ -217,10 +217,10 @@ def register_report_handlers(bot_instance, global_user_data_dict, global_user_st
     def reports_entry_point(message: types.Message):
         chat_id = message.chat.id
         logger.debug(f"Chat {chat_id}: 'Отчеты' button pressed.")
-        
+
         if chat_id in report_handler and report_handler[chat_id].current_internal_state != REPORT_STATE_IDLE:
             logger.warning(f"Chat {chat_id}: Report generation already in progress. State: {report_handler[chat_id].current_internal_state}. Resetting previous.")
-            report_handler[chat_id].reset() 
+            report_handler[chat_id].reset()
 
         report_handler[chat_id] = Report(chat_id, global_user_state_dict)
         report_handler[chat_id].start_report_generation()
