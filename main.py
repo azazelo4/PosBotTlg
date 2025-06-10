@@ -1,96 +1,123 @@
 import logging
 from telebot import types
-from buttons import create_cash_operations_buttons, create_staff_management_buttons, create_admin_buttons, create_cashier_buttons # Added cashier buttons
-from state import bot, user_data, user_state # Import from state.py
+from buttons import create_cash_operations_buttons, create_staff_management_buttons, create_admin_buttons, create_cashier_buttons
+from state import bot, user_data, user_state 
 from handlers.report_handler import register_report_handlers
-# Ensure start_handler is structured to not redefine bot, user_data, or uses them from state.py
-from handlers.start_handler import register_start_handlers # Assuming start_handler has a registration function
+from handlers.start_handler import register_start_handlers # Now this import should work
+from handlers.help_handler import register_help_handlers # Import for help handler
 from handlers.sales_handler import register_sales_handlers
 from handlers.buyback_handler import register_buyback_handlers
 from handlers.return_handler import register_return_handlers
 from handlers.tradein_handler import register_tradein_handlers
-from database import get_all_users, change_user_role_function, deactivate_user_in_db # Added deactivate_user_in_db
-from user_management import (
-    configure_user_management,
-    # UserManagement # Not directly used here if configure_user_management handles all
-)
+from database import get_all_users, change_user_role_function, deactivate_user_in_db
+from user_management import configure_user_management
 
 # Configure logging
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("app_debug.log", mode='a'), # Append mode
+        logging.FileHandler("app_debug.log", mode='a'), 
         logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
 
-# This function is used by other handlers, ensure it's robust
 def get_keyboard_by_role(chat_id):
-    # Ensure user_data[chat_id] and user_data[chat_id]['role'] exist
     user_info = user_data.get(chat_id)
-    if not user_info or 'role' not in user_info:
-        logger.warning(f"Role not found for chat_id {chat_id} in get_keyboard_by_role. User_data: {user_info}")
-        # Fallback to a default or request authorization
+    if not user_info or 'role' not in user_info or user_info.get('is_active') == 0: # Check is_active too
+        logger.warning(f"Role not found or user inactive for chat_id {chat_id} in get_keyboard_by_role. User_data: {user_info}")
         keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
         share_contact_button = types.KeyboardButton("Поделиться номером", request_contact=True)
         keyboard.add(share_contact_button)
-        return keyboard # Or None, or raise an error
+        return keyboard
 
     role = user_info['role']
     if role == 'cashier':
-        return create_cashier_buttons() # create_cash_operations_buttons() is for inside "Касса"
+        return create_cashier_buttons()
     elif role == 'admin':
         return create_admin_buttons()
     else:
         logger.warning(f"Unknown role '{role}' for chat_id {chat_id} in get_keyboard_by_role.")
-        # Fallback for unknown but authenticated roles
         keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-        keyboard.add(types.KeyboardButton("Помощь"))
+        # Provide a way to re-auth if role is weird
+        share_contact_button = types.KeyboardButton("Поделиться номером (смена роли?)", request_contact=True)
+        keyboard.add(share_contact_button)
         return keyboard
 
 
 @bot.message_handler(func=lambda message: message.text == "Касса")
 def handle_cash_operations_menu(message):
     chat_id = message.chat.id
-    # Check if user is in user_data and has an authorized role
     current_user_data = user_data.get(chat_id)
-    if current_user_data and current_user_data.get('is_active', False) and current_user_data.get('role') in ['admin', 'cashier']:
+    if current_user_data and current_user_data.get('is_active', 0) == 1 and current_user_data.get('role') in ['admin', 'cashier']:
         logger.info(f"Chat {chat_id} (Role: {current_user_data.get('role')}): Accessing Cash Operations Menu.")
         bot.send_message(chat_id, "Меню кассовых операций. Выберите действие:", reply_markup=create_cash_operations_buttons())
     else:
         logger.warning(f"Chat {chat_id}: Unauthorized access attempt to Cash Operations Menu. User data: {current_user_data}")
-        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-        share_contact_button = types.KeyboardButton("Поделиться номером", request_contact=True)
-        keyboard.add(share_contact_button)
-        bot.send_message(chat_id, "Доступ запрещен. Пожалуйста, авторизуйтесь.", reply_markup=keyboard)
+        bot.send_message(chat_id, "Доступ запрещен. Пожалуйста, авторизуйтесь через /start.", reply_markup=get_keyboard_by_role(chat_id))
 
 
 @bot.message_handler(func=lambda message: message.text == "Назад")
-def go_back_to_main_menu(message):
+def go_back_to_main_menu(message: types.Message):
     chat_id = message.chat.id
     user = user_data.get(chat_id)
-    
-    # Clear any ongoing operation state
-    if user_state.get(chat_id):
-        logger.info(f"Chat {chat_id}: 'Назад' pressed during state {user_state[chat_id]}. Clearing state.")
-        # Specific cleanup functions for ongoing operations might be needed here if 'Назад' is a hard reset
-        # For now, just clear the generic state. Specific flows should use "Отмена".
-        if user_state[chat_id].startswith("SALES_") and 'sales_data' in user_data[chat_id]: del user_data[chat_id]['sales_data']
-        if user_state[chat_id].startswith("BUYBACK_") and 'buyback_data' in user_data[chat_id]: del user_data[chat_id]['buyback_data']
-        if user_state[chat_id].startswith("RETURN_") and 'return_data' in user_data[chat_id]: del user_data[chat_id]['return_data']
-        if user_state[chat_id].startswith("TRADEIN_") and 'tradein_data' in user_data[chat_id]: del user_data[chat_id]['tradein_data']
-        if user_state[chat_id].startswith("REPORT_") and 'report_data' in user_data[chat_id]: del user_data[chat_id]['report_data']
-        # TODO: Add similar for user management states if they use user_data sub-dictionaries
-        user_state.pop(chat_id, None)
+    current_state = user_state.get(chat_id)
 
-    if not user or user.get('is_active') == 0:
+    logger.info(f"Chat {chat_id}: 'Назад' pressed. Current state: {current_state}")
+
+    # Clear any ongoing operation state and associated data
+    # It's safer to call specific cancel functions if they exist, as they might do more cleanup
+    if current_state:
+        if current_state.startswith("BUYBACK_"):
+            from handlers.buyback_handler import cancel_buyback
+            cancel_buyback(chat_id) # This will send its own "Отменена" message and set keyboard
+            return # cancel_buyback already handles the reply and state cleanup
+        elif current_state.startswith("RETURN_"):
+            from handlers.return_handler import cancel_return
+            cancel_return(chat_id)
+            return
+        elif current_state.startswith("TRADEIN_"):
+            from handlers.tradein_handler import cancel_tradein
+            cancel_tradein(chat_id)
+            return
+        elif current_state.startswith("SALES_") or current_state.startswith("SaleState"): # For sales_handler
+            # sales_handler might need a specific cancel function or a more direct state reset
+            if chat_id in user_data and 'sales_data' in user_data[chat_id]:
+                del user_data[chat_id]['sales_data']
+            if chat_id in user_data and 'sale_handler' in user_data[chat_id]: # If sales_handler stores instance in user_data
+                 del user_data[chat_id]['sale_handler']
+            if 'sale_handler' in globals() and chat_id in sale_handler: # from sales_handler.py
+                 del sale_handler[chat_id]
+            user_state.pop(chat_id, None)
+            # General message for other cancellations via "Назад"
+            bot.send_message(chat_id, "Текущая операция прервана.", reply_markup=get_keyboard_by_role(chat_id))
+
+        elif current_state.startswith("REPORT_"):
+             # report_handler needs a reset mechanism too
+            if 'report_handler' in globals() and chat_id in report_handler:
+                report_handler[chat_id].reset() # Assuming Report class has a reset method
+                del report_handler[chat_id]
+            user_state.pop(chat_id, None)
+            bot.send_message(chat_id, "Генерация отчета прервана.", reply_markup=get_keyboard_by_role(chat_id))
+        
+        elif current_state in ['ADDING_USER', 'DELETING_USER', 'USER_MANAGEMENT'] and 'user_management_instance' in globals():
+            # User management states, potentially reset its internal state
+            # This might need user_management_instance.cancel_operation(chat_id) or similar
+            user_state.pop(chat_id, None) # Basic state pop
+            bot.send_message(chat_id, "Операция с персоналом прервана.", reply_markup=create_staff_management_buttons()) # Go back to staff menu
+            return # Don't go to main menu from staff sub-operations
+
+        else: # Generic state pop for unhandled cases by 'Назад'
+            user_state.pop(chat_id, None)
+            # Fall through to send main menu
+
+    if not user or user.get('is_active', 0) == 0:
         logger.info(f"Chat {chat_id}: 'Назад' pressed by non-authorized/inactive user.")
         keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
         share_contact_button = types.KeyboardButton("Поделиться номером", request_contact=True)
         keyboard.add(share_contact_button)
-        bot.send_message(chat_id, "Вы не авторизованы или ваш аккаунт деактивирован. Пожалуйста, поделитесь своим номером для авторизации.", reply_markup=keyboard)
+        bot.send_message(chat_id, "Вы не авторизованы. Пожалуйста, пройдите авторизацию через /start.", reply_markup=keyboard)
         return
     
     logger.info(f"Chat {chat_id} (Role: {user.get('role')}): Returning to main menu.")
@@ -101,106 +128,75 @@ def go_back_to_main_menu(message):
 def handle_staff_menu(message):
     chat_id = message.chat.id
     current_user_data = user_data.get(chat_id)
-    if current_user_data and current_user_data.get('is_active', False) and current_user_data.get('role') == 'admin':
+    if current_user_data and current_user_data.get('is_active', 0) == 1 and current_user_data.get('role') == 'admin':
         logger.info(f"Chat {chat_id}: Admin accessing Staff Menu.")
         bot.send_message(chat_id, "Меню управления персоналом. Выберите действие:", reply_markup=create_staff_management_buttons())
     else:
         logger.warning(f"Chat {chat_id}: Unauthorized access attempt to Staff Menu. User data: {current_user_data}")
         bot.send_message(chat_id, "Доступ запрещен. Команда доступна только администраторам.", reply_markup=get_keyboard_by_role(chat_id))
 
-# Global "Отмена" handler for operations in progress
 @bot.message_handler(func=lambda message: message.text == "Отмена")
 def handle_global_cancel(message: types.Message):
     chat_id = message.chat.id
     current_op_state = user_state.get(chat_id)
-    logger.debug(f"Chat {chat_id}: 'Отмена' pressed. Current state: {current_op_state}")
+    logger.info(f"Chat {chat_id}: 'Отмена' pressed. Current state: {current_op_state}")
 
-    # Check if in a specific operation state from any of the handlers
-    # This list should be comprehensive of all states that can be cancelled.
-    cancellable_prefixes = ["SALES_", "BUYBACK_", "RETURN_", "TRADEIN_", "REPORT_", "ADDUSER_", "DELUSER_", "CHANGEROLE_"] # Add user management prefixes
+    if not current_op_state:
+        bot.send_message(chat_id, "Нет активных операций для отмены.", reply_markup=get_keyboard_by_role(chat_id))
+        return
 
-    cancelled = False
-    for prefix in cancellable_prefixes:
-        if current_op_state and current_op_state.startswith(prefix):
-            # Clean up specific data if necessary
-            if prefix == "BUYBACK_" and 'buyback_data' in user_data.get(chat_id, {}):
-                from handlers.buyback_handler import cancel_buyback
-                cancel_buyback(chat_id) # Uses its own cleanup and message
-                cancelled = True
-                break
-            elif prefix == "RETURN_" and 'return_data' in user_data.get(chat_id, {}):
-                from handlers.return_handler import cancel_return
-                cancel_return(chat_id)
-                cancelled = True
-                break
-            elif prefix == "TRADEIN_" and 'tradein_data' in user_data.get(chat_id, {}):
-                from handlers.tradein_handler import cancel_tradein
-                cancel_tradein(chat_id)
-                cancelled = True
-                break
-            # Add more specific cancellations if needed (e.g., sales, reports)
-            # Generic cleanup for other states if not handled by specific cancel functions
-            else:
-                 user_state.pop(chat_id, None)
-                 # Generic data cleanup if a pattern is established, e.g. user_data[chat_id].pop('operation_specific_data', None)
-                 bot.send_message(chat_id, "Операция отменена.", reply_markup=get_keyboard_by_role(chat_id))
-                 cancelled = True
-                 break
-    
-    if not cancelled:
-        # If "Отмена" is pressed but not in a known cancellable state, treat as "Назад" or main menu
-        logger.debug(f"Chat {chat_id}: 'Отмена' pressed, no active cancellable state found. Treating as 'Назад'.")
-        go_back_to_main_menu(message)
-
-
-# User Management handlers from user_management.py should be primarily used.
-# The following are stubs if configure_user_management doesn't register them directly via bot instance.
-# It's better if UserManagement class registers its own message handlers.
-# For now, assuming configure_user_management sets up necessary callbacks or next_step_handlers.
-# If UserManagement needs explicit message handlers here, they need to be more integrated.
-
-# Example of how UserManagement might be triggered if it doesn't self-register text commands
-# These might conflict if UserManagement itself registers handlers for these texts.
-# @bot.message_handler(func=lambda message: message.text == "Добавить пользователя")
-# def handle_add_user_proxy(message):
-#     # Delegate to UserManagement instance if needed, or ensure UserManagement handles this text
-#     # user_management_instance.trigger_add_user_flow(message) # Hypothetical
-#     pass
-
-# @bot.message_handler(func=lambda message: message.text == "Удалить пользователя")
-# def handle_delete_user_proxy(message):
-#     # Delegate
-#     pass
-
-# @bot.message_handler(func=lambda message: message.text == "Права")
-# def handle_role_management_proxy(message):
-#     # Delegate
-#     pass
+    # Prioritize specific cancel handlers
+    if current_op_state.startswith("BUYBACK_"):
+        from handlers.buyback_handler import cancel_buyback
+        cancel_buyback(chat_id)
+    elif current_op_state.startswith("RETURN_"):
+        from handlers.return_handler import cancel_return
+        cancel_return(chat_id)
+    elif current_op_state.startswith("TRADEIN_"):
+        from handlers.tradein_handler import cancel_tradein
+        cancel_tradein(chat_id)
+    elif current_op_state.startswith("SALES_") or current_op_state.startswith("SaleState"): # For sales_handler
+        if 'sale_handler' in globals() and chat_id in sale_handler:
+            sale_handler[chat_id].reset()
+            del sale_handler[chat_id]
+        user_state.pop(chat_id, None)
+        if chat_id in user_data and 'sales_data' in user_data[chat_id]: del user_data[chat_id]['sales_data']
+        bot.send_message(chat_id, "Продажа отменена.", reply_markup=get_keyboard_by_role(chat_id))
+    elif current_op_state.startswith("REPORT_"):
+        if 'report_handler' in globals() and chat_id in report_handler:
+            report_handler[chat_id].reset()
+            del report_handler[chat_id]
+        user_state.pop(chat_id, None)
+        bot.send_message(chat_id, "Генерация отчета отменена.", reply_markup=get_keyboard_by_role(chat_id))
+    elif current_op_state in ['ADDING_USER', 'DELETING_USER', 'USER_MANAGEMENT']: # User management states
+        user_state.pop(chat_id, None) # Basic state pop
+        # user_management_instance might need a specific cancel method
+        bot.send_message(chat_id, "Операция с персоналом отменена.", reply_markup=create_staff_management_buttons()) # Back to staff menu
+    else:
+        # Generic cancel if no specific handler matched the state
+        user_state.pop(chat_id, None)
+        # Clean up any generic operation data if a pattern is established
+        # e.g., if user_data[chat_id].pop('current_operation_data', None)
+        bot.send_message(chat_id, "Операция отменена.", reply_markup=get_keyboard_by_role(chat_id))
 
 
 def main():
     logger.info("Bot starting...")
     
-    # Initialize and register handlers from different modules
-    register_start_handlers() # Handles /start and authorization
+    register_start_handlers() 
+    register_help_handlers() # Register help handlers
     
-    # User management configuration
-    # The UserManagement class in user_management.py seems to register its own handlers.
-    # So, direct message_handler for "Добавить пользователя", etc., in main.py might be redundant
-    # or should be removed if UserManagement handles them.
-    # The functions get_all_users, change_user_role_function are passed.
     user_management_instance = configure_user_management(bot, user_data, get_all_users, change_user_role_function)
-    # The callback_query_handlers related to user management are registered within configure_user_management or UserManagement class.
 
-    register_sales_handlers()
-    register_report_handlers()
+    register_sales_handlers(bot, user_data) # Pass bot and user_data if sales_handler expects them
+    register_report_handlers(bot, user_data) # Pass bot and user_data
     register_buyback_handlers()
     register_return_handlers()
     register_tradein_handlers()
     
     logger.info("Bot polling started...")
     try:
-        bot.polling(none_stop=True, interval=0, timeout=20)
+        bot.polling(none_stop=True, interval=0, timeout=30) # Increased timeout
     except Exception as e:
         logger.critical(f"Bot polling crashed: {e}", exc_info=True)
     finally:
