@@ -21,16 +21,15 @@ def create_connection():
         logger.exception(f"The error '{e}' occurred while connecting to the database.")
     return connection
 
-# --- (get_user_by_phone, get_all_users, get_product_by_article, get_store_by_id remain the same) ---
 def get_user_by_phone(phone_number):
     logger.debug(f"Fetching user with phone number: {phone_number}")
     connection = create_connection()
-    if not connection: return None # Guard against connection failure
-    cursor = connection.cursor(dictionary=True) # Use dictionary=True for consistency
+    if not connection: return None 
+    cursor = connection.cursor(dictionary=True) 
     try:
         query = "SELECT * FROM users WHERE phone_number = %s"
         cursor.execute(query, (phone_number,))
-        result = cursor.fetchone() # Fetches one row as a dictionary
+        result = cursor.fetchone() 
         if result:
             logger.debug(f"Результат запроса для {phone_number}: {result}")
             return result
@@ -64,13 +63,12 @@ def get_product_by_article(article_number):
     logger.debug(f"Fetching product with article number: {article_number}")
     connection = create_connection()
     if not connection: return None
-    # Use dictionary cursor for product details for consistency
     cursor = connection.cursor(dictionary=True)
     product = None
     try:
         query = "SELECT * FROM products WHERE article_number = %s"
         cursor.execute(query, (article_number,))
-        product = cursor.fetchone() # Fetches as dictionary
+        product = cursor.fetchone() 
         if product:
             logger.info(f"Продукт найден: {product}")
         else:
@@ -88,7 +86,7 @@ def get_store_by_id(store_id):
     logger.debug(f"Fetching store with ID: {store_id}")
     connection = create_connection()
     if not connection: return None
-    cursor = connection.cursor(dictionary=True) # Use dictionary cursor
+    cursor = connection.cursor(dictionary=True) 
     store = None
     query = "SELECT * FROM stores WHERE id = %s"
     try:
@@ -104,76 +102,107 @@ def get_store_by_id(store_id):
             logger.debug("Database connection closed.")
     return store
 
+# FUNCTION ADDED BACK HERE
+def get_sale_and_product_details_by_sale_id(sale_id):
+    logger.debug(f"Fetching sale and product details for sale_id: {sale_id}")
+    connection = create_connection()
+    if not connection: return None
+    cursor = connection.cursor(dictionary=True)
+    details = None
+    try:
+        query = """
+        SELECT 
+            s.id as sale_id, 
+            s.sold_price, 
+            s.payment_type as sale_payment_type, 
+            s.sale_date,
+            p.id as product_id, 
+            p.article_number, 
+            p.model as product_model, 
+            p.product_type
+        FROM sales s
+        JOIN products p ON s.product_id = p.id
+        WHERE s.id = %s
+        """
+        cursor.execute(query, (sale_id,))
+        details = cursor.fetchone()
+        if details:
+            logger.info(f"Sale and product details found for sale_id {sale_id}: {details}")
+        else:
+            logger.warning(f"No sale found with sale_id {sale_id}")
+    except Error as e:
+        logger.error(f"Error fetching sale details for sale_id {sale_id}: {e}")
+    finally:
+        if connection.is_connected():
+            cursor.close()
+            connection.close()
+            logger.debug(f"Database connection closed for get_sale_and_product_details_by_sale_id (sale_id: {sale_id}).")
+    return details
 
-# Modified update_product_quantity to accept a cursor
+
 def _update_product_quantity_with_cursor(cursor, product_article, quantity_change):
     logger.debug(f"Attempting to update quantity for product article: {product_article} by {quantity_change} using provided cursor.")
-    # Check current quantity to prevent negative stock if decreasing
     if quantity_change < 0:
-        cursor.execute("SELECT quantity FROM products WHERE article_number = %s FOR UPDATE", (product_article,)) # Add FOR UPDATE for row lock
+        cursor.execute("SELECT quantity FROM products WHERE article_number = %s FOR UPDATE", (product_article,))
         current_quantity_result = cursor.fetchone()
-        if not current_quantity_result: # Product not found by article, should not happen if called after get_product_by_article
+        if not current_quantity_result:
              logger.error(f"Product {product_article} not found during quantity check in _update_product_quantity_with_cursor.")
              raise ValueError(f"Product {product_article} not found for quantity update.")
-
-        # If cursor is dictionary cursor, access by key
-        current_quantity = current_quantity_result[0] if isinstance(current_quantity_result, tuple) else current_quantity_result['quantity']
+        current_quantity = current_quantity_result[0] if isinstance(current_quantity_result, tuple) else current_quantity_result.get('quantity') # Adjust for dict cursor
+        if current_quantity is None: # Should not happen if product exists
+            logger.error(f"Product {product_article} quantity is NULL in _update_product_quantity_with_cursor.")
+            raise ValueError(f"Product {product_article} has NULL quantity.")
 
         if current_quantity < abs(quantity_change):
             logger.warning(f"Not enough stock for {product_article} to decrease by {abs(quantity_change)}. Current: {current_quantity}")
-            raise ValueError(f"Not enough stock for {product_article}.") # Raise error to trigger rollback
+            raise ValueError(f"Not enough stock for {product_article}.")
 
     query = "UPDATE products SET quantity = quantity + %s WHERE article_number = %s"
     cursor.execute(query, (quantity_change, product_article))
-    if cursor.rowcount == 0:
-        logger.warning(f"Product {product_article} quantity not updated (rowcount 0). Product might not exist or quantity is already correct.")
-        # Depending on strictness, you might want to raise an error here too if an update was expected.
-        # For now, we'll assume it's possible if quantity doesn't change due to other reasons.
-        # raise ValueError(f"Failed to update quantity for {product_article}, product not found or no change needed.")
-
-
+    if cursor.rowcount == 0 and quantity_change !=0 : # If quantity_change is 0, rowcount can be 0 legitimately
+        logger.warning(f"Product {product_article} quantity not updated (rowcount 0), but an update was expected for change {quantity_change}.")
+        # This might indicate the product_article doesn't exist, which should have been caught earlier by get_product_by_article
+        # For safety, if an update was expected but didn't happen, it could be an issue.
+        raise ValueError(f"Failed to update quantity for {product_article}, product not found or no change occurred when one was expected.")
     logger.info(f"Product {product_article} quantity successfully updated by {quantity_change} in current transaction. Rowcount: {cursor.rowcount}")
     return True
 
-
-# Standalone version for other uses (buyback, return, trade-in will use this)
 def update_product_quantity(product_article, quantity_change):
     logger.debug(f"Standalone update_product_quantity for article: {product_article} by {quantity_change}")
     connection = create_connection()
     if not connection: return False
-    cursor = connection.cursor() # Can be dictionary=True if preferred for consistency
+    cursor = connection.cursor(dictionary=True) # Use dictionary=True
     success = False
     try:
-        # The logic of _update_product_quantity_with_cursor needs to be here
-        # or call it, but ensure transactionality.
         if quantity_change < 0:
-            # Use SELECT ... FOR UPDATE if you need to lock the row during the check and subsequent update
-            # This requires the operation to be within a transaction.
             cursor.execute("SELECT quantity FROM products WHERE article_number = %s FOR UPDATE", (product_article,))
             current_quantity_result = cursor.fetchone()
             if not current_quantity_result:
                 logger.error(f"Product {product_article} not found for standalone quantity update.")
-                return False # Or raise
-            current_quantity = current_quantity_result[0] # Assuming non-dictionary cursor here
+                return False
+            current_quantity = current_quantity_result['quantity']
+            if current_quantity is None:
+                logger.error(f"Product {product_article} quantity is NULL (standalone).")
+                return False
             if current_quantity < abs(quantity_change):
                 logger.warning(f"Not enough stock for {product_article} (standalone). Current: {current_quantity}")
-                return False # Or raise
+                return False
 
         query = "UPDATE products SET quantity = quantity + %s WHERE article_number = %s"
         cursor.execute(query, (quantity_change, product_article))
         
-        if cursor.rowcount > 0:
+        if cursor.rowcount > 0 or quantity_change == 0: # Allow rowcount 0 if quantity_change is 0
             connection.commit()
             logger.info(f"Product {product_article} quantity updated by {quantity_change} (standalone). Rows affected: {cursor.rowcount}")
             success = True
         else:
-            logger.warning(f"Product {product_article} quantity not updated (standalone, rowcount 0).")
-            connection.rollback() # Rollback if no rows affected unexpectedly
+            logger.warning(f"Product {product_article} quantity not updated (standalone, rowcount 0 for non-zero change).")
+            connection.rollback() 
 
     except Error as e:
         logger.error(f"Error in standalone update_product_quantity for {product_article}: {e}")
         if connection.is_connected(): connection.rollback()
-    except ValueError as ve: # Catch stock errors from the check
+    except ValueError as ve: 
         logger.error(f"ValueError in standalone update_product_quantity for {product_article}: {ve}")
         if connection.is_connected(): connection.rollback()
     finally:
@@ -182,8 +211,6 @@ def update_product_quantity(product_article, quantity_change):
             connection.close()
     return success
 
-
-# Record sale using a single transaction
 def record_sale(product_id, product_article, store_id, user_id, sale_price, payment_type):
     logger.debug(f"Recording sale for product_id: {product_id} (article: {product_article}), store_id: {store_id}, user_id: {user_id}, sale_price: {sale_price}, payment_type: {payment_type}")
     connection = create_connection()
@@ -191,23 +218,19 @@ def record_sale(product_id, product_article, store_id, user_id, sale_price, paym
         logger.error("Failed to create database connection for record_sale.")
         return False
         
-    cursor = connection.cursor()
+    cursor = connection.cursor(dictionary=True) # Use dictionary cursor for consistency
     try:
-        # Start transaction explicitly if autocommit is not True by default or for clarity
-        # connection.start_transaction() # Or cursor.execute("START TRANSACTION;")
-
         insert_query = """INSERT INTO sales (product_id, store_id, user_id, sale_date, sold_price, payment_type) 
         VALUES (%s, %s, %s, NOW(), %s, %s)"""
         cursor.execute(insert_query, (product_id, store_id, user_id, sale_price, payment_type))
         logger.debug(f"Insert into sales executed. Product ID: {product_id}")
 
-        # Use the internal update quantity function with the same cursor
-        _update_product_quantity_with_cursor(cursor, product_article, -1) # Decrease quantity by 1
+        _update_product_quantity_with_cursor(cursor, product_article, -1) 
         
         connection.commit()
         logger.info(f"Sale recorded and product {product_article} quantity updated successfully.")
         return True
-    except (Error, ValueError) as e: # Catch DB errors and ValueErrors (e.g. from stock check)
+    except (Error, ValueError) as e: 
         logger.exception(f"Error during record_sale transaction for product article {product_article}. Rolling back.")
         if connection.is_connected():
             connection.rollback()
@@ -240,14 +263,14 @@ def get_min_price(product_article):
     logger.debug(f"Fetching minimum price for product article: {product_article}")
     connection = create_connection()
     if not connection: return None
-    cursor = connection.cursor()
+    cursor = connection.cursor(dictionary=True) # Using dictionary cursor
     min_price = None
     try:
         query = "SELECT min_price FROM products WHERE article_number = %s"
         cursor.execute(query, (product_article,))
         result = cursor.fetchone()
         if result:
-            min_price = result[0]
+            min_price = result['min_price'] # Access by key
     except Error as e:
         logger.error(f"Error fetching min price for {product_article}: {e}")
     finally:
@@ -300,9 +323,6 @@ def generate_report(start_date, end_date):
             connection.close()
             logger.debug("Database connection closed after generating report.")
     return report_data
-
-# --- (add_user_to_db, deactivate_user_in_db, change_user_role_function remain similar but ensure connection handling) ---
-# --- (create_buyback_record, create_return_record, create_trade_in_record will use the standalone update_product_quantity) ---
 
 def add_user_to_db(phone_number, role, name):
     logger.debug(f"Adding user to database with phone_number: {phone_number}, role: {role}, name: {name}")
@@ -373,7 +393,7 @@ def change_user_role_function(user_id, new_role):
     connection = create_connection()
     if not connection:
         logger.error("Failed to create DB connection for change_user_role.")
-        raise Error("DB connection failed.") # Or return a specific failure indicator
+        raise Error("DB connection failed.") 
     cursor = connection.cursor()
     try:
         query = "UPDATE users SET role = %s WHERE id = %s"
@@ -393,43 +413,28 @@ def change_user_role_function(user_id, new_role):
 
 def create_buyback_record(product_article, price, payment_type, user_id, store_id):
     logger.debug(f"Creating buyback record for article: {product_article}, price: {price}, user_id: {user_id}")
-    # This function creates its own connection, which is fine for a self-contained operation
-    # It calls the standalone update_product_quantity
     connection = create_connection()
     if not connection: return None
     cursor = connection.cursor()
     buyback_id = None
     try:
+        # For atomicity, buyback insert and quantity update should be one transaction
+        connection.start_transaction()
         query = """
         INSERT INTO buybacks (product_article, buyback_price, payment_type, user_id, store_id, buyback_date)
         VALUES (%s, %s, %s, %s, %s, NOW())
         """
         cursor.execute(query, (product_article, price, payment_type, user_id, store_id))
         buyback_id = cursor.lastrowid
-        connection.commit() # Commit buyback record first
+        
+        _update_product_quantity_with_cursor(cursor, product_article, 1) # Increase quantity
 
-        # Then update quantity in a separate transaction (as per standalone update_product_quantity)
-        if not update_product_quantity(product_article, 1): # Increase quantity
-            logger.error(f"Failed to update quantity for buyback of {product_article}. Buyback record {buyback_id} created, but quantity update failed.")
-            # This is a critical state - buyback recorded, stock not updated.
-            # Manual intervention or a compensating transaction might be needed.
-            # For now, we log the error. Ideally, this whole operation should be one transaction.
-            # To make it one transaction, update_product_quantity would need to accept a cursor.
-            # Let's assume for now, this two-step process is acceptable for buyback/return/tradein.
-            # A better approach would be:
-            # connection.start_transaction()
-            # ... insert buyback ...
-            # _update_product_quantity_with_cursor(cursor, product_article, 1)
-            # connection.commit()
-            # ...
-            # But this means all these create_..._record functions need to manage transactions carefully.
-            # The standalone `update_product_quantity` handles its own transaction.
-
-        logger.info(f"Buyback record created with ID: {buyback_id} for article {product_article}")
-    except Error as e:
-        logger.error(f"Error creating buyback record for {product_article}: {e}")
-        if connection.is_connected(): connection.rollback() # Rollback only the insert if commit wasn't reached
-        buyback_id = None # Ensure it's None on error
+        connection.commit()
+        logger.info(f"Buyback record created with ID: {buyback_id} and stock updated for article {product_article}")
+    except (Error, ValueError) as e:
+        logger.error(f"Error during buyback transaction for {product_article}: {e}")
+        if connection.is_connected(): connection.rollback() 
+        buyback_id = None 
     finally:
         if connection.is_connected():
             cursor.close()
@@ -444,21 +449,20 @@ def create_return_record(sale_id, product_article, return_price, payment_type, u
     cursor = connection.cursor()
     return_id = None
     try:
+        connection.start_transaction()
         query = """
         INSERT INTO returns (original_sale_id, product_article, return_price, payment_type, user_id, store_id, return_date)
         VALUES (%s, %s, %s, %s, %s, %s, NOW())
         """
         cursor.execute(query, (sale_id, product_article, return_price, payment_type, user_id, store_id))
         return_id = cursor.lastrowid
-        connection.commit() # Commit return record
-
-        if not update_product_quantity(product_article, 1): # Increase stock
-            logger.error(f"Failed to update quantity for return of {product_article}. Return record {return_id} created, but quantity update failed.")
-            # Similar critical state as in buyback.
-
-        logger.info(f"Return record created with ID: {return_id} for product {product_article} from sale {sale_id}")
-    except Error as e:
-        logger.error(f"Error creating return record for {product_article}: {e}")
+        
+        _update_product_quantity_with_cursor(cursor, product_article, 1) # Increase stock
+            
+        connection.commit()
+        logger.info(f"Return record created with ID: {return_id} and stock updated for product {product_article} from sale {sale_id}")
+    except (Error, ValueError) as e:
+        logger.error(f"Error during return transaction for {product_article}: {e}")
         if connection.is_connected(): connection.rollback()
         return_id = None
     finally:
@@ -474,30 +478,21 @@ def create_trade_in_record(old_product_article, new_product_article, price_diffe
     cursor = connection.cursor()
     trade_in_id = None
     try:
+        connection.start_transaction()
         query = """
         INSERT INTO trade_ins (old_product_article, new_product_article, price_difference, payment_type_difference, user_id, store_id, trade_in_date)
         VALUES (%s, %s, %s, %s, %s, %s, NOW())
         """
         cursor.execute(query, (old_product_article, new_product_article, price_difference, payment_type_difference, user_id, store_id))
         trade_in_id = cursor.lastrowid
-        connection.commit() # Commit trade-in record
 
-        qty_updated_old = update_product_quantity(old_product_article, 1) # Increase stock for old
-        if not qty_updated_old:
-            logger.error(f"Failed to update quantity for trade-in (old item: {old_product_article}). Trade-in {trade_in_id} recorded.")
-        
-        qty_updated_new = update_product_quantity(new_product_article, -1) # Decrease stock for new
-        if not qty_updated_new:
-            logger.error(f"Failed to update quantity for trade-in (new item: {new_product_article}). Trade-in {trade_in_id} recorded.")
-            # If old item update succeeded but new one failed, this is inconsistent.
-
-        if qty_updated_old and qty_updated_new:
-            logger.info(f"Trade-in record created with ID: {trade_in_id} and stock updated.")
-        else:
-            logger.warning(f"Trade-in record {trade_in_id} created, but one or both stock updates failed.")
-
-    except Error as e:
-        logger.error(f"Error creating trade-in record: {e}")
+        _update_product_quantity_with_cursor(cursor, old_product_article, 1) # Increase stock for old
+        _update_product_quantity_with_cursor(cursor, new_product_article, -1) # Decrease stock for new
+            
+        connection.commit()
+        logger.info(f"Trade-in record created with ID: {trade_in_id} and stock updated.")
+    except (Error, ValueError) as e:
+        logger.error(f"Error during trade-in transaction (old: {old_product_article}, new: {new_product_article}): {e}")
         if connection.is_connected(): connection.rollback()
         trade_in_id = None
     finally:
