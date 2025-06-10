@@ -36,9 +36,9 @@ def get_user_by_phone(phone_number):
         if result:
             # Извлекаем имена столбцов из cursor.description
             columns = [desc[0] for desc in cursor.description]
-            user_data = dict(zip(columns, result))  # Преобразуем результат в словарь
-            logger.debug(f"Результат запроса для {phone_number}: {user_data}")
-            return user_data  # Возвращаем словарь
+            user_data_dict = dict(zip(columns, result))  # Преобразуем результат в словарь
+            logger.debug(f"Результат запроса для {phone_number}: {user_data_dict}")
+            return user_data_dict  # Возвращаем словарь
         else:
             logger.debug(f"Пользователь с телефоном {phone_number} не найден.")
             return None
@@ -46,63 +46,71 @@ def get_user_by_phone(phone_number):
         logger.exception("Error executing get_user_by_phone query.")
         return None
     finally:
-        cursor.close()
-        connection.close()
-        logger.debug("Database connection closed.")
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+            logger.debug("Database connection closed.")
 
 def get_all_users():
     connection = create_connection()
-    cursor = connection.cursor()
+    cursor = connection.cursor(dictionary=True) # Use dictionary cursor for easier access
     try:
-        query = "SELECT phone_number, name, role FROM users WHERE is_active = 1"
+        query = "SELECT id, phone_number, name, role FROM users WHERE is_active = 1"
         cursor.execute(query)
-        result = cursor.fetchall()
-        users = [{"id": row[0], "name": row[1], "role": row[2]} for row in result]
-        return users
+        users = cursor.fetchall()
+        return users # Returns a list of dictionaries
     finally:
-        cursor.close()
-        connection.close()
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
 
 # Get a product by its article number
 def get_product_by_article(article_number):
     logger.debug(f"Fetching product with article number: {article_number}")
     connection = create_connection()
     cursor = connection.cursor(buffered=True)
+    product = None
     try:
         logger.debug(f"Выполнение запроса для поиска продукта с артикулом: {article_number}")
-        query = "SELECT * FROM products WHERE article_number LIKE %s"
+        query = "SELECT * FROM products WHERE article_number = %s" # Changed LIKE to =
         cursor.execute(query, (article_number,))
         logger.debug(f"Query executed: {query} with article_number={article_number}")
         result = cursor.fetchone()
         
         if result:
-            columns = ["id", "store_id", "article_number", "metal_type", "product_type", "model", "weight", "price_per_gram", "price", "min_price", "arrival_date", "quantity", "manufacturer", "commentaries"]
+            columns = [desc[0] for desc in cursor.description] # Get column names
             product = dict(zip(columns, result))
             logger.info(f"Продукт найден: {product}")
-            return product
         else:
             logger.warning(f"Продукт с артикулом {article_number} не найден.")
-            return None
     except Exception as e:
         logger.exception("Ошибка при выполнении запроса к базе данных.")
-        return None
     finally:
-        cursor.close()
-        connection.close()
-        logger.debug("Database connection closed.")
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+            logger.debug("Database connection closed.")
+    return product
+
 
 # Get a store by its ID
 def get_store_by_id(store_id):
     logger.debug(f"Fetching store with ID: {store_id}")
     connection = create_connection()
     cursor = connection.cursor()
+    store = None
     query = "SELECT * FROM stores WHERE id = %s"
-    cursor.execute(query, (store_id,))
-    logger.debug(f"Query executed: {query} with store_id={store_id}")
-    store = cursor.fetchone()
-    cursor.close()
-    connection.close()
-    logger.debug("Database connection closed.")
+    try:
+        cursor.execute(query, (store_id,))
+        logger.debug(f"Query executed: {query} with store_id={store_id}")
+        store = cursor.fetchone()
+    except Error as e:
+        logger.error(f"Error fetching store by ID: {e}")
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+            logger.debug("Database connection closed.")
     return store
 
 # Record sale
@@ -115,32 +123,58 @@ def record_sale(product_id, store_id, user_id, sale_price, payment_type):
         VALUES (%s, %s, %s, NOW(), %s, %s)"""
         cursor.execute(insert_query, (product_id, store_id, user_id, sale_price, payment_type))
         logger.debug(f"Insert query executed: {insert_query} with values ({product_id}, {store_id}, {user_id}, {sale_price}, {payment_type})")
-        update_query = """UPDATE products SET quantity = quantity - 1 WHERE id = %s"""
-        cursor.execute(update_query, (product_id,))
-        logger.debug(f"Update query executed: {update_query} with product_id={product_id}")
+        
+        product = get_product_by_article(get_product_article_by_id(product_id)) # Need to get article to update quantity
+        if product:
+             update_product_quantity(product['article_number'], -1) # Decrease quantity by 1
+
         connection.commit()
     except Exception as e:
         logger.exception("Ошибка при записи продажи в базу данных.")
+        if connection:
+            connection.rollback()
     finally:
-        cursor.close()
-        connection.close()
-        logger.debug("Database connection closed.")
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+            logger.debug("Database connection closed.")
 
-# Get the minimum price of a product
-def get_min_price(product):
-    logger.debug(f"Fetching minimum price for product: {product}")
+def get_product_article_by_id(product_id):
     connection = create_connection()
     cursor = connection.cursor()
-    query = "SELECT min_price FROM products WHERE id = %s"
-    cursor.execute(query, (product[0],))
-    logger.debug(f"Query executed: {query} with product_id={product[0]}")
+    article = None
+    try:
+        query = "SELECT article_number FROM products WHERE id = %s"
+        cursor.execute(query, (product_id,))
+        result = cursor.fetchone()
+        if result:
+            article = result[0]
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+    return article
+
+# Get the minimum price of a product
+def get_min_price(product_article): # Changed to accept article
+    logger.debug(f"Fetching minimum price for product article: {product_article}")
+    connection = create_connection()
+    cursor = connection.cursor()
     min_price = None
-    result = cursor.fetchone()
-    if result:
-        min_price = result[0]
-    cursor.close()
-    connection.close()
-    logger.debug("Database connection closed.")
+    try:
+        query = "SELECT min_price FROM products WHERE article_number = %s"
+        cursor.execute(query, (product_article,))
+        logger.debug(f"Query executed: {query} with product_article={product_article}")
+        result = cursor.fetchone()
+        if result:
+            min_price = result[0]
+    except Error as e:
+        logger.error(f"Error fetching min price: {e}")
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+            logger.debug("Database connection closed.")
     return min_price
 
 # Get report
@@ -148,44 +182,31 @@ def generate_report(start_date, end_date):
     logger.debug(f"Generating report from {start_date} to {end_date}")
     connection = create_connection()
     cursor = connection.cursor()
+    report_data = []
     try:
-        query = f"""
-                SELECT products.product_type, users.name, stores.name, sales.sold_price, sales.sale_date, sales.payment_type
-                FROM sales
-                JOIN products ON sales.product_id = products.id
-                JOIN users ON sales.user_id = users.id
-                JOIN stores ON sales.store_id = stores.id
-                WHERE sales.sale_date BETWEEN '{start_date}' AND '{end_date}'
-                GROUP BY sales.sale_date, sales.product_id, sales.user_id, sales.sold_price, products.product_type, users.name, sales.payment_type;
-                """
+        query = """
+                SELECT p.product_type, p.model, u.name as user_name, st.name as store_name, s.sold_price, s.sale_date, s.payment_type
+                FROM sales s
+                JOIN products p ON s.product_id = p.id
+                JOIN users u ON s.user_id = u.id
+                JOIN stores st ON s.store_id = st.id
+                WHERE s.sale_date BETWEEN %s AND %s
+                GROUP BY s.id, p.product_type, p.model, u.name, st.name, s.sold_price, s.sale_date, s.payment_type;
+                """ # Added aliases and GROUP BY s.id for distinct sales
         logger.debug(f"Executing report query: {query}")
-        cursor.execute(query)
-        report_data = cursor.fetchall()
+        cursor.execute(query, (start_date, end_date))
+        report_data = cursor.fetchall() # Assuming default tuple rows
+        # If dictionary cursor is preferred for reports:
+        # report_data = [dict(zip([col[0] for col in cursor.description], row)) for row in cursor.fetchall()]
         logger.debug(f"Report data retrieved: {report_data}")
-        return report_data
     except Exception as e:
         logger.exception("Error generating report.")
-        return []
     finally:
-        cursor.close()
-        connection.close()
-        logger.debug("Database connection closed after generating report.")
-
-# Update User
-# #def update_user(user_id, role):
-#     connection = create_connection()
-#     cursor = connection.cursor()
-#        query = f"""
-#           UPDATE `users` SET
-#           `store_id` = '%s',
-#           `phone_number` = '%s',
-#           `role` = %s,
-#           `name` = '%s'
-#           WHERE `id` = '%s';
-#           """
-#         cursor.execute(query)
-#         cursor.close()
-#         connection.close()
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+            logger.debug("Database connection closed after generating report.")
+    return report_data
 
 
 # Функция для добавления пользователя в базу данных
@@ -193,122 +214,64 @@ def add_user_to_db(phone_number, role, name):
     logger.debug(f"Adding user to database with phone_number: {phone_number}, role: {role}, name: {name}")
     connection = create_connection()
     cursor = connection.cursor()
+    message = ""
+    try:
+        select_query = "SELECT id, is_active FROM users WHERE phone_number = %s"
+        cursor.execute(select_query, (phone_number,))
+        result = cursor.fetchone()
 
-    # Проверка, существует ли пользователь с таким номером телефона
-    select_query = "SELECT id, is_active FROM users WHERE phone_number = %s"
-    cursor.execute(select_query, (phone_number,))
-    logger.debug(f"Select query executed: {select_query} with phone_number={phone_number}")
-    result = cursor.fetchone()
-
-    if result:
-        user_id, is_active = result
-        if is_active == 0:
-            # Если пользователь существует, но неактивен, активируем его
-            update_query = "UPDATE users SET is_active = 1, role = %s, name = %s WHERE id = %s"
-            cursor.execute(update_query, (role, name, user_id))
-            logger.debug(f"Update query executed: {update_query} with values ({role}, {name}, {user_id})")
-            connection.commit()
-            cursor.close()
-            connection.close()
-            logger.debug("Database connection closed.")
-            return "Пользователь активирован повторно."
+        if result:
+            user_id, is_active = result
+            if is_active == 0:
+                update_query = "UPDATE users SET is_active = 1, role = %s, name = %s WHERE id = %s"
+                cursor.execute(update_query, (role, name, user_id))
+                message = "Пользователь активирован повторно."
+            else:
+                message = "Пользователь уже существует и активен."
         else:
+            insert_query = "INSERT INTO users (phone_number, role, name, is_active) VALUES (%s, %s, %s, 1)"
+            cursor.execute(insert_query, (phone_number, role, name))
+            message = "Пользователь добавлен успешно."
+        connection.commit()
+    except Error as e:
+        logger.error(f"Database error in add_user_to_db: {e}")
+        if connection: connection.rollback()
+        message = "Ошибка при работе с базой данных."
+    finally:
+        if connection and connection.is_connected():
             cursor.close()
             connection.close()
             logger.debug("Database connection closed.")
-            return "Пользователь уже существует и активен."
-    else:
-        # Добавление нового пользователя, если он не существует
-        insert_query = "INSERT INTO users (phone_number, role, name, is_active) VALUES (%s, %s, %s, 1)"
-        cursor.execute(insert_query, (phone_number, role, name))
-        logger.debug(f"Insert query executed: {insert_query} with values ({phone_number}, {role}, {name})")
-        connection.commit()
-        cursor.close()
-        connection.close()
-        logger.debug("Database connection closed.")
-        return "Пользователь добавлен успешно."
+    return message
 
 # Функция для удаления пользователя из базы данных
 def deactivate_user_in_db(phone_number):
     logger.debug(f"Deactivating user with phone_number: {phone_number}")
     connection = create_connection()
     cursor = connection.cursor()
+    response = ""
+    try:
+        select_query = "SELECT id FROM users WHERE phone_number = %s AND is_active = 1"
+        cursor.execute(select_query, (phone_number,))
+        result = cursor.fetchone()
 
-    # Проверка, существует ли пользователь с таким номером телефона
-    select_query = "SELECT id FROM users WHERE phone_number = %s AND is_active = 1"
-    cursor.execute(select_query, (phone_number,))
-    logger.debug(f"Select query executed: {select_query} with phone_number={phone_number}")
-    result = cursor.fetchone()
-
-    if result:
-        # Деактивация пользователя
-        update_query = "UPDATE users SET is_active = 0 WHERE phone_number = %s"
-        cursor.execute(update_query, (phone_number,))
-        logger.debug(f"Update query executed: {update_query} with phone_number={phone_number}")
-        connection.commit()
-        response = "Пользователь деактивирован."
-    else:
-        response = "Пользователь не найден или уже деактивирован."
-
-    cursor.close()
-    connection.close()
-    logger.debug("Database connection closed.")
+        if result:
+            update_query = "UPDATE users SET is_active = 0 WHERE phone_number = %s"
+            cursor.execute(update_query, (phone_number,))
+            connection.commit()
+            response = "Пользователь деактивирован."
+        else:
+            response = "Пользователь не найден или уже деактивирован."
+    except Error as e:
+        logger.error(f"Database error in deactivate_user_in_db: {e}")
+        if connection: connection.rollback()
+        response = "Ошибка при работе с базой данных."
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+            logger.debug("Database connection closed.")
     return response
-
-def get_deactivated_users():
-    logger.debug("Fetching deactivated users.")
-    connection = create_connection()
-    cursor = connection.cursor()
-    try:
-        # Получаем список пользователей, у которых is_active = 0
-        query = "SELECT id FROM users WHERE is_active = 0"
-        cursor.execute(query)
-        logger.debug(f"Query executed: {query}")
-        result = cursor.fetchall()
-        return [row[0] for row in result]  # Возвращаем список ID деактивированных пользователей
-    finally:
-        cursor.close()
-        connection.close()
-        logger.debug("Database connection closed.")
-
-def check_role_changes():
-    logger.debug("Checking for role changes.")
-    connection = create_connection()
-    cursor = connection.cursor()
-    try:
-        # Запрашиваем текущие данные пользователей
-        query = "SELECT id, role FROM users"
-        cursor.execute(query)
-        logger.debug(f"Query executed: {query}")
-        current_roles = {row[0]: row[1] for row in cursor.fetchall()}  # Формат: {id: role}
-
-        # Проверяем изменения в ролях
-        global role_cache
-        for user_id, current_role in current_roles.items():
-            if user_id in role_cache:
-                # Если роль изменилась, обновляем user_data
-                if role_cache[user_id] != current_role:
-                    role_cache[user_id] = current_role
-                    for chat_id, user in user_data.items():
-                        if user['id'] == user_id:
-                            user['role'] = current_role
-                            bot.send_message(
-                                chat_id,
-                                f"Ваша роль была изменена на '{current_role}'."
-                            )
-            else:
-                # Если пользователь новый, добавляем в кэш
-                role_cache[user_id] = current_role
-
-        # Удаляем пользователей из кэша, которых больше нет в базе
-        for user_id in list(role_cache.keys()):
-            if user_id not in current_roles:
-                del role_cache[user_id]
-
-    finally:
-        cursor.close()
-        connection.close()
-        logger.debug("Database connection closed.")
 
 # Define change_user_role_function
 def change_user_role_function(user_id, new_role):
@@ -318,14 +281,218 @@ def change_user_role_function(user_id, new_role):
     try:
         query = "UPDATE users SET role = %s WHERE id = %s"
         cursor.execute(query, (new_role, user_id))
-        logger.debug(f"Query executed: {query} with values ({new_role}, {user_id})")
         connection.commit()
         logger.info(f"User ID {user_id} role updated to {new_role}.")
     except Exception as e:
         logger.exception("Ошибка при изменении роли пользователя.")
-        raise e
+        if connection: connection.rollback()
+        raise e # Re-raise after logging and rollback
     finally:
-        cursor.close()
-        connection.close()
-        logger.debug("Database connection closed.")
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+            logger.debug("Database connection closed.")
 
+# --- Functions for Buyback, Return, Trade-in ---
+
+def update_product_quantity(product_article, quantity_change):
+    logger.debug(f"Updating quantity for product article: {product_article} by {quantity_change}")
+    connection = create_connection()
+    cursor = connection.cursor()
+    success = False
+    try:
+        # Check current quantity to prevent negative stock if decreasing
+        if quantity_change < 0:
+            cursor.execute("SELECT quantity FROM products WHERE article_number = %s", (product_article,))
+            current_quantity = cursor.fetchone()
+            if current_quantity and current_quantity[0] < abs(quantity_change):
+                logger.warning(f"Not enough stock for {product_article} to decrease by {abs(quantity_change)}. Current: {current_quantity[0]}")
+                return False # Or raise an error
+
+        query = "UPDATE products SET quantity = quantity + %s WHERE article_number = %s"
+        cursor.execute(query, (quantity_change, product_article))
+        connection.commit()
+        logger.info(f"Product {product_article} quantity updated by {quantity_change}. Rows affected: {cursor.rowcount}")
+        success = cursor.rowcount > 0
+    except Error as e:
+        logger.error(f"Error updating product quantity for {product_article}: {e}")
+        if connection: connection.rollback()
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+    return success
+
+def create_buyback_record(product_article, price, payment_type, user_id, store_id):
+    logger.debug(f"Creating buyback record for article: {product_article}, price: {price}, user_id: {user_id}")
+    connection = create_connection()
+    cursor = connection.cursor()
+    buyback_id = None
+    try:
+        # Assuming a 'buybacks' table: id, product_article, buyback_price, payment_type, buyback_date, user_id, store_id
+        # And that product_article is a foreign key or just the article string
+        query = """
+        INSERT INTO buybacks (product_article, buyback_price, payment_type, user_id, store_id, buyback_date)
+        VALUES (%s, %s, %s, %s, %s, NOW())
+        """
+        cursor.execute(query, (product_article, price, payment_type, user_id, store_id))
+        buyback_id = cursor.lastrowid
+        
+        # Increase product quantity
+        if not update_product_quantity(product_article, 1):
+            logger.error(f"Failed to update quantity for buyback of {product_article}. Rolling back buyback record.")
+            connection.rollback()
+            return None
+
+        connection.commit()
+        logger.info(f"Buyback record created with ID: {buyback_id} for article {product_article}")
+    except Error as e:
+        logger.error(f"Error creating buyback record for {product_article}: {e}")
+        if connection: connection.rollback()
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+    return buyback_id
+
+def get_sale_and_product_details_by_sale_id(sale_id):
+    logger.debug(f"Fetching sale and product details for sale_id: {sale_id}")
+    connection = create_connection()
+    cursor = connection.cursor(dictionary=True) # Use dictionary cursor
+    details = None
+    try:
+        # Assuming sales.id is the order_id
+        query = """
+        SELECT s.id as sale_id, s.sold_price, s.payment_type as sale_payment_type, s.sale_date,
+               p.id as product_id, p.article_number, p.model as product_model, p.product_type
+        FROM sales s
+        JOIN products p ON s.product_id = p.id
+        WHERE s.id = %s
+        """
+        cursor.execute(query, (sale_id,))
+        details = cursor.fetchone()
+        if details:
+            logger.info(f"Sale and product details found for sale_id {sale_id}: {details}")
+        else:
+            logger.warning(f"No sale found with sale_id {sale_id}")
+    except Error as e:
+        logger.error(f"Error fetching sale details for sale_id {sale_id}: {e}")
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+    return details
+
+def create_return_record(sale_id, product_article, return_price, payment_type, user_id, store_id):
+    logger.debug(f"Creating return record for sale_id: {sale_id}, product_article: {product_article}, price: {return_price}")
+    connection = create_connection()
+    cursor = connection.cursor()
+    return_id = None
+    try:
+        # Assuming a 'returns' table: id, original_sale_id, product_article, return_price, payment_type, return_date, user_id, store_id
+        query = """
+        INSERT INTO returns (original_sale_id, product_article, return_price, payment_type, user_id, store_id, return_date)
+        VALUES (%s, %s, %s, %s, %s, %s, NOW())
+        """
+        cursor.execute(query, (sale_id, product_article, return_price, payment_type, user_id, store_id))
+        return_id = cursor.lastrowid
+
+        if not update_product_quantity(product_article, 1): # Increase stock
+            logger.error(f"Failed to update quantity for return of {product_article}. Rolling back return record.")
+            connection.rollback()
+            return None
+            
+        connection.commit()
+        logger.info(f"Return record created with ID: {return_id} for product {product_article} from sale {sale_id}")
+    except Error as e:
+        logger.error(f"Error creating return record for {product_article}: {e}")
+        if connection: connection.rollback()
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+    return return_id
+
+def create_trade_in_record(old_product_article, new_product_article, price_difference, payment_type_difference, user_id, store_id):
+    logger.debug(f"Creating trade-in: old {old_product_article}, new {new_product_article}, diff {price_difference}")
+    connection = create_connection()
+    cursor = connection.cursor()
+    trade_in_id = None
+    try:
+        # Assuming 'trade_ins' table: id, old_product_article, new_product_article, price_difference, payment_type_difference, trade_in_date, user_id, store_id
+        query = """
+        INSERT INTO trade_ins (old_product_article, new_product_article, price_difference, payment_type_difference, user_id, store_id, trade_in_date)
+        VALUES (%s, %s, %s, %s, %s, %s, NOW())
+        """
+        cursor.execute(query, (old_product_article, new_product_article, price_difference, payment_type_difference, user_id, store_id))
+        trade_in_id = cursor.lastrowid
+
+        # Update stock for old product (returned)
+        if not update_product_quantity(old_product_article, 1):
+             logger.error(f"Failed to update quantity for trade-in (old item: {old_product_article}). Rolling back trade-in.")
+             connection.rollback()
+             return None
+        # Update stock for new product (sold)
+        if not update_product_quantity(new_product_article, -1):
+            logger.error(f"Failed to update quantity for trade-in (new item: {new_product_article}). Rolling back trade-in and old item stock.")
+            # Attempt to roll back the first stock update if possible, or handle inconsistency
+            update_product_quantity(old_product_article, -1) # Revert old product stock
+            connection.rollback()
+            return None
+            
+        connection.commit()
+        logger.info(f"Trade-in record created with ID: {trade_in_id}")
+    except Error as e:
+        logger.error(f"Error creating trade-in record: {e}")
+        if connection: connection.rollback()
+        # Potentially revert stock changes if partially successful before error
+        # This part can be complex to make fully atomic without 2PC
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+    return trade_in_id
+
+# Ensure tables 'buybacks', 'returns', 'trade_ins' exist in your DB with appropriate columns.
+# Example DDL (adjust as needed):
+"""
+CREATE TABLE IF NOT EXISTS buybacks (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    product_article VARCHAR(255) NOT NULL,
+    buyback_price DECIMAL(10, 2) NOT NULL,
+    payment_type VARCHAR(50),
+    user_id INT,
+    store_id INT,
+    buyback_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (store_id) REFERENCES stores(id)
+    -- FOREIGN KEY (product_article) REFERENCES products(article_number) -- If articles are unique and you want FK constraint
+);
+
+CREATE TABLE IF NOT EXISTS returns (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    original_sale_id INT NOT NULL,
+    product_article VARCHAR(255) NOT NULL,
+    return_price DECIMAL(10, 2) NOT NULL,
+    payment_type VARCHAR(50),
+    user_id INT,
+    store_id INT,
+    return_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (original_sale_id) REFERENCES sales(id),
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (store_id) REFERENCES stores(id)
+);
+
+CREATE TABLE IF NOT EXISTS trade_ins (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    old_product_article VARCHAR(255) NOT NULL,
+    new_product_article VARCHAR(255) NOT NULL,
+    price_difference DECIMAL(10, 2) NOT NULL, -- Positive if customer pays, negative if bot pays
+    payment_type_difference VARCHAR(50), -- How the difference was settled
+    user_id INT,
+    store_id INT,
+    trade_in_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (store_id) REFERENCES stores(id)
+);
+"""
