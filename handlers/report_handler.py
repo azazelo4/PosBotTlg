@@ -6,6 +6,7 @@ import logging
 import openpyxl
 from database import generate_report
 from buttons import create_cancel_markup, create_cash_operations_buttons 
+import mysql.connector # Ensure this import is available for Decimal handling
 
 logger = logging.getLogger(__name__)
 
