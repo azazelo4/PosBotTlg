@@ -1,12 +1,18 @@
 from telebot import types
+<<<<<<< HEAD
 from database import add_user_to_db, deactivate_user_in_db, update_user_phone, get_user_by_phone
 import logging
 import re # Для нормализации номера
+=======
+from database import add_user_to_db, deactivate_user_in_db, update_user_phone, get_user_by_phone # get_user_by_phone needed
+import logging
+>>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
 from state import user_state as global_main_user_state, user_data as global_main_user_data 
 from buttons import create_staff_management_buttons, create_cancel_markup
 
 logger = logging.getLogger(__name__)
 
+<<<<<<< HEAD
 # Состояния FSM для User Management
 UM_STATE_AWAITING_ADD_USER_DETAILS_OR_CONTACT = "UM_AWAITING_ADD_USER_DETAILS_OR_CONTACT" # Объединяем состояния
 UM_STATE_AWAITING_ROLE_FOR_CONTACT_USER = "UM_AWAITING_ROLE_FOR_CONTACT_USER"
@@ -66,6 +72,12 @@ def normalize_phone_number(phone_str: str) -> str | None:
     logger.warning(f"Не удалось нормализовать номер: {phone_str} -> {cleaned_phone}")
     return None
 
+=======
+UM_STATE_AWAITING_ADD_USER_DETAILS = "UM_AWAITING_ADD_USER_DETAILS"
+# UM_STATE_AWAITING_DELETE_USER_PHONE is removed as "Удалить пользователя" button is removed
+UM_STATE_AWAITING_NEW_PHONE_FOR_USER = "UM_AWAITING_NEW_PHONE_FOR_USER"
+# UM_STATE_AWAITING_DEACTIVATE_CONFIRMATION for inline deactivation confirm
+>>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
 
 class UserManagement:
     def __init__(self, bot_instance, global_user_data_ref, get_users_func, change_role_func):
@@ -84,6 +96,7 @@ class UserManagement:
         def add_user_prompt_handler(message):
             chat_id = message.chat.id
             self.logger.info(f"Chat {chat_id}: Admin initiated 'Добавить пользователя'.")
+<<<<<<< HEAD
             global_main_user_state[chat_id] = UM_STATE_AWAITING_ADD_USER_DETAILS_OR_CONTACT
             admin_store_id = self.global_user_data.get(chat_id, {}).get('store_id')
             self.current_operation_data[chat_id] = {'admin_store_id': admin_store_id}
@@ -213,6 +226,59 @@ class UserManagement:
                 global_main_user_state.pop(chat_id, None) 
                 if user_id_being_edited:
                     self.bot.delete_message(chat_id, message.message_id) 
+=======
+            global_main_user_state[chat_id] = UM_STATE_AWAITING_ADD_USER_DETAILS
+            # Assuming admin adding user implies user is for their store_id
+            admin_store_id = self.global_user_data.get(chat_id, {}).get('store_id')
+            self.current_operation_data[chat_id] = {'admin_store_id': admin_store_id} # Store admin's store_id
+            self.bot.send_message(chat_id, "Введите данные нового пользователя (Имя Фамилия, +7XXXXXXXXXX, Роль (admin/cashier/manager)):", reply_markup=create_cancel_markup())
+
+        @self.bot.message_handler(func=lambda message: global_main_user_state.get(message.chat.id) == UM_STATE_AWAITING_ADD_USER_DETAILS)
+        def process_add_user_data_handler(message):
+            chat_id = message.chat.id; text = message.text.strip()
+            if text == "Отмена": self.cancel_um_operation_and_return_to_staff_menu(chat_id, "Добавление отменено."); return
+            try:
+                parts = text.split(",", 2) # Expect 3 parts now: Name, Phone, Role
+                if len(parts) != 3: 
+                    self.bot.send_message(chat_id, "Формат: Имя Фамилия, +7XXXXXXXXXX, Роль.", reply_markup=create_cancel_markup()); return
+                
+                name_surname, phone, role_text = parts[0].strip(), parts[1].strip(), parts[2].strip().lower()
+
+                if not (phone.startswith("+7") and len(phone) == 12 and phone[1:].isdigit()):
+                    self.bot.send_message(chat_id, "Телефон: +7XXXXXXXXXX.", reply_markup=create_cancel_markup()); return
+                if role_text not in ['admin', 'cashier', 'manager']:
+                    self.bot.send_message(chat_id, "Роль: admin, cashier или manager.", reply_markup=create_cancel_markup()); return
+
+                admin_store_id = self.current_operation_data.get(chat_id, {}).get('admin_store_id', 1) # Default to 1 if not found
+                
+                response_msg = add_user_to_db(phone, role_text, name_surname, admin_store_id) # Pass store_id
+                self.bot.send_message(chat_id, response_msg)
+                self.finish_um_operation_and_return_to_staff_menu(chat_id)
+            except Exception as e: 
+                self.logger.exception(f"Chat {chat_id}: Error adding user.")
+                self.bot.send_message(chat_id, f"Ошибка добавления: {e}")
+                self.finish_um_operation_and_return_to_staff_menu(chat_id)
+        
+        # Removed "Удалить пользователя" by phone handler as button is removed.
+        # Deactivation is now through "Права" -> select user -> "Деактивировать".
+
+        @self.bot.message_handler(func=lambda message: global_main_user_state.get(message.chat.id) == UM_STATE_AWAITING_NEW_PHONE_FOR_USER)
+        def process_new_phone_input(message: types.Message):
+            chat_id = message.chat.id
+            new_phone_text = message.text.strip()
+            operation_data = self.current_operation_data.get(chat_id, {})
+            user_id_being_edited = operation_data.get('user_id_to_edit')
+            original_inline_message_id = operation_data.get('inline_message_id')
+
+
+            if new_phone_text == "Отмена":
+                global_main_user_state.pop(chat_id, None) # Clear current state
+                if user_id_being_edited and original_inline_message_id:
+                    # Re-send the action menu for the user by editing the original message
+                    # This requires storing and retrieving the original_inline_message_id correctly.
+                    # For simplicity, we might just send a new action menu or go back to user list.
+                    self.bot.delete_message(chat_id, message.message_id) # Delete "Отмена" message
+>>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
                     self._send_user_action_menu_as_new(chat_id, user_id_being_edited, "Изменение телефона отменено.")
                 else:
                     self.cancel_um_operation_and_return_to_staff_menu(chat_id, "Операция отменена.")
@@ -228,14 +294,23 @@ class UserManagement:
                 self.cancel_um_operation_and_return_to_staff_menu(chat_id, "Произошла ошибка, операция отменена.")
                 return
             
+<<<<<<< HEAD
             success, db_message = update_user_phone(user_id_being_edited, normalized_new_phone) # Передаем нормализованный номер
             self.bot.send_message(chat_id, db_message, reply_markup=create_staff_management_buttons()) 
+=======
+            success, db_message = update_user_phone(user_id_being_edited, new_phone_text)
+            self.bot.send_message(chat_id, db_message, reply_markup=create_staff_management_buttons()) # ReplyMarkup to remove "Отмена"
+>>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
             self.finish_um_operation_and_return_to_staff_menu(chat_id)
 
 
     def handle_role_management(self, chat_id): 
         self.logger.debug(f"UserManagement instance handling 'Права' for chat_id: {chat_id}")
+<<<<<<< HEAD
         global_main_user_state[chat_id] = 'USER_MANAGEMENT_USER_LIST' 
+=======
+        global_main_user_state[chat_id] = 'USER_MANAGEMENT_USER_LIST' # New state for user list
+>>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
         self.current_operation_data.pop(chat_id, None) 
 
         try:
@@ -251,7 +326,11 @@ class UserManagement:
                 keyboard.add(types.InlineKeyboardButton(text=button_text, callback_data=callback_data))
             keyboard.add(types.InlineKeyboardButton(text="Отмена (в меню персонала)", callback_data="um_cancel_inline_to_staff_menu"))
             sent_message = self.bot.send_message(chat_id, "Выберите пользователя для управления:", reply_markup=keyboard)
+<<<<<<< HEAD
             self.current_operation_data[chat_id] = {'inline_message_id': sent_message.message_id} 
+=======
+            self.current_operation_data[chat_id] = {'inline_message_id': sent_message.message_id} # Store message ID to edit later
+>>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
         except Exception as e:
             self.logger.exception(f"Error in UserManagement.handle_role_management: {e}")
             self.bot.send_message(chat_id, "Ошибка получения списка пользователей.")
@@ -260,6 +339,10 @@ class UserManagement:
     def _send_user_action_menu_as_new(self, chat_id, user_id_to_edit, message_text_intro="Выберите действие:"):
         """Sends the user action menu as a new message."""
         global_main_user_state[chat_id] = 'USER_MANAGEMENT_ACTION_SELECT'
+<<<<<<< HEAD
+=======
+        # Ensure user_id_to_edit is in current_operation_data or add it
+>>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
         if chat_id not in self.current_operation_data: self.current_operation_data[chat_id] = {}
         self.current_operation_data[chat_id]['user_id_to_edit'] = user_id_to_edit
         
@@ -270,7 +353,11 @@ class UserManagement:
         keyboard.add(types.InlineKeyboardButton(text="< Назад (к списку)", callback_data="um_action_back_to_user_list"))
         
         sent_msg = self.bot.send_message(chat_id, message_text_intro, reply_markup=keyboard)
+<<<<<<< HEAD
         self.current_operation_data[chat_id]['inline_message_id'] = sent_msg.message_id
+=======
+        self.current_operation_data[chat_id]['inline_message_id'] = sent_msg.message_id # Store new message_id
+>>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
 
 
     def handle_user_selection_callback(self, call: types.CallbackQuery): 
@@ -285,6 +372,10 @@ class UserManagement:
         
         try:
             user_id_to_edit = call.data.split("_")[-1]
+<<<<<<< HEAD
+=======
+            # Store user_id and original message_id for potential edits or context
+>>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
             self.current_operation_data[chat_id] = {'user_id_to_edit': user_id_to_edit, 'inline_message_id': message_id}
             
             self.bot.delete_message(chat_id, message_id) 
@@ -299,22 +390,37 @@ class UserManagement:
     def handle_user_action_callback(self, call: types.CallbackQuery):
         chat_id = call.message.chat.id
         action_data = call.data
+<<<<<<< HEAD
         message_id = call.message.message_id
+=======
+        message_id = call.message.message_id # This is the ID of the action menu message
+>>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
         self.logger.debug(f"Chat {chat_id}: User action callback: {action_data}")
 
         user_id_to_edit = self.current_operation_data.get(chat_id, {}).get('user_id_to_edit')
         if not user_id_to_edit and not action_data.startswith("um_action_back_to_user_list"):
+<<<<<<< HEAD
              try: user_id_to_edit = action_data.split("_")[-1]
              except IndexError: pass 
+=======
+             try: user_id_to_edit = action_data.split("_")[-1] # Attempt to re-parse if context lost
+             except IndexError: pass # Keep it None if parsing fails
+>>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
         
         if not user_id_to_edit and not action_data.startswith("um_action_back_to_user_list"):
             self.logger.error(f"Chat {chat_id}: Could not determine user_id for action '{action_data}'. current_op_data: {self.current_operation_data.get(chat_id)}")
             self.bot.edit_message_text("Ошибка: пользователь не определен. Операция прервана.", chat_id, message_id, reply_markup=None)
             self.finish_um_operation_and_return_to_staff_menu(chat_id)
+<<<<<<< HEAD
             self.bot.answer_callback_query(call.id, "Ошибка")
             return
         
         self.bot.delete_message(chat_id, message_id) 
+=======
+            return
+        
+        self.bot.delete_message(chat_id, message_id) # Delete the action menu message
+>>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
 
         if action_data.startswith("um_action_changerole_"):
             self._prompt_for_new_role(chat_id, user_id_to_edit)
@@ -323,11 +429,18 @@ class UserManagement:
         elif action_data.startswith("um_action_deactivate_"):
             self._prompt_for_deactivation_confirm(chat_id, user_id_to_edit)
         elif action_data == "um_action_back_to_user_list":
+<<<<<<< HEAD
             self.handle_role_management(chat_id) 
         else:
             self.bot.answer_callback_query(call.id, "Неизвестное действие.")
             self.finish_um_operation_and_return_to_staff_menu(chat_id) # Возврат в меню если действие непонятно
             return # Явно выходим, чтобы не выполнить answer_callback_query еще раз
+=======
+            self.handle_role_management(chat_id) # Re-display user list (sends a new message)
+        else:
+            self.bot.answer_callback_query(call.id, "Неизвестное действие.")
+            self.finish_um_operation_and_return_to_staff_menu(chat_id)
+>>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
         self.bot.answer_callback_query(call.id)
 
 
@@ -336,20 +449,33 @@ class UserManagement:
         self.current_operation_data[chat_id].update({'action': 'change_role', 'user_id_to_edit': user_id_to_edit})
 
         keyboard = types.InlineKeyboardMarkup(row_width=1)
+<<<<<<< HEAD
         roles = ['admin', 'cashier', 'manager']
+=======
+        roles = ['admin', 'cashier', 'manager'] # Added manager
+>>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
         for role in roles:
             keyboard.add(types.InlineKeyboardButton(
                 text=role.capitalize(),
                 callback_data=f"um_setrole_{user_id_to_edit}_{role}" 
             ))
+<<<<<<< HEAD
         keyboard.add(types.InlineKeyboardButton(text="< Назад (к действиям)", callback_data=f"um_select_user_{user_id_to_edit}")) # Используем um_select_user для возврата к меню действий для этого юзера
+=======
+        # Back button should go to the action menu for the *same user*
+        keyboard.add(types.InlineKeyboardButton(text="< Назад (к действиям)", callback_data=f"um_select_user_{user_id_to_edit}"))
+>>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
         sent_msg = self.bot.send_message(chat_id, f"Выберите новую роль для пользователя ID {user_id_to_edit}:", reply_markup=keyboard)
         self.current_operation_data[chat_id]['inline_message_id'] = sent_msg.message_id
 
 
     def handle_set_new_role_callback(self, call: types.CallbackQuery):
         chat_id = call.message.chat.id
+<<<<<<< HEAD
         message_id = call.message.message_id 
+=======
+        message_id = call.message.message_id # message with role options
+>>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
         data_parts = call.data.split("_") 
         user_id_to_change = data_parts[2]
         new_role = data_parts[3]
@@ -364,6 +490,7 @@ class UserManagement:
 
     def _prompt_for_new_phone(self, chat_id, user_id_to_edit):
         global_main_user_state[chat_id] = UM_STATE_AWAITING_NEW_PHONE_FOR_USER
+<<<<<<< HEAD
         # Убедимся, что user_id_to_edit есть в current_operation_data
         if chat_id not in self.current_operation_data: self.current_operation_data[chat_id] = {}
         self.current_operation_data[chat_id].update({'action': 'change_phone', 'user_id_to_edit': user_id_to_edit})
@@ -371,10 +498,21 @@ class UserManagement:
 
     def _prompt_for_deactivation_confirm(self, chat_id, user_id_to_deactivate):
         global_main_user_state[chat_id] = 'USER_MANAGEMENT_DEACTIVATE_CONFIRM' 
+=======
+        self.current_operation_data[chat_id].update({'action': 'change_phone', 'user_id_to_edit': user_id_to_edit})
+        self.bot.send_message(chat_id, f"Введите новый номер телефона для пользователя ID {user_id_to_edit} (формат: +7XXXXXXXXXX) или 'Отмена':", reply_markup=create_cancel_markup())
+
+    def _prompt_for_deactivation_confirm(self, chat_id, user_id_to_deactivate):
+        global_main_user_state[chat_id] = 'USER_MANAGEMENT_DEACTIVATE_CONFIRM' # Specific state
+>>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
         self.current_operation_data[chat_id].update({'action': 'deactivate', 'user_id_to_deactivate': user_id_to_deactivate})
 
         keyboard = types.InlineKeyboardMarkup(row_width=1)
         keyboard.add(types.InlineKeyboardButton(text="Да, деактивировать", callback_data=f"um_confirm_deactivate_{user_id_to_deactivate}"))
+<<<<<<< HEAD
+=======
+        # Back button should go to the action menu for the *same user*
+>>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
         keyboard.add(types.InlineKeyboardButton(text="< Назад (к действиям)", callback_data=f"um_select_user_{user_id_to_deactivate}"))
         sent_msg = self.bot.send_message(chat_id, f"Вы уверены, что хотите деактивировать пользователя ID {user_id_to_deactivate}?", reply_markup=keyboard)
         self.current_operation_data[chat_id]['inline_message_id'] = sent_msg.message_id
@@ -382,7 +520,11 @@ class UserManagement:
 
     def handle_deactivation_confirmation_callback(self, call: types.CallbackQuery):
         chat_id = call.message.chat.id
+<<<<<<< HEAD
         message_id = call.message.message_id 
+=======
+        message_id = call.message.message_id # message with confirm/cancel buttons
+>>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
         user_id_to_deactivate = call.data.split("_")[-1]
 
         self.logger.info(f"Chat {chat_id}: Deactivating user ID {user_id_to_deactivate}")
@@ -393,6 +535,7 @@ class UserManagement:
         self.finish_um_operation_and_return_to_staff_menu(chat_id)
 
     def cancel_um_operation_and_return_to_staff_menu(self, chat_id, message_text="Операция с персоналом отменена."):
+        # ... (remains largely the same) ...
         self.logger.info(f"Chat {chat_id}: User management operation cancelled. Returning to staff menu.")
         current_state = global_main_user_state.get(chat_id, "")
         if current_state.startswith("UM_") or current_state.startswith("USER_MANAGEMENT"):
@@ -402,6 +545,7 @@ class UserManagement:
 
 
     def finish_um_operation_and_return_to_staff_menu(self, chat_id, message_text=None):
+        # ... (remains largely the same) ...
         self.logger.debug(f"Chat {chat_id}: Finishing UM operation. Returning to staff menu.")
         current_state = global_main_user_state.get(chat_id, "")
         if current_state.startswith("UM_") or current_state.startswith("USER_MANAGEMENT"):
@@ -418,8 +562,12 @@ class UserManagement:
 
 
     def register_callback_handlers(self):
+<<<<<<< HEAD
         # um_select_user_ID (выбор пользователя из списка, показывает меню действий)
         # um_cancel_inline_to_staff_menu (отмена из inline клавиатуры в меню персонала)
+=======
+        # um_select_user_ID (selects a user from list, shows action menu)
+>>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
         @self.bot.callback_query_handler(func=lambda call: call.data.startswith("um_select_user_") or \
                                                            call.data == "um_cancel_inline_to_staff_menu")
         def route_user_selection_callback(call):
@@ -429,17 +577,29 @@ class UserManagement:
             else:
                 self.handle_user_selection_callback(call)
 
+<<<<<<< HEAD
         # um_action_ACTION_ID (выбор действия для пользователя)
+=======
+        # um_action_ACTION_ID (selects an action for the user)
+>>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
         @self.bot.callback_query_handler(func=lambda call: call.data.startswith("um_action_"))
         def route_user_action_callback(call):
             self.handle_user_action_callback(call)
 
+<<<<<<< HEAD
         # um_setrole_ID_ROLE (подтверждение новой роли)
+=======
+        # um_setrole_ID_ROLE (confirms the new role)
+>>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
         @self.bot.callback_query_handler(func=lambda call: call.data.startswith("um_setrole_"))
         def route_set_new_role_callback(call):
             self.handle_set_new_role_callback(call)
         
+<<<<<<< HEAD
         # um_confirm_deactivate_ID (подтверждение деактивации)
+=======
+        # um_confirm_deactivate_ID (confirms deactivation)
+>>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
         @self.bot.callback_query_handler(func=lambda call: call.data.startswith("um_confirm_deactivate_"))
         def route_deactivation_confirm_callback(call):
             self.handle_deactivation_confirmation_callback(call)
