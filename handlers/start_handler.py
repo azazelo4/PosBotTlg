@@ -24,7 +24,8 @@ def contact_handler(message: types.Message):
         return
 
     phone_number_from_contact = message.contact.phone_number # Это "сырой" номер из контакта
-    logger.info(f"Chat {chat_id}: Contact received, raw phone number: {phone_number_from_contact}")
+    logger.info(f"Chat {chat_id}: Contact received, raw phone number: '{phone_number_from_contact}', repr: {repr(phone_number_from_contact)}")
+    #logger.info(f"Chat {chat_id}: Contact received, raw phone number: {phone_number_from_contact}")
 
     remove_markup = types.ReplyKeyboardRemove()
     bot.send_message(chat_id, f"Спасибо! Ваш номер {phone_number_from_contact} получен. Обрабатываю...", reply_markup=remove_markup)

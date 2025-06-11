@@ -12,34 +12,81 @@ logger = logging.getLogger(__name__)
 # Если импортировать: from user_management import normalize_phone_number
 # Но для самодостаточности модуля database.py, лучше иметь свою или скопировать.
 # ВАЖНО: Убедитесь, что эта функция идентична той, что в user_management.py или импортируется оттуда.
-def _normalize_phone_for_db(phone_str: str) -> str | None:
-    if not phone_str: return None
-    cleaned_phone = re.sub(r'[^\d+]', '', phone_str)
-    if not cleaned_phone: return None
-    
-    if cleaned_phone.startswith('+'):
-        if cleaned_phone.startswith('+7') and len(cleaned_phone) == 12 and cleaned_phone[1:].isdigit():
-            return cleaned_phone
-        # Можно добавить обработку +8 -> +7 здесь, если такой формат возможен на входе normalize_phone_number
-        elif cleaned_phone.startswith('+8') and len(cleaned_phone) == 12 and cleaned_phone[2:].isdigit():
-             return '+7' + cleaned_phone[2:]
+def _normalize_phone_for_db(phone_str_raw: str) -> str | None:
+    """
+    Нормализует номер телефона к формату +7XXXXXXXXXXX (11 цифр после +7).
+    Агрессивно очищает все нецифровые символы.
+    """
+    if not phone_str_raw: 
+        logger.debug("DB Normalizer: Получена пустая строка для нормализации.")
+        return None
 
-    temp_phone = cleaned_phone[1:] if cleaned_phone.startswith('+') else cleaned_phone
+    # Шаг 1: Удаляем ВСЕ, что не является цифрой
+    digits_only = re.sub(r'\D', '', phone_str_raw)
+    logger.debug(f"DB Normalizer: phone_str_raw='{phone_str_raw}', digits_only='{digits_only}'")
+
+    if not digits_only:
+        logger.debug(f"DB Normalizer: После очистки в '{phone_str_raw}' не осталось цифр.")
+        return None
+
+    # Шаг 2: Приводим к формату +7XXXXXXXXXXX (11 цифр после +7)
+    # Это соответствует вашему формату в БД '+77775295987'
     
-    if len(temp_phone) == 11 and temp_phone.startswith('8') and temp_phone.isdigit():
-        return '+7' + temp_phone[1:]
-    elif len(temp_phone) == 11 and temp_phone.startswith('7') and temp_phone.isdigit():
-        return '+7' + temp_phone
-    elif len(temp_phone) == 10 and temp_phone.isdigit():
-        return '+7' + temp_phone
-    
-    # Если это уже был +7, но не прошел верхние проверки (например, из-за лишних символов, которые удалились)
-    if cleaned_phone.startswith('+7') and len(cleaned_phone) == 12 and cleaned_phone[1:].isdigit():
-        return cleaned_phone
+    # Если номер начинается с '8' и имеет 12 цифр (8 + 11 цифр номера)
+    # Например, "877775295987" -> "+77775295987"
+    if len(digits_only) == 12 and digits_only.startswith('8'):
+        normalized_phone = '+7' + digits_only[1:]
+        logger.debug(f"DB Normalizer: '{phone_str_raw}' (digits: {digits_only}) -> {normalized_phone} (сценарий 8XXXXXXXXXXX)")
+        return normalized_phone
+
+    # Если номер начинается с '7' и имеет 12 цифр (7 как код страны + 11 цифр номера)
+    # Например, "777775295987" (часто приходит от API, если номер уже был с +7) -> "+77775295987"
+    if len(digits_only) == 12 and digits_only.startswith('7'):
+        normalized_phone = '+7' + digits_only[1:]
+        logger.debug(f"DB Normalizer: '{phone_str_raw}' (digits: {digits_only}) -> {normalized_phone} (сценарий 7XXXXXXXXXXX)")
+        return normalized_phone
         
-    logger.debug(f"DB Normalizer: Could not normalize {phone_str} to +7XXXXXXXXXX format")
-    return None # Если не удалось нормализовать к +7
+    # Если номер имеет 11 цифр (предполагаем, что это сам номер без кода страны 7/8)
+    # Например, "77775295987" (если пользователь ввел без 8 или +7 в РФ/КЗ) -> "+77775295987"
+    if len(digits_only) == 11:
+        normalized_phone = '+7' + digits_only
+        logger.debug(f"DB Normalizer: '{phone_str_raw}' (digits: {digits_only}) -> {normalized_phone} (сценарий XXXXXXXXXXX -> 11 цифр)")
+        return normalized_phone
 
+    logger.warning(f"DB Normalizer: Не удалось нормализовать '{phone_str_raw}' (цифры: '{digits_only}') к целевому формату +7XXXXXXXXXXX (11 цифр после +7).")
+    return None
+
+# Ваша функция get_user_by_phone должна использовать _normalize_phone_for_db
+def get_user_by_phone(phone_number_raw):
+    normalized_phone = _normalize_phone_for_db(phone_number_raw) # Используем обновленную функцию
+    if not normalized_phone:
+        # Лог уже будет внутри _normalize_phone_for_db или здесь можно добавить
+        logger.debug(f"Поиск пользователя: не удалось нормализовать номер: '{phone_number_raw}'")
+        return None
+        
+    # Этот лог останется полезным
+    logger.debug(f"Fetching user with normalized phone number: {normalized_phone} (raw: {phone_number_raw})")
+    
+    connection = create_connection()
+    if not connection: return None
+    cursor = connection.cursor(dictionary=True)
+    try:
+        query = "SELECT * FROM users WHERE phone_number = %s"
+        cursor.execute(query, (normalized_phone,))
+        result = cursor.fetchone()
+        if result:
+            logger.debug(f"Результат запроса для {normalized_phone}: {result}")
+            return result
+        else:
+            logger.debug(f"Пользователь с нормализованным телефоном {normalized_phone} не найден.")
+            return None
+    except Exception as e:
+        logger.exception(f"Error executing get_user_by_phone query for {normalized_phone}.")
+        return None
+    finally:
+        if connection.is_connected():
+            cursor.close()
+            connection.close()
 
 # Create a database connection
 def create_connection():
