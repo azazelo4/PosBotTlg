@@ -486,6 +486,7 @@ def create_buyback_record(product_article, price, payment_type, user_id, store_i
             connection.close()
 
 
+
 def create_return_record(sale_id, product_article, return_price, payment_type, user_id, store_id):
     logger.debug(f"Creating return record for sale_id: {sale_id}, product_article: {product_article}, price: {return_price}")
     connection = create_connection()

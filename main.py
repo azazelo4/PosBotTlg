@@ -62,6 +62,7 @@ def get_keyboard_by_role(chat_id: int) -> types.ReplyKeyboardMarkup | types.Repl
         keyboard.add(share_contact_button)
         return keyboard
 
+<<<<<<< HEAD
 
 @bot.message_handler(func=lambda message: message.text == "Касса")
 def handle_cash_operations_menu(message: types.Message):
@@ -82,6 +83,8 @@ def handle_cash_operations_menu(message: types.Message):
         keyboard.add(share_contact_button)
         return keyboard
 
+=======
+>>>>>>> parent of effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
 
 @bot.message_handler(func=lambda message: message.text == "Касса")
 def handle_cash_operations_menu(message):
@@ -178,6 +181,7 @@ def handle_rights_button(message: types.Message):
 
 @bot.message_handler(func=lambda message: message.text == "Отмена")
 <<<<<<< HEAD
+<<<<<<< HEAD
 def handle_global_cancel(message: types.Message):
     chat_id = message.chat.id
     current_fsm_state = user_state.get(chat_id)
@@ -186,6 +190,10 @@ def handle_global_cancel(message: types.Message):
 =======
 def handle_global_cancel(message: types.Message, called_from_back=False):
     chat_id = message.chat.id
+=======
+def handle_global_cancel(message: types.Message, called_from_back=False):
+    chat_id = message.chat.id
+>>>>>>> parent of effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
     current_op_state = user_state.get(chat_id) # Global state from state.py
     action_source = "'Отмена'" if not called_from_back else "'Назад' (приравнивается к отмене)"
     logger.info(f"Chat {chat_id}: {action_source} pressed. Current global state: {current_op_state}")
