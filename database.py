@@ -88,19 +88,14 @@ def get_user_by_phone(phone_number_raw: str):
             cursor.close()
             connection.close()
 
-def get_all_users(): # Used by UserManagement "Права"
+def get_all_users():
     connection = create_connection()
     if not connection:
         logger.error("Failed to create database connection for get_all_users.")
         return []
     cursor = connection.cursor(dictionary=True)
     try:
-<<<<<<< HEAD
-=======
-        # Consider if you want to list ALL users (including inactive for reactivation)
-        # or just active ones. For "Права" on active users, is_active = 1 is good.
->>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
-        query = "SELECT id, phone_number, name, role FROM users WHERE is_active = 1"
+        query = "SELECT id, phone_number, name, role FROM users WHERE is_active = 1" # Only active users
         cursor.execute(query)
         users = cursor.fetchall()
         return users
@@ -111,67 +106,91 @@ def get_all_users(): # Used by UserManagement "Права"
         if connection and connection.is_connected():
             cursor.close()
             connection.close()
+            logger.debug("Database connection closed.")
+    return store
 
-def add_user_to_db(phone_number_raw: str, role: str, name: str, store_id: int | None = None) -> str:
-    normalized_phone = _normalize_phone_for_db(phone_number_raw)
-    if not normalized_phone:
-        return f"Ошибка: неверный формат номера телефона '{phone_number_raw}'. Не удалось нормализовать."
+def get_sale_and_product_details_by_sale_id(sale_id):
+    logger.debug(f"Fetching sale and product details for sale_id: {sale_id}")
+    connection = create_connection()
+    if not connection: return None
+    cursor = connection.cursor(dictionary=True)
+    details = None
+    try:
+        query = """
+        SELECT 
+            s.id as sale_id, 
+            s.sold_price, 
+            s.payment_type as sale_payment_type, 
+            s.sale_date,
+            p.id as product_id, 
+            p.article_number, 
+            p.model as product_model, 
+            p.product_type
+        FROM sales s
+        JOIN products p ON s.product_id = p.id
+        WHERE s.id = %s
+        """
+        cursor.execute(query, (sale_id,))
+        details = cursor.fetchone()
+        if details:
+            logger.info(f"Sale and product details found for sale_id {sale_id}: {details}")
+        else:
+            logger.warning(f"No sale found with sale_id {sale_id}")
+    except Error as e:
+        logger.error(f"Error fetching sale details for sale_id {sale_id}: {e}")
+    finally:
+        if connection.is_connected():
+            cursor.close()
+            connection.close()
+            logger.debug(f"Database connection closed for get_sale_and_product_details_by_sale_id (sale_id: {sale_id}).")
+    return details
 
-<<<<<<< HEAD
-    logger.debug(f"Adding user to database with normalized_phone: {normalized_phone}, role: {role}, name: {name}, store_id: {store_id}")
-=======
+
 def _update_product_quantity_with_cursor(cursor, product_article, quantity_change):
     logger.debug(f"Attempting to update quantity for product article: {product_article} by {quantity_change} using provided cursor.")
-    if quantity_change < 0: # Check stock only if decreasing
+    if quantity_change < 0:
         cursor.execute("SELECT quantity FROM products WHERE article_number = %s FOR UPDATE", (product_article,))
-        current_quantity_result = cursor.fetchone()
+        current_quantity_result = cursor.fetchone() # Will be dict or None
         if not current_quantity_result:
              logger.error(f"Product {product_article} not found during quantity check in _update_product_quantity_with_cursor.")
-             raise ValueError(f"Продукт {product_article} не найден для обновления количества.")
+             raise ValueError(f"Product {product_article} not found for quantity update.")
         current_quantity = current_quantity_result.get('quantity')
         if current_quantity is None:
             logger.error(f"Product {product_article} quantity is NULL in _update_product_quantity_with_cursor.")
-            raise ValueError(f"У продукта {product_article} не указано количество (NULL).")
+            raise ValueError(f"Product {product_article} has NULL quantity.")
         if current_quantity < abs(quantity_change):
             logger.warning(f"Not enough stock for {product_article} to decrease by {abs(quantity_change)}. Current: {current_quantity}")
-            raise ValueError(f"Недостаточно товара {product_article} на складе.")
+            raise ValueError(f"Not enough stock for {product_article}.")
 
     query = "UPDATE products SET quantity = quantity + %s WHERE article_number = %s"
     cursor.execute(query, (quantity_change, product_article))
     if cursor.rowcount == 0 and quantity_change !=0 :
         logger.warning(f"Product {product_article} quantity not updated (rowcount 0), but an update was expected for change {quantity_change}.")
-        raise ValueError(f"Не удалось обновить количество для {product_article}, товар не найден или количество не изменилось.")
+        raise ValueError(f"Failed to update quantity for {product_article}, product not found or no change occurred when one was expected.")
     logger.info(f"Product {product_article} quantity successfully updated by {quantity_change} in current transaction. Rowcount: {cursor.rowcount}")
     return True
 
-# Standalone function for updating quantity, creates its own transaction
-def update_product_quantity(product_article, quantity_change, store_id_context=None): # Added store_id_context for logging
-    logger.debug(f"Standalone update_product_quantity for article: {product_article} by {quantity_change} (Store context: {store_id_context})")
+def update_product_quantity(product_article, quantity_change):
+    logger.debug(f"Standalone update_product_quantity for article: {product_article} by {quantity_change}")
     connection = create_connection()
-    if not connection: return False, "Ошибка подключения к БД."
+    if not connection: return False
     cursor = connection.cursor(dictionary=True)
     success = False
-    message = ""
     try:
-        # We need to ensure the product exists, especially for increasing quantity.
-        # If a product with article_number does not exist, this update will do nothing (rowcount 0).
-        # For increasing stock (e.g. poполнить остатки), we expect the product to exist.
-        cursor.execute("SELECT quantity FROM products WHERE article_number = %s FOR UPDATE", (product_article,))
-        product_exists = cursor.fetchone()
-
-        if not product_exists:
-            logger.warning(f"Product {product_article} not found for stock update.")
-            return False, f"Товар с артикулом {product_article} не найден."
-
         if quantity_change < 0:
-            current_quantity = product_exists['quantity']
+            cursor.execute("SELECT quantity FROM products WHERE article_number = %s FOR UPDATE", (product_article,))
+            current_quantity_result = cursor.fetchone()
+            if not current_quantity_result:
+                logger.error(f"Product {product_article} not found for standalone quantity update.")
+                return False
+            current_quantity = current_quantity_result['quantity']
             if current_quantity is None:
                 logger.error(f"Product {product_article} quantity is NULL (standalone).")
-                return False, f"У продукта {product_article} не указано количество (NULL)."
+                return False
             if current_quantity < abs(quantity_change):
                 logger.warning(f"Not enough stock for {product_article} (standalone). Current: {current_quantity}")
-                return False, f"Недостаточно товара {product_article} на складе ({current_quantity} шт.) для списания {abs(quantity_change)} шт."
-        
+                return False
+
         query = "UPDATE products SET quantity = quantity + %s WHERE article_number = %s"
         cursor.execute(query, (quantity_change, product_article))
         
@@ -179,31 +198,23 @@ def update_product_quantity(product_article, quantity_change, store_id_context=N
             connection.commit()
             logger.info(f"Product {product_article} quantity updated by {quantity_change} (standalone). Rows affected: {cursor.rowcount}")
             success = True
-            message = f"Остаток товара {product_article} изменен на {quantity_change} шт."
         else:
-            # This case (rowcount 0 for non-zero change) implies product_article didn't match AFTER the FOR UPDATE lock.
-            # Should be rare if product_exists check passed.
             logger.warning(f"Product {product_article} quantity not updated (standalone, rowcount 0 for non-zero change).")
             connection.rollback()
-            message = f"Не удалось обновить остаток для {product_article} (изменение не было применено)."
-            
+
     except Error as e:
         logger.error(f"Error in standalone update_product_quantity for {product_article}: {e}")
         if connection.is_connected(): connection.rollback()
-        message = f"Ошибка БД при обновлении остатка: {e}"
     except ValueError as ve:
         logger.error(f"ValueError in standalone update_product_quantity for {product_article}: {ve}")
         if connection.is_connected(): connection.rollback()
-        message = str(ve) # Use the message from ValueError (e.g., "Not enough stock...")
     finally:
         if connection.is_connected():
             cursor.close()
             connection.close()
-    return success, message
-
+    return success
 
 def record_sale(product_id, product_article, store_id, user_id, sale_price, payment_type):
-    # ... (remains the same, uses _update_product_quantity_with_cursor) ...
     logger.debug(f"Recording sale for product_id: {product_id} (article: {product_article}), store_id: {store_id}, user_id: {user_id}, sale_price: {sale_price}, payment_type: {payment_type}")
 >>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
     connection = create_connection()
@@ -218,7 +229,6 @@ def record_sale(product_id, product_article, store_id, user_id, sale_price, paym
         cursor.execute(select_query_phone, (normalized_phone,))
 =======
 def get_product_article_by_id(product_id):
-    # ... (remains the same) ...
     connection = create_connection()
     if not connection: return None
     cursor = connection.cursor()
@@ -236,7 +246,6 @@ def get_product_article_by_id(product_id):
     return article
 
 def get_min_price(product_article):
-    # ... (remains the same) ...
     logger.debug(f"Fetching minimum price for product article: {product_article}")
     connection = create_connection()
     if not connection: return None
@@ -258,11 +267,10 @@ def get_min_price(product_article):
     return min_price
 
 def generate_report(start_date, end_date):
-    # ... (remains the same) ...
     logger.debug(f"Generating report from {start_date} to {end_date}")
     connection = create_connection()
     if not connection: return []
-    cursor = connection.cursor() # Using default tuple cursor as report handler expects it
+    cursor = connection.cursor()
     report_data = []
     try:
         query = """
@@ -302,47 +310,28 @@ def generate_report(start_date, end_date):
             logger.debug("Database connection closed after generating report.")
     return report_data
 
-def add_user_to_db(phone_number, role, name, store_id=None): # Added store_id, defaulting to None
-    logger.debug(f"Adding user to database with phone_number: {phone_number}, role: {role}, name: {name}, store_id: {store_id}")
+def add_user_to_db(phone_number, role, name):
+    logger.debug(f"Adding user to database with phone_number: {phone_number}, role: {role}, name: {name}")
     connection = create_connection()
     if not connection: return "Ошибка: не удалось подключиться к базе данных."
     cursor = connection.cursor()
     message = ""
     try:
-        # Check if phone number already exists
-        select_query_phone = "SELECT id, is_active FROM users WHERE phone_number = %s"
-        cursor.execute(select_query_phone, (phone_number,))
->>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
-        result_phone = cursor.fetchone()
+        select_query = "SELECT id, is_active FROM users WHERE phone_number = %s"
+        cursor.execute(select_query, (phone_number,))
+        result = cursor.fetchone()
 
-        if result_phone:
-            user_id, is_active = result_phone
-<<<<<<< HEAD
+        if result:
+            user_id, is_active = result
             if is_active == 0:
-                update_query = "UPDATE users SET is_active = 1, role = %s, name = %s, store_id = %s WHERE id = %s"
-                cursor.execute(update_query, (role, name, store_id, user_id))
-                message = f"Пользователь с номером {normalized_phone} ({name}) активирован повторно и данные обновлены."
+                update_query = "UPDATE users SET is_active = 1, role = %s, name = %s WHERE id = %s"
+                cursor.execute(update_query, (role, name, user_id))
+                message = "Пользователь активирован повторно."
             else:
-                message = f"Пользователь с номером {normalized_phone} ({name}) уже существует и активен."
+                message = "Пользователь уже существует и активен."
         else:
-            if store_id is None: store_id = 1 # Default store_id if not provided
-            insert_query = "INSERT INTO users (phone_number, role, name, store_id, is_active) VALUES (%s, %s, %s, %s, 1)"
-            cursor.execute(insert_query, (normalized_phone, role, name, store_id))
-            message = f"Пользователь {name} с номером {normalized_phone} добавлен успешно."
-=======
-            if is_active == 0: # User exists but is inactive, reactivate and update
-                update_query = "UPDATE users SET is_active = 1, role = %s, name = %s, store_id = %s WHERE id = %s"
-                cursor.execute(update_query, (role, name, store_id, user_id))
-                message = "Пользователь активирован повторно и данные обновлены."
-            else: # User exists and is active
-                message = "Пользователь с таким номером телефона уже существует и активен."
-                # Optionally, update their details if name/role/store_id differ?
-                # For now, just inform.
-        else: # New user
-            # Default store_id to a sensible value if not provided, e.g., 1, or make it mandatory
-            if store_id is None: store_id = 1 # Example default, adjust as needed
-            insert_query = "INSERT INTO users (phone_number, role, name, store_id, is_active) VALUES (%s, %s, %s, %s, 1)"
-            cursor.execute(insert_query, (phone_number, role, name, store_id))
+            insert_query = "INSERT INTO users (phone_number, role, name, is_active) VALUES (%s, %s, %s, 1)"
+            cursor.execute(insert_query, (phone_number, role, name))
             message = "Пользователь добавлен успешно."
 >>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
         connection.commit()
@@ -356,12 +345,7 @@ def add_user_to_db(phone_number, role, name, store_id=None): # Added store_id, d
             connection.close()
     return message
 
-<<<<<<< HEAD
-def deactivate_user_in_db(user_id_to_deactivate: int) -> str:
-=======
-def deactivate_user_in_db(user_id_to_deactivate):
-    # ... (remains the same) ...
->>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
+def deactivate_user_in_db(user_id_to_deactivate): # Changed to accept user_id
     logger.debug(f"Deactivating user with ID: {user_id_to_deactivate}")
     connection = create_connection()
     if not connection:
@@ -370,9 +354,11 @@ def deactivate_user_in_db(user_id_to_deactivate):
     cursor = connection.cursor()
     response = ""
     try:
+        # Check if user exists and is active
         select_query = "SELECT phone_number FROM users WHERE id = %s AND is_active = 1"
         cursor.execute(select_query, (user_id_to_deactivate,))
         result = cursor.fetchone()
+
         if result:
             update_query = "UPDATE users SET is_active = 0 WHERE id = %s"
             cursor.execute(update_query, (user_id_to_deactivate,))
@@ -392,17 +378,12 @@ def deactivate_user_in_db(user_id_to_deactivate):
             connection.close()
     return response
 
-<<<<<<< HEAD
-def change_user_role_function(user_id: int, new_role: str) -> tuple[bool, str]:
-=======
-
 def change_user_role_function(user_id, new_role):
-    # ... (remains the same) ...
->>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
     logger.debug(f"Changing role for user_id: {user_id} to new_role: {new_role}")
     connection = create_connection()
     if not connection:
         logger.error("Failed to create DB connection for change_user_role.")
+        # Return a status or raise a specific error
         return False, "Ошибка подключения к БД."
 
     cursor = connection.cursor()
@@ -434,7 +415,6 @@ def update_user_phone(user_id: int, new_phone_number_raw: str) -> tuple[bool, st
     logger.debug(f"Updating phone for user_id: {user_id} to normalized_new_phone: {normalized_new_phone}")
 =======
 def update_user_phone(user_id, new_phone_number):
-    # ... (remains the same) ...
     logger.debug(f"Updating phone for user_id: {user_id} to new_phone: {new_phone_number}")
 >>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
     connection = create_connection()
@@ -443,6 +423,7 @@ def update_user_phone(user_id, new_phone_number):
 
     cursor = connection.cursor(dictionary=True)
     try:
+        # Check if the new phone number is already in use by another active user
         check_query = "SELECT id, name FROM users WHERE phone_number = %s AND id != %s AND is_active = 1"
         cursor.execute(check_query, (normalized_new_phone, user_id))
         existing_user = cursor.fetchone()
@@ -468,280 +449,14 @@ def update_user_phone(user_id, new_phone_number):
         if connection.is_connected():
             cursor.close()
             connection.close()
+            logger.debug("Database connection closed.")
 
-<<<<<<< HEAD
-def get_product_by_article(article_number: str):
-    logger.debug(f"Fetching product with article number: {article_number}")
-    connection = create_connection()
-    if not connection: return None
-    cursor = connection.cursor(dictionary=True)
-    product = None
-    try:
-        query = "SELECT * FROM products WHERE article_number = %s"
-        cursor.execute(query, (article_number,))
-        product = cursor.fetchone()
-        if product:
-            logger.info(f"Продукт найден: {product.get('model', article_number)}")
-        else:
-            logger.warning(f"Продукт с артикулом {article_number} не найден.")
-    except Error as e:
-        logger.exception(f"Ошибка при выполнении запроса get_product_by_article (артикул: {article_number}).")
-    finally:
-        if connection and connection.is_connected():
-            cursor.close()
-            connection.close()
-    return product
 
-def get_store_by_id(store_id: int):
-    logger.debug(f"Fetching store with ID: {store_id}")
-    connection = create_connection()
-    if not connection: return None
-    cursor = connection.cursor(dictionary=True)
-    store = None
-    query = "SELECT * FROM stores WHERE id = %s"
-    try:
-        cursor.execute(query, (store_id,))
-        store = cursor.fetchone()
-        logger.debug(f"Query executed: {query} with store_id={store_id}, result: {store}")
-    except Error as e:
-        logger.error(f"Error fetching store by ID: {e}")
-    finally:
-        if connection and connection.is_connected():
-            cursor.close()
-            connection.close()
-    return store
-
-def get_sale_and_product_details_by_sale_id(sale_id: int):
-    logger.debug(f"Fetching sale and product details for sale_id: {sale_id}")
-    connection = create_connection()
-    if not connection: return None
-    cursor = connection.cursor(dictionary=True)
-    details = None
-    try:
-        query = """
-        SELECT
-            s.id as sale_id,
-            s.sold_price,
-            s.payment_type as sale_payment_type,
-            s.sale_date,
-            p.id as product_id,
-            p.article_number,
-            p.model as product_model,
-            p.product_type
-        FROM sales s
-        JOIN products p ON s.product_id = p.id
-        WHERE s.id = %s
-        """
-        cursor.execute(query, (sale_id,))
-        details = cursor.fetchone()
-        if details:
-            logger.info(f"Sale and product details found for sale_id {sale_id}: {details.get('product_model', details.get('article_number'))}")
-        else:
-            logger.warning(f"No sale found with sale_id {sale_id}")
-    except Error as e:
-        logger.error(f"Error fetching sale details for sale_id {sale_id}: {e}")
-    finally:
-        if connection and connection.is_connected():
-            cursor.close()
-            connection.close()
-    return details
-
-def _update_product_quantity_with_cursor(cursor, product_article: str, quantity_change: int) -> bool:
-    logger.debug(f"Attempting to update quantity for product article: {product_article} by {quantity_change} using provided cursor.")
-    # Fetch current quantity and lock the row
-    cursor.execute("SELECT quantity FROM products WHERE article_number = %s FOR UPDATE", (product_article,))
-    current_quantity_result = cursor.fetchone()
-
-    if not current_quantity_result:
-        logger.error(f"Product {product_article} not found during quantity check in _update_product_quantity_with_cursor.")
-        raise ValueError(f"Продукт {product_article} не найден для обновления количества.")
-
-    current_quantity = current_quantity_result.get('quantity')
-    if current_quantity is None: # Should be prevented by NOT NULL constraint
-        logger.error(f"Product {product_article} quantity is NULL in _update_product_quantity_with_cursor.")
-        raise ValueError(f"У продукта {product_article} не указано количество (NULL).")
-
-    if quantity_change < 0 and current_quantity < abs(quantity_change):
-        logger.warning(f"Not enough stock for {product_article} to decrease by {abs(quantity_change)}. Current: {current_quantity}")
-        raise ValueError(f"Недостаточно товара {product_article} на складе ({current_quantity} шт.) для списания {abs(quantity_change)} шт.")
-
-    query = "UPDATE products SET quantity = quantity + %s WHERE article_number = %s"
-    cursor.execute(query, (quantity_change, product_article))
-
-    if cursor.rowcount == 0 and quantity_change != 0:
-        # This case should ideally not be reached if FOR UPDATE found the product
-        logger.error(f"Product {product_article} quantity not updated (rowcount 0) despite existing. Change: {quantity_change}")
-        raise ValueError(f"Не удалось обновить количество для продукта {product_article} (rowcount 0).")
-
-    logger.info(f"Product {product_article} quantity successfully updated by {quantity_change} in current transaction. Rowcount: {cursor.rowcount}")
-    return True
-
-def update_product_quantity(product_article: str, quantity_change: int, store_id_context: int | None = None) -> tuple[bool, str]:
-    logger.debug(f"Standalone update_product_quantity for article: {product_article} by {quantity_change} (Store context: {store_id_context})")
-    connection = create_connection()
-    if not connection: return False, "Ошибка подключения к БД."
-    cursor = connection.cursor(dictionary=True)
-    success = False
-    message = ""
-    try:
-        connection.start_transaction()
-        # The logic with FOR UPDATE and checks is now inside _update_product_quantity_with_cursor
-        _update_product_quantity_with_cursor(cursor, product_article, quantity_change)
-        # Fetch new quantity for message after successful update
-        cursor.execute("SELECT quantity FROM products WHERE article_number = %s", (product_article,))
-        new_quantity_data = cursor.fetchone()
-        new_quantity = new_quantity_data['quantity'] if new_quantity_data else "неизвестно"
-
-        connection.commit()
-        success = True
-        message = f"Остаток товара {product_article} изменен на {quantity_change:+} шт. Новый остаток: {new_quantity} шт."
-        logger.info(message)
-
-    except ValueError as ve: # Catch errors from _update_product_quantity_with_cursor
-        logger.warning(f"ValueError in standalone update_product_quantity for {product_article}: {ve}")
-        if connection.is_connected(): connection.rollback()
-        message = str(ve)
-    except Error as e:
-        logger.error(f"Error in standalone update_product_quantity for {product_article}: {e}")
-        if connection.is_connected(): connection.rollback()
-        message = f"Ошибка БД при обновлении остатка: {e}"
-    finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
-    return success, message
-
-def record_sale(product_id: int, product_article: str, store_id: int, user_id: int, sale_price: float, payment_type: str) -> tuple[bool, str]:
-    logger.debug(f"Recording sale for product_id: {product_id} (article: {product_article}), store_id: {store_id}, user_id: {user_id}, sale_price: {sale_price}, payment_type: {payment_type}")
-    connection = create_connection()
-    if not connection:
-        logger.error("Failed to create database connection for record_sale.")
-        return False, "Ошибка подключения к БД для записи продажи."
-
-    cursor = connection.cursor(dictionary=True)
-    try:
-        connection.start_transaction()
-        _update_product_quantity_with_cursor(cursor, product_article, -1) # Уменьшаем количество
-
-        insert_query = """INSERT INTO sales (product_id, store_id, user_id, sale_date, sold_price, payment_type)
-        VALUES (%s, %s, %s, NOW(), %s, %s)"""
-        cursor.execute(insert_query, (product_id, store_id, user_id, sale_price, payment_type))
-        logger.debug(f"Insert into sales executed. Product ID: {product_id}")
-
-        connection.commit()
-        logger.info(f"Sale recorded and product {product_article} quantity updated successfully.")
-        return True, "Продажа успешно зарегистрирована."
-    except ValueError as ve:
-        logger.warning(f"ValueError during record_sale for {product_article}: {ve}")
-        if connection.is_connected(): connection.rollback()
-        return False, str(ve)
-    except Error as e:
-        logger.exception(f"MySQL Error during record_sale transaction for product article {product_article}. Rolling back.")
-        if connection.is_connected(): connection.rollback()
-        return False, f"Ошибка БД при записи продажи: {e}"
-    finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
-
-def get_product_article_by_id(product_id: int) -> str | None:
-    connection = create_connection()
-    if not connection: return None
-    cursor = connection.cursor() # No need for dictionary=True if only one column
-    article = None
-    try:
-        query = "SELECT article_number FROM products WHERE id = %s"
-        cursor.execute(query, (product_id,))
-        result = cursor.fetchone()
-        if result:
-            article = result[0]
-    except Error as e:
-        logger.exception(f"Error fetching article for product_id {product_id}")
-    finally:
-        if connection and connection.is_connected():
-            cursor.close()
-            connection.close()
-    return article
-
-def get_min_price(product_article: str) -> float | None:
-    logger.debug(f"Fetching minimum price for product article: {product_article}")
-    connection = create_connection()
-    if not connection: return None
-    cursor = connection.cursor(dictionary=True)
-    min_price = None
-    try:
-        query = "SELECT min_price FROM products WHERE article_number = %s"
-        cursor.execute(query, (product_article,))
-        result = cursor.fetchone()
-        if result and result['min_price'] is not None:
-            min_price = float(result['min_price'])
-    except Error as e:
-        logger.error(f"Error fetching min price for {product_article}: {e}")
-    except (ValueError, TypeError) as ve:
-        logger.error(f"Error converting min_price for {product_article}: {ve}. Value: {result.get('min_price') if result else 'N/A'}")
-    finally:
-        if connection and connection.is_connected():
-            cursor.close()
-            connection.close()
-    return min_price
-
-def generate_report(start_date: date, end_date: date) -> list:
-    logger.debug(f"Generating report from {start_date} to {end_date}")
-    connection = create_connection()
-    if not connection: return []
-    # cursor = connection.cursor() # Original code, will return tuples
-    cursor = connection.cursor(dictionary=True) # Changed to dictionary for easier access in report_handler
-    report_data = []
-    try:
-        query = """
-                SELECT
-                    s.id as sale_id,
-                    s.sale_date,
-                    s.sold_price,
-                    s.payment_type,
-                    p.article_number,
-                    p.product_type,
-                    p.model,
-                    p.metal_type,
-                    p.weight,
-                    p.price_per_gram,
-                    p.price as product_original_price,
-                    p.manufacturer,
-                    p.commentaries,
-                    u.name as user_name,
-                    st.name as store_name
-                FROM sales s
-                JOIN products p ON s.product_id = p.id
-                JOIN users u ON s.user_id = u.id
-                JOIN stores st ON s.store_id = st.id
-                WHERE DATE(s.sale_date) BETWEEN %s AND %s
-                ORDER BY s.sale_date, s.id;
-                """
-        # Ensure end_date includes the whole day if it's a date object
-        # The query uses DATE(s.sale_date) so direct date comparison is fine.
-        cursor.execute(query, (start_date, end_date))
-        report_data = cursor.fetchall()
-    except Error as e:
-        logger.exception("Error generating report.")
-    finally:
-        if connection and connection.is_connected():
-            cursor.close()
-            connection.close()
-    return report_data
-
-def create_buyback_record(product_article: str, price: float, payment_type: str, user_id: int, store_id: int) -> tuple[int | None, str]:
-    logger.debug(f"Creating buyback record for article: {product_article}, price: {price}, user_id: {user_id}")
-    connection = create_connection()
-    if not connection: return None, "Ошибка подключения к БД для скупки."
-    cursor = connection.cursor(dictionary=True)
-=======
 def create_buyback_record(product_article, price, payment_type, user_id, store_id):
-    # ... (remains the same - uses single transaction with _update_product_quantity_with_cursor) ...
     logger.debug(f"Creating buyback record for article: {product_article}, price: {price}, user_id: {user_id}")
     connection = create_connection()
     if not connection: return None
-    cursor = connection.cursor(dictionary=True)
->>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
+    cursor = connection.cursor(dictionary=True) # Using dictionary cursor
     buyback_id = None
     try:
         connection.start_transaction()
@@ -763,24 +478,15 @@ def create_buyback_record(product_article, price, payment_type, user_id, store_i
         return None, str(ve)
     except Error as e:
         logger.error(f"Error during buyback transaction for {product_article}: {e}")
-<<<<<<< HEAD
         if connection.is_connected(): connection.rollback()
-        return None, f"Ошибка БД при скупке: {e}"
-=======
-        if connection.is_connected(): connection.rollback() 
-        buyback_id = None 
->>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
+        buyback_id = None
     finally:
         if connection.is_connected():
             cursor.close()
             connection.close()
 
-<<<<<<< HEAD
-def create_return_record(sale_id: int, product_article: str, return_price: float, payment_type: str, user_id: int, store_id: int) -> tuple[int | None, str]:
-=======
+
 def create_return_record(sale_id, product_article, return_price, payment_type, user_id, store_id):
-    # ... (remains the same - uses single transaction) ...
->>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
     logger.debug(f"Creating return record for sale_id: {sale_id}, product_article: {product_article}, price: {return_price}")
     connection = create_connection()
     if not connection: return None, "Ошибка подключения к БД для возврата."
@@ -817,8 +523,6 @@ def create_return_record(sale_id, product_article, return_price, payment_type, u
 def create_trade_in_record(old_product_article: str, new_product_article: str, price_difference: float, payment_type_difference: str, user_id: int, store_id: int) -> tuple[int | None, str]:
 =======
 def create_trade_in_record(old_product_article, new_product_article, price_difference, payment_type_difference, user_id, store_id):
-    # ... (remains the same - uses single transaction) ...
->>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
     logger.debug(f"Creating trade-in: old {old_product_article}, new {new_product_article}, diff {price_difference}")
     connection = create_connection()
     if not connection: return None, "Ошибка подключения к БД для Trade-In."
@@ -846,221 +550,9 @@ def create_trade_in_record(old_product_article, new_product_article, price_diffe
     except Error as e:
         logger.error(f"Error during trade-in transaction (old: {old_product_article}, new: {new_product_article}): {e}")
         if connection.is_connected(): connection.rollback()
-        return None, f"Ошибка БД при Trade-In: {e}"
+        trade_in_id = None
     finally:
         if connection.is_connected():
             cursor.close()
             connection.close()
-
-def add_product_to_db(product_data: dict) -> tuple[bool, str]:
-    logger.info(f"Attempting to add new product: {product_data.get('article_number')}")
-    connection = create_connection()
-    if not connection:
-        return False, "Ошибка подключения к БД."
-    cursor = connection.cursor(dictionary=True)
-    try:
-        connection.start_transaction()
-        cursor.execute("SELECT id FROM products WHERE article_number = %s", (product_data['article_number'],))
-        if cursor.fetchone():
-            logger.warning(f"Product with article_number {product_data['article_number']} already exists.")
-            connection.rollback()
-            return False, f"Товар с артикулом {product_data['article_number']} уже существует."
-
-        # Ensure all required fields for DB are present
-        required_fields_for_db = ['store_id', 'article_number', 'metal_type', 'product_type', 'model',
-                                  'weight', 'price', 'min_price', 'quantity']
-        # Optional fields: 'price_per_gram', 'manufacturer', 'commentaries', 'arrival_date'
-
-        for field in required_fields_for_db:
-            if field not in product_data or product_data[field] is None:
-                # Allow quantity to be 0 if None, but other required fields must be present
-                if field == 'quantity' and product_data.get(field) is None:
-                    product_data[field] = 0
-                else:
-                    logger.error(f"Missing or None value for required field '{field}' for new product {product_data['article_number']}.")
-                    connection.rollback()
-                    return False, f"Отсутствует обязательное поле или оно не заполнено: {field}"
-        
-        # Prepare for insert, handling optional fields and arrival_date default
-        cols = []
-        vals_placeholder = []
-        vals_list = []
-
-        # Define all possible columns in DB order or as desired
-        db_columns = ['store_id', 'article_number', 'metal_type', 'product_type', 'model',
-                      'weight', 'price_per_gram', 'price', 'min_price', 'quantity',
-                      'manufacturer', 'commentaries', 'arrival_date']
-
-        for col_name in db_columns:
-            if col_name == 'arrival_date':
-                if product_data.get(col_name) is None: # Use NOW() if not provided
-                    cols.append(f"`{col_name}`")
-                    vals_placeholder.append("NOW()")
-                else: # If provided, use it
-                    cols.append(f"`{col_name}`")
-                    vals_placeholder.append("%s")
-                    vals_list.append(product_data[col_name])
-            elif col_name in product_data:
-                cols.append(f"`{col_name}`")
-                vals_placeholder.append("%s")
-                vals_list.append(product_data[col_name])
-            # If a column isn't in product_data and isn't arrival_date, it might be nullable or have a DB default.
-            # For this example, we assume all defined db_columns either exist in product_data,
-            # are arrival_date, or are otherwise handled by DB (e.g. nullable, default value).
-
-        query = f"INSERT INTO products ({', '.join(cols)}) VALUES ({', '.join(vals_placeholder)})"
-
-        logger.debug(f"Add product query: {query}, values: {vals_list}")
-        cursor.execute(query, vals_list)
-        product_id = cursor.lastrowid
-        connection.commit()
-        logger.info(f"Product {product_data['article_number']} added successfully with ID {product_id}.")
-        return True, f"Товар {product_data.get('article_number')} ({product_data.get('model', '')}) успешно добавлен."
-
-    except Error as e:
-        logger.exception(f"Database error adding product {product_data.get('article_number')}: {e}")
-        if connection.is_connected(): connection.rollback()
-        return False, f"Ошибка БД при добавлении товара: {e}"
-    except Exception as ex:
-        logger.exception(f"General error adding product {product_data.get('article_number')}: {ex}")
-        if connection.is_connected(): connection.rollback()
-        return False, f"Общая ошибка при добавлении товара: {ex}"
-    finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
-
-def get_stock_report_data(store_id: int | None = None) -> list:
-    logger.info(f"Generating stock report data. Store filter: {store_id}")
-    connection = create_connection()
-    if not connection: return []
-    cursor = connection.cursor(dictionary=True)
-    try:
-        base_query = """
-            SELECT
-                p.article_number, p.product_type, p.model, p.metal_type,
-                p.weight, p.quantity, p.price, p.min_price,
-                p.manufacturer, s.name as store_name, p.arrival_date, p.commentaries
-            FROM products p
-            LEFT JOIN stores s ON p.store_id = s.id
-        """
-        params = []
-        if store_id is not None:
-            base_query += " WHERE p.store_id = %s"
-            params.append(store_id)
-
-        base_query += " ORDER BY p.product_type, p.model, p.article_number"
-
-        cursor.execute(base_query, params if params else None)
-        stock_data = cursor.fetchall()
-        logger.info(f"Stock report data fetched. Count: {len(stock_data)}")
-        return stock_data
-    except Error as e:
-        logger.exception(f"Database error generating stock report: {e}")
-        return []
-    finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
-<<<<<<< HEAD
-=======
     return trade_in_id
-
-# --- New functions for Stock Management ---
-def add_product_to_db(product_data: dict):
-    logger.info(f"Attempting to add new product: {product_data.get('article_number')}")
-    connection = create_connection()
-    if not connection:
-        return False, "Ошибка подключения к БД."
-    cursor = connection.cursor(dictionary=True)
-    try:
-        # Check if article_number already exists
-        cursor.execute("SELECT id FROM products WHERE article_number = %s", (product_data['article_number'],))
-        if cursor.fetchone():
-            logger.warning(f"Product with article_number {product_data['article_number']} already exists.")
-            return False, f"Товар с артикулом {product_data['article_number']} уже существует."
-
-        # Ensure all required fields are present and have defaults if necessary
-        # Assuming product_data contains all necessary keys from the products table structure
-        # Example: store_id might come from user context or be a required input
-        required_fields = ['store_id', 'article_number', 'metal_type', 'product_type', 'model', 
-                           'weight', 'price_per_gram', 'price', 'min_price', 'quantity', 'manufacturer']
-        for field in required_fields:
-            if field not in product_data or product_data[field] is None:
-                # Allow quantity to be 0, but not None for other numeric fields if they are NOT NULL
-                if field == 'quantity' and product_data.get(field) is None:
-                    product_data[field] = 0 # Default quantity to 0
-                elif field not in ['commentaries'] : # commentaries can be optional
-                    logger.error(f"Missing required field '{field}' for new product {product_data['article_number']}.")
-                    return False, f"Отсутствует обязательное поле: {field}"
-        
-        # Set arrival_date to now if not provided
-        product_data.setdefault('arrival_date', Error) # Placeholder, will use NOW() in SQL
-
-        cols = []
-        vals_placeholder = []
-        vals = []
-        for key, value in product_data.items():
-            if key == 'arrival_date' and value == Error: # Special handling for NOW()
-                cols.append(f"`{key}`")
-                vals_placeholder.append("NOW()")
-            else:
-                cols.append(f"`{key}`") # Backticks for safety
-                vals_placeholder.append("%s")
-                vals.append(value)
-        
-        query = f"INSERT INTO products ({', '.join(cols)}) VALUES ({', '.join(vals_placeholder)})"
-        
-        logger.debug(f"Add product query: {query}, values: {vals}")
-        cursor.execute(query, vals)
-        connection.commit()
-        product_id = cursor.lastrowid
-        logger.info(f"Product {product_data['article_number']} added successfully with ID {product_id}.")
-        return True, f"Товар {product_data['article_number']} ({product_data.get('model', '')}) успешно добавлен."
-
-    except Error as e:
-        logger.exception(f"Database error adding product {product_data.get('article_number')}: {e}")
-        if connection.is_connected(): connection.rollback()
-        return False, f"Ошибка БД при добавлении товара: {e}"
-    except Exception as ex: # Catch other errors like KeyError
-        logger.exception(f"General error adding product {product_data.get('article_number')}: {ex}")
-        if connection.is_connected(): connection.rollback()
-        return False, f"Общая ошибка при добавлении товара: {ex}"
-    finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
-
-def get_stock_report_data(store_id=None): # Optional filter by store_id
-    logger.info(f"Generating stock report data. Store filter: {store_id}")
-    connection = create_connection()
-    if not connection: return []
-    cursor = connection.cursor(dictionary=True) # Return as dicts
-    try:
-        base_query = """
-            SELECT 
-                p.article_number, p.product_type, p.model, p.metal_type, 
-                p.weight, p.quantity, p.price, p.min_price, 
-                p.manufacturer, s.name as store_name, p.arrival_date, p.commentaries
-            FROM products p
-            LEFT JOIN stores s ON p.store_id = s.id
-        """
-        params = []
-        if store_id:
-            base_query += " WHERE p.store_id = %s"
-            params.append(store_id)
-        
-        base_query += " ORDER BY p.product_type, p.model, p.article_number"
-
-        cursor.execute(base_query, params)
-        stock_data = cursor.fetchall()
-        logger.info(f"Stock report data fetched. Count: {len(stock_data)}")
-        return stock_data
-    except Error as e:
-        logger.exception(f"Database error generating stock report: {e}")
-        return []
-    finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
->>>>>>> effa315 (Implement stock management functionality with add and restock product flows, including state management and stock report generation.)
