@@ -1,3 +1,5 @@
+# Create this file: NewVM/handlers/stock_handler.py
+
 import logging
 from telebot import types
 from state import bot, user_data, user_state as global_main_user_state
@@ -21,12 +23,11 @@ STOCK_STATE_ADD_PRODUCT_MODEL = "STOCK_ADD_PRODUCT_MODEL"
 STOCK_STATE_ADD_PRODUCT_METAL_TYPE = "STOCK_ADD_PRODUCT_METAL_TYPE"
 STOCK_STATE_ADD_PRODUCT_WEIGHT = "STOCK_ADD_PRODUCT_WEIGHT"
 STOCK_STATE_ADD_PRODUCT_PRICE_PER_GRAM = "STOCK_ADD_PRODUCT_PRICE_PER_GRAM"
-STOCK_STATE_ADD_PRODUCT_PRICE = "STOCK_ADD_PRODUCT_PRICE" # Calculated or input? For now, let's assume input.
+STOCK_STATE_ADD_PRODUCT_PRICE = "STOCK_ADD_PRODUCT_PRICE"
 STOCK_STATE_ADD_PRODUCT_MIN_PRICE = "STOCK_ADD_PRODUCT_MIN_PRICE"
 STOCK_STATE_ADD_PRODUCT_QUANTITY = "STOCK_ADD_PRODUCT_QUANTITY"
 STOCK_STATE_ADD_PRODUCT_MANUFACTURER = "STOCK_ADD_PRODUCT_MANUFACTURER"
 STOCK_STATE_ADD_PRODUCT_COMMENTARIES = "STOCK_ADD_PRODUCT_COMMENTARIES"
-# store_id is taken from manager's profile, arrival_date will be NOW()
 STOCK_STATE_ADD_PRODUCT_CONFIRM = "STOCK_ADD_PRODUCT_CONFIRM"
 
 # Restock States
@@ -52,11 +53,11 @@ class StockOperation:
     def __init__(self, chat_id, global_user_state_ref, user_db_data_ref):
         self.chat_id = chat_id
         self.global_user_state = global_user_state_ref
-        self.user_db_data = user_db_data_ref
-        self.current_internal_state = STOCK_STATE_IDLE # Internal FSM state for this operation instance
+        self.user_db_data = user_db_data_ref # This is user_data[chat_id]
+        self.current_internal_state = STOCK_STATE_IDLE
         self.product_data_buffer = {}
         self.restock_data = {}
-        logger.debug(f"Chat {self.chat_id}: StockOperation instance created. User DB data: {self.user_db_data}")
+        logger.debug(f"Chat {self.chat_id}: StockOperation instance created. User DB data from main: {self.user_db_data}")
 
 
     def _set_global_state(self, state_value):
@@ -70,7 +71,6 @@ class StockOperation:
         self.product_data_buffer.clear()
         self.restock_data.clear()
         
-        # Clear global state if it was set by this handler
         current_global_state = self.global_user_state.get(self.chat_id, "")
         if current_global_state.startswith("STOCK_"):
             self.global_user_state.pop(self.chat_id, None)
@@ -87,7 +87,7 @@ class StockOperation:
     # --- Add Product Flow ---
     def start_add_product(self):
         logger.info(f"Chat {self.chat_id}: Starting 'add product' flow.")
-        self.product_data_buffer = {} # Clear previous buffer
+        self.product_data_buffer = {} 
         
         store_id = self.user_db_data.get('store_id')
         if not store_id:
@@ -133,11 +133,10 @@ class StockOperation:
 
     def _process_add_article(self, text):
         if not text: bot.send_message(self.chat_id, "Артикул не может быть пустым.",reply_markup=create_cancel_markup()); return
-        # Check if article exists (optional, add_product_to_db handles it but early check is user-friendly)
-        # existing_product = get_product_by_article(text)
-        # if existing_product:
-        #     bot.send_message(self.chat_id, f"Товар с артикулом {text} уже существует. Введите другой или 'Отмена'.", reply_markup=create_cancel_markup())
-        #     return
+        existing_product = get_product_by_article(text)
+        if existing_product:
+            bot.send_message(self.chat_id, f"Товар с артикулом {text} ({existing_product.get('model', '')}) уже существует. Введите другой или 'Отмена'.", reply_markup=create_cancel_markup())
+            return
         self.product_data_buffer['article_number'] = text
         self._prompt_next_add_step(STOCK_STATE_ADD_PRODUCT_TYPE, "Шаг 2/11: Тип товара (напр., кольцо, цепь):")
     
@@ -176,7 +175,6 @@ class StockOperation:
 
     def _process_add_min_price(self, text):
         min_price = parse_float_input(text)
-        # Min price can be <= price, but not negative.
         if min_price is None or min_price < 0: bot.send_message(self.chat_id, "Мин. цена должна быть неотрицательным числом.",reply_markup=create_cancel_markup()); return
         if min_price > self.product_data_buffer.get('price', float('inf')):
              bot.send_message(self.chat_id, "Мин. цена не может быть больше цены продажи.",reply_markup=create_cancel_markup()); return
@@ -187,32 +185,34 @@ class StockOperation:
         quantity = parse_int_input(text)
         if quantity is None or quantity < 0: bot.send_message(self.chat_id, "Количество должно быть целым неотрицательным числом.",reply_markup=create_cancel_markup()); return
         self.product_data_buffer['quantity'] = quantity
-        self._prompt_next_add_step(STOCK_STATE_ADD_PRODUCT_MANUFACTURER, "Шаг 10/11: Производитель (если есть, иначе пропустить '-' ):")
+        self._prompt_next_add_step(STOCK_STATE_ADD_PRODUCT_MANUFACTURER, "Шаг 10/11: Производитель (если есть, иначе введите '-' ):")
 
     def _process_add_manufacturer(self, text):
-        self.product_data_buffer['manufacturer'] = text if text != '-' else ''
-        self._prompt_next_add_step(STOCK_STATE_ADD_PRODUCT_COMMENTARIES, "Шаг 11/11: Комментарии (если есть, иначе пропустить '-' ):")
+        self.product_data_buffer['manufacturer'] = text if text != '-' else None # Store None if '-'
+        self._prompt_next_add_step(STOCK_STATE_ADD_PRODUCT_COMMENTARIES, "Шаг 11/11: Комментарии (если есть, иначе введите '-' ):")
 
     def _process_add_commentaries(self, text):
-        self.product_data_buffer['commentaries'] = text if text != '-' else ''
-        # All fields collected, move to confirmation
+        self.product_data_buffer['commentaries'] = text if text != '-' else None # Store None if '-'
         self._set_global_state(STOCK_STATE_ADD_PRODUCT_CONFIRM)
         confirm_text = "Проверьте данные нового товара:\n"
-        for key, val in self.product_data_buffer.items():
-            # Simple pretty print for keys
+        # Ensure all required fields for DB are present, even if None
+        expected_keys = ['store_id', 'article_number', 'metal_type', 'product_type', 'model', 
+                           'weight', 'price_per_gram', 'price', 'min_price', 'quantity', 
+                           'manufacturer', 'commentaries']
+        for key in expected_keys:
+            val = self.product_data_buffer.get(key)
             display_key = key.replace('_', ' ').capitalize()
             if key == 'store_id': display_key = 'ID Магазина'
-            confirm_text += f"{display_key}: {val}\n"
+            confirm_text += f"{display_key}: {val if val is not None else 'N/A'}\n"
         confirm_text += "\nДобавить этот товар на склад?"
         bot.send_message(self.chat_id, confirm_text, reply_markup=create_confirmation_markup())
 
     def _process_add_confirm(self, text):
         if text == "Подтвердить":
-            # arrival_date will be set to NOW() by the database query if not provided
-            # self.product_data_buffer['arrival_date'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S') # Or let DB handle
+            # arrival_date is handled by DB function using NOW() if not passed
             success, db_msg = add_product_to_db(self.product_data_buffer)
-            bot.send_message(self.chat_id, db_msg)
-            self.reset_and_remove(reply_markup=create_stock_management_buttons())
+            # No message_text here, db_msg is sent, then reset sends final menu
+            self.reset_and_remove(message_text=db_msg, reply_markup=create_stock_management_buttons())
         elif text == "Отмена":
             self.reset_and_remove("Добавление товара отменено.")
         else:
@@ -237,10 +237,11 @@ class StockOperation:
             if not product:
                 bot.send_message(self.chat_id, f"Товар с артикулом {text} не найден. Попробуйте снова или 'Отмена'.", reply_markup=create_cancel_markup())
                 return
-            # Check if product belongs to manager's store if role is manager
+            
             manager_store_id = self.user_db_data.get('store_id')
             if self.user_db_data.get('role') == 'manager' and product.get('store_id') != manager_store_id:
-                bot.send_message(self.chat_id, f"Товар {text} не принадлежит вашему магазину. Операция невозможна.", reply_markup=create_cancel_markup())
+                bot.send_message(self.chat_id, f"Товар {text} ({product.get('model','')}) не принадлежит вашему магазину ({manager_store_id}). Операция невозможна.", reply_markup=create_cancel_markup())
+                # Stay in this state or reset? For now, stay, user can try another article or cancel.
                 return
 
             self.restock_data['article_number'] = text
@@ -255,24 +256,24 @@ class StockOperation:
                 bot.send_message(self.chat_id, "Количество должно быть целым положительным числом.", reply_markup=create_cancel_markup()); return
             self.restock_data['quantity_to_add'] = qty_to_add
             self._set_global_state(STOCK_STATE_RESTOCK_CONFIRM)
-            confirm_text = f"Пополнить остаток {self.restock_data['product_name']} (Арт: {self.restock_data['article_number']}) на {qty_to_add} шт.?\nНовый остаток будет: {self.restock_data['current_quantity'] + qty_to_add}"
+            new_total = self.restock_data.get('current_quantity', 0) + qty_to_add
+            confirm_text = f"Пополнить остаток {self.restock_data['product_name']} (Арт: {self.restock_data['article_number']}) на {qty_to_add} шт.?\nНовый остаток будет: {new_total}"
             bot.send_message(self.chat_id, confirm_text, reply_markup=create_confirmation_markup())
         
         elif self.current_internal_state == STOCK_STATE_RESTOCK_CONFIRM:
             if text == "Подтвердить":
                 article = self.restock_data['article_number']
                 qty = self.restock_data['quantity_to_add']
-                store_id_context = self.user_db_data.get('store_id') # For logging/context in update_product_quantity
-                success, db_msg = update_product_quantity(article, qty, store_id_context) # Pass store_id for context
-                bot.send_message(self.chat_id, db_msg) # db_msg now comes from update_product_quantity
-                self.reset_and_remove(reply_markup=create_stock_management_buttons())
+                store_id_context = self.user_db_data.get('store_id') 
+                success, db_msg = update_product_quantity(article, qty, store_id_context)
+                self.reset_and_remove(message_text=db_msg, reply_markup=create_stock_management_buttons())
             elif text == "Отмена":
                 self.reset_and_remove("Пополнение остатков отменено.")
             else:
                 bot.send_message(self.chat_id, "Используйте кнопки 'Подтвердить' или 'Отмена'.", reply_markup=create_confirmation_markup())
 
 
-    # --- Stock Report Flow (Direct action, no FSM needed here for simple version) ---
+    # --- Stock Report Flow ---
     def generate_stock_report(self):
         logger.info(f"Chat {self.chat_id}: Generating stock report.")
         store_id_filter = None
@@ -282,64 +283,63 @@ class StockOperation:
             store_id_filter = self.user_db_data.get('store_id')
             if not store_id_filter:
                 logger.warning(f"Chat {self.chat_id}: Manager {self.user_db_data.get('id')} has no store_id. Cannot filter stock report.")
-                bot.send_message(self.chat_id, "Ошибка: не определен ваш магазин для отчета.", reply_markup=create_stock_management_buttons())
-                self.reset_and_remove()
+                self.reset_and_remove(message_text="Ошибка: не определен ваш магазин для отчета.", reply_markup=create_stock_management_buttons())
                 return
-        # Admin sees all stores (store_id_filter remains None)
         
         bot.send_message(self.chat_id, f"Генерирую отчет об остатках {'для вашего магазина' if store_id_filter else 'по всем магазинам'}...", reply_markup=types.ReplyKeyboardRemove())
         try:
             stock_items = get_stock_report_data(store_id_filter)
             if not stock_items:
-                bot.send_message(self.chat_id, "Нет данных для отчета об остатках.", reply_markup=create_stock_management_buttons())
-                self.reset_and_remove()
+                self.reset_and_remove(message_text="Нет данных для отчета об остатках.", reply_markup=create_stock_management_buttons())
                 return
 
             wb = openpyxl.Workbook()
             sheet = wb.active
             headers = [
-                'Артикул', 'Тип товара', 'Модель', 'Тип металла', 'Вес', 
-                'Остаток', 'Цена', 'Мин. Цена', 'Производитель', 'Магазин',
-                'Дата поступления', 'Комментарии'
+                'Артикул', 'Тип товара', 'Модель', 'Тип металла', 'Вес (г)', 
+                'Остаток (шт)', 'Цена (прод.)', 'Мин. Цена (прод.)', 'Производитель', 'Магазин',
+                'Дата поступл.', 'Комментарии'
             ]
             sheet.append(headers)
             for item in stock_items:
-                arrival_date_str = item.get('arrival_date').strftime('%Y-%m-%d') if isinstance(item.get('arrival_date'), (date, datetime)) else ''
+                arrival_date_str = item.get('arrival_date').strftime('%Y-%m-%d %H:%M:%S') if isinstance(item.get('arrival_date'), (date, datetime)) else str(item.get('arrival_date', ''))
+
                 row_data = [
                     item.get('article_number', ''), item.get('product_type', ''), item.get('model', ''),
                     item.get('metal_type', ''), 
-                    float(item.get('weight', 0)) if item.get('weight') is not None else '', 
-                    int(item.get('quantity', 0)) if item.get('quantity') is not None else '',
-                    float(item.get('price', 0)) if item.get('price') is not None else '', 
-                    float(item.get('min_price', 0)) if item.get('min_price') is not None else '', 
+                    item.get('weight'), # Already float/decimal from DB
+                    item.get('quantity'), # Already int
+                    item.get('price'), # Already float/decimal
+                    item.get('min_price'), # Already float/decimal
                     item.get('manufacturer', ''), item.get('store_name', ''), 
                     arrival_date_str,
                     item.get('commentaries', '')
                 ]
+                # Convert None to empty string for Excel
+                row_data = ["" if v is None else v for v in row_data]
                 sheet.append(row_data)
             
             report_buffer = io.BytesIO()
             wb.save(report_buffer)
             report_buffer.seek(0)
-            filename = f"stock_report_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+            filename = f"stock_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
             bot.send_document(self.chat_id, report_buffer, visible_file_name=filename, caption="Отчет об остатках готов.")
+            # Message and buttons are sent by reset_and_remove after this.
         except Exception as e:
             logger.exception(f"Chat {self.chat_id}: Error generating stock report: {e}")
             bot.send_message(self.chat_id, "Ошибка при создании отчета об остатках.")
         finally:
-            # Send stock menu buttons after report or error
-            self.reset_and_remove(reply_markup=create_stock_management_buttons())
+            self.reset_and_remove(reply_markup=create_stock_management_buttons()) # Ensure menu returns
 
 
 def register_stock_handlers(bot_instance_main, global_user_data_ref, global_user_state_ref):
-    # bot_instance_main is already the global bot from state.py
     
     @bot.message_handler(func=lambda msg: msg.text == "Добавить товар" and \
                          global_user_data_ref.get(msg.chat.id,{}).get('role') in ['admin','manager'] and \
                          global_user_data_ref.get(msg.chat.id,{}).get('is_active'))
     def initiate_add_product(message: types.Message):
         chat_id = message.chat.id
-        logger.info(f"Chat {chat_id}: 'Добавить товар' selected.")
+        logger.info(f"Chat {chat_id}: 'Добавить товар' selected by {global_user_data_ref.get(chat_id,{}).get('role')}.")
         if chat_id in stock_operations_handler: stock_operations_handler[chat_id].reset_and_remove()
         stock_operations_handler[chat_id] = StockOperation(chat_id, global_user_state_ref, global_user_data_ref[chat_id])
         stock_operations_handler[chat_id].start_add_product()
@@ -349,19 +349,24 @@ def register_stock_handlers(bot_instance_main, global_user_data_ref, global_user
                          global_user_data_ref.get(msg.chat.id,{}).get('is_active'))
     def initiate_stock_report(message: types.Message):
         chat_id = message.chat.id
-        logger.info(f"Chat {chat_id}: 'Отчет об остатках' selected.")
-        if chat_id in stock_operations_handler : stock_operations_handler[chat_id].reset_and_remove() # Reset any previous op
-        # Create a temporary instance just for this action, it will self-destruct
+        logger.info(f"Chat {chat_id}: 'Отчет об остатках' selected by {global_user_data_ref.get(chat_id,{}).get('role')}.")
+        if chat_id in stock_operations_handler : stock_operations_handler[chat_id].reset_and_remove()
+        
+        # global_main_user_state.pop(chat_id, None) # Clear any FSM state before direct action
+        # For direct actions like reports, ensure no FSM state is lingering for this user for stock ops
+        current_global_state = global_user_state_ref.get(chat_id, "")
+        if current_global_state.startswith("STOCK_"):
+            global_user_state_ref.pop(chat_id, None)
+
         stock_instance = StockOperation(chat_id, global_user_state_ref, global_user_data_ref[chat_id])
-        global_main_user_state.pop(chat_id, None) # Ensure no FSM state is active
-        stock_instance.generate_stock_report()
+        stock_instance.generate_stock_report() # This method now calls reset_and_remove internally
 
     @bot.message_handler(func=lambda msg: msg.text == "Пополнить остатки" and \
                          global_user_data_ref.get(msg.chat.id,{}).get('role') in ['admin','manager'] and \
                          global_user_data_ref.get(msg.chat.id,{}).get('is_active'))
     def initiate_restock_product(message: types.Message):
         chat_id = message.chat.id
-        logger.info(f"Chat {chat_id}: 'Пополнить остатки' selected.")
+        logger.info(f"Chat {chat_id}: 'Пополнить остатки' selected by {global_user_data_ref.get(chat_id,{}).get('role')}.")
         if chat_id in stock_operations_handler: stock_operations_handler[chat_id].reset_and_remove()
         stock_operations_handler[chat_id] = StockOperation(chat_id, global_user_state_ref, global_user_data_ref[chat_id])
         stock_operations_handler[chat_id].start_restock_product()
@@ -371,14 +376,18 @@ def register_stock_handlers(bot_instance_main, global_user_data_ref, global_user
         chat_id = message.chat.id
         if chat_id in stock_operations_handler:
             instance = stock_operations_handler[chat_id]
-            # Route based on the instance's internal state, which should match global state prefix
-            if instance.current_internal_state.startswith("STOCK_ADD_"):
-                instance.handle_add_product_message(message)
-            elif instance.current_internal_state.startswith("STOCK_RESTOCK_"):
-                instance.handle_restock_message(message)
+            # Integrity check: global state must match instance's expectation
+            if global_user_state_ref.get(chat_id) == instance.current_internal_state:
+                if instance.current_internal_state.startswith("STOCK_ADD_"):
+                    instance.handle_add_product_message(message)
+                elif instance.current_internal_state.startswith("STOCK_RESTOCK_"):
+                    instance.handle_restock_message(message)
+                else:
+                    logger.warning(f"Chat {chat_id}: STOCK_ state {global_user_state_ref.get(chat_id)} but internal state {instance.current_internal_state} not matching ADD or RESTOCK prefix.")
+                    instance.reset_and_remove("Произошла внутренняя ошибка состояния (1). Операция отменена.")
             else:
-                logger.warning(f"Chat {chat_id}: STOCK_ state {global_user_state_ref.get(chat_id)} but internal state {instance.current_internal_state} not matching ADD or RESTOCK prefix.")
-                instance.reset_and_remove("Произошла внутренняя ошибка состояния. Операция отменена.")
+                logger.error(f"Chat {chat_id}: State Mismatch! Global: {global_user_state_ref.get(chat_id)}, Instance: {instance.current_internal_state}. Resetting.")
+                instance.reset_and_remove("Произошла внутренняя ошибка состояния (2). Операция отменена.")
         else: 
             logger.warning(f"Chat {chat_id}: Message for STOCK_ state but no handler instance. State: {global_user_state_ref.get(chat_id)}. Resetting state.")
             global_user_state_ref.pop(chat_id, None)
