@@ -2,8 +2,8 @@
 
 import logging
 from telebot import types
-from state import bot, user_data, user_state as global_main_user_state
-from database import add_product_to_db, get_stock_report_data, update_product_quantity, get_product_by_article
+from state import bot, user_data, user_state as global_main_user_state # type: ignore
+from database import add_product_to_db, get_stock_report_data, update_product_quantity, get_product_by_article, get_distinct_product_types, get_distinct_metal_types
 from buttons import create_cancel_markup, create_stock_management_buttons, create_confirmation_markup
 import io
 import openpyxl
@@ -51,9 +51,6 @@ def parse_int_input(text_input):
     except ValueError:
         return None
 
-# Predefined choices for ENUM-like fields
-PREDEFINED_PRODUCT_TYPES = ["Кольцо", "Серьги", "Цепь", "Браслет", "Подвеска", "Другое"]
-PREDEFINED_METAL_TYPES = ["Золото 585", "Золото 750", "Серебро 925", "Платина 950", "Другое"]
 
 class StockOperation:
     def __init__(self, chat_id, global_user_state_ref, user_db_data_ref):
@@ -148,8 +145,17 @@ class StockOperation:
     
     def _prompt_for_product_type(self):
         self._set_global_state(STOCK_STATE_AWAITING_PRODUCT_TYPE_CHOICE)
+        
+        product_types_from_db = get_distinct_product_types()
+        # Ensure "Другое" is always an option and avoid duplicates if it's already in DB
+        choices = sorted(list(set(product_types_from_db + ["Другое"])))
+
+        if not choices: # Should not happen if "Другое" is always added, but as a safeguard
+            bot.send_message(self.chat_id, "Не удалось загрузить типы товаров. Попробуйте позже или отмените операцию.", reply_markup=create_cancel_markup())
+            return
+            
         keyboard = types.InlineKeyboardMarkup(row_width=2)
-        buttons = [types.InlineKeyboardButton(text=ptype, callback_data=f"stock_add_prodtype_{ptype}") for ptype in PREDEFINED_PRODUCT_TYPES]
+        buttons = [types.InlineKeyboardButton(text=ptype, callback_data=f"stock_add_prodtype_{ptype}") for ptype in choices]
         keyboard.add(*buttons)
         # Add a cancel inline button as well, or rely on the ReplyKeyboard "Отмена"
         # keyboard.add(types.InlineKeyboardButton(text="Отменить ввод", callback_data="stock_add_cancel_inline"))
@@ -177,8 +183,16 @@ class StockOperation:
 
     def _prompt_for_metal_type(self):
         self._set_global_state(STOCK_STATE_AWAITING_METAL_TYPE_CHOICE)
+        
+        metal_types_from_db = get_distinct_metal_types()
+        choices = sorted(list(set(metal_types_from_db + ["Другое"])))
+
+        if not choices:
+            bot.send_message(self.chat_id, "Не удалось загрузить типы металлов. Попробуйте позже или отмените операцию.", reply_markup=create_cancel_markup())
+            return
+
         keyboard = types.InlineKeyboardMarkup(row_width=2)
-        buttons = [types.InlineKeyboardButton(text=mtype, callback_data=f"stock_add_metaltype_{mtype}") for mtype in PREDEFINED_METAL_TYPES]
+        buttons = [types.InlineKeyboardButton(text=mtype, callback_data=f"stock_add_metaltype_{mtype}") for mtype in choices]
         keyboard.add(*buttons)
         bot.send_message(self.chat_id, "Шаг 4/11: Выберите Тип металла:", reply_markup=keyboard)
         bot.send_message(self.chat_id, "Или нажмите 'Отмена' на клавиатуре ниже.", reply_markup=create_cancel_markup())

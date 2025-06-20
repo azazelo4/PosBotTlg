@@ -649,3 +649,45 @@ def get_stock_report_data(store_id=None): # Optional filter by store_id
         if connection.is_connected():
             cursor.close()
             connection.close()
+
+def get_distinct_product_types():
+    logger.debug("Fetching distinct product types from database.")
+    connection = create_connection()
+    if not connection: return []
+    cursor = connection.cursor() # Default cursor returns tuples
+    product_types_list = []
+    try:
+        # Select distinct, non-null, non-empty product_type values, ordered
+        query = "SELECT DISTINCT product_type FROM products WHERE product_type IS NOT NULL AND product_type != '' ORDER BY product_type"
+        cursor.execute(query)
+        results = cursor.fetchall()
+        product_types_list = [row[0] for row in results] # Extract the first element of each tuple
+        logger.info(f"Successfully fetched {len(product_types_list)} distinct product types: {product_types_list}")
+    except Error as e:
+        logger.exception("Error fetching distinct product types from database.")
+    finally:
+        if connection.is_connected():
+            cursor.close()
+            connection.close()
+            logger.debug("Database connection closed after fetching product types.")
+    return product_types_list
+
+def get_distinct_metal_types():
+    logger.debug("Fetching distinct metal types from database.")
+    connection = create_connection()
+    if not connection: return []
+    cursor = connection.cursor()
+    metal_types_list = []
+    try:
+        query = "SELECT DISTINCT metal_type FROM products WHERE metal_type IS NOT NULL AND metal_type != '' ORDER BY metal_type"
+        cursor.execute(query)
+        results = cursor.fetchall()
+        metal_types_list = [row[0] for row in results]
+        logger.info(f"Successfully fetched {len(metal_types_list)} distinct metal types: {metal_types_list}")
+    except Error as e:
+        logger.exception("Error fetching distinct metal types from database.")
+    finally:
+        if connection.is_connected():
+            cursor.close()
+            connection.close()
+            logger.debug("Database connection closed after fetching metal types.")
