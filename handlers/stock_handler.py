@@ -17,6 +17,8 @@ stock_operations_handler = {} # Stores StockOperation instances {chat_id: instan
 STOCK_STATE_IDLE = "STOCK_IDLE" # Should not be set in global_main_user_state
 
 # Add Product States
+STOCK_STATE_AWAITING_PRODUCT_TYPE_CHOICE = "STOCK_AWAITING_PRODUCT_TYPE_CHOICE"
+STOCK_STATE_AWAITING_METAL_TYPE_CHOICE = "STOCK_AWAITING_METAL_TYPE_CHOICE"
 STOCK_STATE_ADD_PRODUCT_ARTICLE = "STOCK_ADD_PRODUCT_ARTICLE"
 STOCK_STATE_ADD_PRODUCT_TYPE = "STOCK_ADD_PRODUCT_TYPE"
 STOCK_STATE_ADD_PRODUCT_MODEL = "STOCK_ADD_PRODUCT_MODEL"
@@ -48,6 +50,10 @@ def parse_int_input(text_input):
         return int(text_input)
     except ValueError:
         return None
+
+# Predefined choices for ENUM-like fields
+PREDEFINED_PRODUCT_TYPES = ["Кольцо", "Серьги", "Цепь", "Браслет", "Подвеска", "Другое"]
+PREDEFINED_METAL_TYPES = ["Золото 585", "Золото 750", "Серебро 925", "Платина 950", "Другое"]
 
 class StockOperation:
     def __init__(self, chat_id, global_user_state_ref, user_db_data_ref):
@@ -107,9 +113,9 @@ class StockOperation:
 
         state_actions = {
             STOCK_STATE_ADD_PRODUCT_ARTICLE: self._process_add_article,
-            STOCK_STATE_ADD_PRODUCT_TYPE: self._process_add_product_type,
+            # STOCK_STATE_ADD_PRODUCT_TYPE is now handled by _prompt_for_product_type and its callback
             STOCK_STATE_ADD_PRODUCT_MODEL: self._process_add_model,
-            STOCK_STATE_ADD_PRODUCT_METAL_TYPE: self._process_add_metal_type,
+            # STOCK_STATE_ADD_PRODUCT_METAL_TYPE is now handled by _prompt_for_metal_type and its callback
             STOCK_STATE_ADD_PRODUCT_WEIGHT: self._process_add_weight,
             STOCK_STATE_ADD_PRODUCT_PRICE_PER_GRAM: self._process_add_price_per_gram,
             STOCK_STATE_ADD_PRODUCT_PRICE: self._process_add_price,
@@ -138,21 +144,51 @@ class StockOperation:
             bot.send_message(self.chat_id, f"Товар с артикулом {text} ({existing_product.get('model', '')}) уже существует. Введите другой или 'Отмена'.", reply_markup=create_cancel_markup())
             return
         self.product_data_buffer['article_number'] = text
-        self._prompt_next_add_step(STOCK_STATE_ADD_PRODUCT_TYPE, "Шаг 2/11: Тип товара (напр., кольцо, цепь):")
+        self._prompt_for_product_type()
     
-    def _process_add_product_type(self, text):
-        if not text: bot.send_message(self.chat_id, "Тип товара не может быть пустым.",reply_markup=create_cancel_markup()); return
-        self.product_data_buffer['product_type'] = text
+    def _prompt_for_product_type(self):
+        self._set_global_state(STOCK_STATE_AWAITING_PRODUCT_TYPE_CHOICE)
+        keyboard = types.InlineKeyboardMarkup(row_width=2)
+        buttons = [types.InlineKeyboardButton(text=ptype, callback_data=f"stock_add_prodtype_{ptype}") for ptype in PREDEFINED_PRODUCT_TYPES]
+        keyboard.add(*buttons)
+        # Add a cancel inline button as well, or rely on the ReplyKeyboard "Отмена"
+        # keyboard.add(types.InlineKeyboardButton(text="Отменить ввод", callback_data="stock_add_cancel_inline"))
+        bot.send_message(self.chat_id, "Шаг 2/11: Выберите Тип товара:", reply_markup=keyboard)
+        # Send cancel reply keyboard as well, in case user wants to use that
+        bot.send_message(self.chat_id, "Или нажмите 'Отмена' на клавиатуре ниже, чтобы прервать добавление.", reply_markup=create_cancel_markup())
+
+
+    def handle_product_type_choice_callback(self, call: types.CallbackQuery):
+        chat_id = call.message.chat.id
+        product_type = call.data.split("stock_add_prodtype_")[-1]
+        
+        bot.answer_callback_query(call.id)
+        bot.delete_message(chat_id, call.message.message_id) # Remove the inline keyboard message
+        # Potentially remove the "Или нажмите 'Отмена'..." message too if we can get its ID or send it differently
+
+        self.product_data_buffer['product_type'] = product_type
+        logger.info(f"Chat {chat_id}: Product type selected: {product_type}")
         self._prompt_next_add_step(STOCK_STATE_ADD_PRODUCT_MODEL, "Шаг 3/11: Модель/Название товара:")
 
     def _process_add_model(self, text):
         if not text: bot.send_message(self.chat_id, "Модель не может быть пустой.",reply_markup=create_cancel_markup()); return
         self.product_data_buffer['model'] = text
-        self._prompt_next_add_step(STOCK_STATE_ADD_PRODUCT_METAL_TYPE, "Шаг 4/11: Тип металла (напр., Золото 585, Серебро 925):")
+        self._prompt_for_metal_type()
 
-    def _process_add_metal_type(self, text):
-        if not text: bot.send_message(self.chat_id, "Тип металла не может быть пустым.",reply_markup=create_cancel_markup()); return
-        self.product_data_buffer['metal_type'] = text
+    def _prompt_for_metal_type(self):
+        self._set_global_state(STOCK_STATE_AWAITING_METAL_TYPE_CHOICE)
+        keyboard = types.InlineKeyboardMarkup(row_width=2)
+        buttons = [types.InlineKeyboardButton(text=mtype, callback_data=f"stock_add_metaltype_{mtype}") for mtype in PREDEFINED_METAL_TYPES]
+        keyboard.add(*buttons)
+        bot.send_message(self.chat_id, "Шаг 4/11: Выберите Тип металла:", reply_markup=keyboard)
+        bot.send_message(self.chat_id, "Или нажмите 'Отмена' на клавиатуре ниже.", reply_markup=create_cancel_markup())
+
+    def handle_metal_type_choice_callback(self, call: types.CallbackQuery):
+        bot.answer_callback_query(call.id)
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+        metal_type = call.data.split("stock_add_metaltype_")[-1]
+        self.product_data_buffer['metal_type'] = metal_type
+        logger.info(f"Chat {call.message.chat.id}: Metal type selected: {metal_type}")
         self._prompt_next_add_step(STOCK_STATE_ADD_PRODUCT_WEIGHT, "Шаг 5/11: Вес (в граммах, например, 2.53):")
 
     def _process_add_weight(self, text):
@@ -392,5 +428,25 @@ def register_stock_handlers(bot_instance_main, global_user_data_ref, global_user
             logger.warning(f"Chat {chat_id}: Message for STOCK_ state but no handler instance. State: {global_user_state_ref.get(chat_id)}. Resetting state.")
             global_user_state_ref.pop(chat_id, None)
             bot.send_message(chat_id, "Произошла ошибка. Пожалуйста, начните операцию со складом заново.", reply_markup=create_stock_management_buttons())
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("stock_add_prodtype_"))
+    def cb_product_type_select(call: types.CallbackQuery):
+        chat_id = call.message.chat.id
+        if chat_id in stock_operations_handler and \
+           stock_operations_handler[chat_id].current_internal_state == STOCK_STATE_AWAITING_PRODUCT_TYPE_CHOICE:
+            stock_operations_handler[chat_id].handle_product_type_choice_callback(call)
+        else:
+            bot.answer_callback_query(call.id, "Истек срок действия выбора или операция отменена.")
+            bot.delete_message(chat_id, call.message.message_id) # Clean up the old keyboard
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("stock_add_metaltype_"))
+    def cb_metal_type_select(call: types.CallbackQuery):
+        chat_id = call.message.chat.id
+        if chat_id in stock_operations_handler and \
+           stock_operations_handler[chat_id].current_internal_state == STOCK_STATE_AWAITING_METAL_TYPE_CHOICE:
+            stock_operations_handler[chat_id].handle_metal_type_choice_callback(call)
+        else:
+            bot.answer_callback_query(call.id, "Истек срок действия выбора или операция отменена.")
+            bot.delete_message(chat_id, call.message.message_id) # Clean up
 
     logger.info("Stock handlers registered.")
