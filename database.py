@@ -650,44 +650,48 @@ def get_stock_report_data(store_id=None): # Optional filter by store_id
             cursor.close()
             connection.close()
 
-def get_distinct_product_types():
-    logger.debug("Fetching distinct product types from database.")
+def get_enum_or_distinct_values(table_name, column_name, add_other_option=True):
+    logger.debug(f"Fetching ENUM/distinct values for {table_name}.{column_name}")
     connection = create_connection()
     if not connection: return []
-    cursor = connection.cursor() # Default cursor returns tuples
-    product_types_list = []
+    cursor = connection.cursor(dictionary=True) # Use dictionary cursor to get column info by name
+    values_list = []
     try:
-        # Select distinct, non-null, non-empty product_type values, ordered
-        query = "SELECT DISTINCT product_type FROM products WHERE product_type IS NOT NULL AND product_type != '' ORDER BY product_type"
-        cursor.execute(query)
-        results = cursor.fetchall()
-        product_types_list = [row[0] for row in results] # Extract the first element of each tuple
-        logger.info(f"Successfully fetched {len(product_types_list)} distinct product types: {product_types_list}")
-    except Error as e:
-        logger.exception("Error fetching distinct product types from database.")
-    finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
-            logger.debug("Database connection closed after fetching product types.")
-    return product_types_list
+        # First, try to get ENUM values if the column is ENUM
+        query_schema = f"SHOW COLUMNS FROM `{table_name}` LIKE %s"
+        cursor.execute(query_schema, (column_name,))
+        column_info = cursor.fetchone()
 
-def get_distinct_metal_types():
-    logger.debug("Fetching distinct metal types from database.")
-    connection = create_connection()
-    if not connection: return []
-    cursor = connection.cursor()
-    metal_types_list = []
-    try:
-        query = "SELECT DISTINCT metal_type FROM products WHERE metal_type IS NOT NULL AND metal_type != '' ORDER BY metal_type"
-        cursor.execute(query)
-        results = cursor.fetchall()
-        metal_types_list = [row[0] for row in results]
-        logger.info(f"Successfully fetched {len(metal_types_list)} distinct metal types: {metal_types_list}")
+        if column_info and 'Type' in column_info:
+            type_def = column_info['Type']
+            if type_def.lower().startswith("enum(") and type_def.endswith(")"):
+                values_str = type_def[len("enum("):-1]
+                values_list = [val.strip("'") for val in values_str.split(',')]
+                logger.info(f"Successfully fetched ENUM values for {table_name}.{column_name}: {values_list}")
+            else:
+                # If not ENUM, fallback to fetching distinct values
+                logger.debug(f"{table_name}.{column_name} is not ENUM, fetching distinct values.")
+                # Ensure cursor is reset or use a new one if necessary, though it should be fine
+                cursor_distinct = connection.cursor() # Default cursor for simple list
+                query_distinct = f"SELECT DISTINCT `{column_name}` FROM `{table_name}` WHERE `{column_name}` IS NOT NULL AND `{column_name}` != '' ORDER BY `{column_name}`"
+                cursor_distinct.execute(query_distinct)
+                results_distinct = cursor_distinct.fetchall()
+                values_list = [row[0] for row in results_distinct]
+                logger.info(f"Successfully fetched {len(values_list)} distinct values for {table_name}.{column_name}: {values_list}")
+                cursor_distinct.close()
+        else:
+            logger.warning(f"Could not retrieve column info for {table_name}.{column_name}")
+
+        if add_other_option and "Другое" not in values_list:
+            values_list.append("Другое")
+        
+        values_list = sorted(list(set(values_list))) # Ensure uniqueness and sort
+
     except Error as e:
-        logger.exception("Error fetching distinct metal types from database.")
+        logger.exception(f"Error fetching ENUM/distinct values for {table_name}.{column_name}")
     finally:
         if connection.is_connected():
             cursor.close()
             connection.close()
-            logger.debug("Database connection closed after fetching metal types.")
+            logger.debug(f"Database connection closed after fetching values for {table_name}.{column_name}")
+    return values_list
