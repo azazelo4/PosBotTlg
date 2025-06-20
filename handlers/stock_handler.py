@@ -3,7 +3,7 @@
 import logging
 from telebot import types
 from state import bot, user_data, user_state as global_main_user_state # type: ignore
-from database import add_product_to_db, get_stock_report_data, update_product_quantity, get_product_by_article, get_distinct_product_types, get_distinct_metal_types
+from database import add_product_to_db, get_stock_report_data, update_product_quantity, get_product_by_article, get_enum_or_distinct_values
 from buttons import create_cancel_markup, create_stock_management_buttons, create_confirmation_markup
 import io
 import openpyxl
@@ -146,9 +146,9 @@ class StockOperation:
     def _prompt_for_product_type(self):
         self._set_global_state(STOCK_STATE_AWAITING_PRODUCT_TYPE_CHOICE)
         
-        product_types_from_db = get_distinct_product_types()
+        product_types_from_db = get_enum_or_distinct_values('products', 'product_type', add_other_option=True)
         # Ensure "Другое" is always an option and avoid duplicates if it's already in DB
-        choices = sorted(list(set(product_types_from_db + ["Другое"])))
+        choices = product_types_from_db # get_enum_or_distinct_values already handles "Другое" and sorting
 
         if not choices: # Should not happen if "Другое" is always added, but as a safeguard
             bot.send_message(self.chat_id, "Не удалось загрузить типы товаров. Попробуйте позже или отмените операцию.", reply_markup=create_cancel_markup())
@@ -184,8 +184,8 @@ class StockOperation:
     def _prompt_for_metal_type(self):
         self._set_global_state(STOCK_STATE_AWAITING_METAL_TYPE_CHOICE)
         
-        metal_types_from_db = get_distinct_metal_types()
-        choices = sorted(list(set(metal_types_from_db + ["Другое"])))
+        metal_types_from_db = get_enum_or_distinct_values('products', 'metal_type', add_other_option=True)
+        choices = metal_types_from_db # get_enum_or_distinct_values already handles "Другое" and sorting
 
         if not choices:
             bot.send_message(self.chat_id, "Не удалось загрузить типы металлов. Попробуйте позже или отмените операцию.", reply_markup=create_cancel_markup())
