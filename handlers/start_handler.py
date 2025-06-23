@@ -60,10 +60,10 @@ def contact_handler(message: types.Message):
             logger.info(f"Chat {chat_id}: User {phone_number} (DB ID: {user_data[chat_id]['id']}) authorized successfully. Role: {user_data[chat_id]['role']}.")
 
             # --- NEW: Update user's chat_id in DB ---
-            from database import update_user_chat_id # Local import to avoid circular dependency
-            success, msg = update_user_chat_id(user_data[chat_id]['id'], chat_id)
-            if not success:
-                logger.warning(f"Chat {chat_id}: Failed to update chat_id for user {user_data[chat_id]['id']}: {msg}")
+            # from database import update_user_chat_id # Local import to avoid circular dependency
+            # success, msg = update_user_chat_id(user_data[chat_id]['id'], chat_id)
+            # if not success:
+            #     logger.warning(f"Chat {chat_id}: Failed to update chat_id for user {user_data[chat_id]['id']}: {msg}")
             # --- END NEW ---
             reply_text = f"Здравствуйте, {user_data[chat_id].get('name', '')} {user_data[chat_id].get('surename', '')}!\n"
             reply_text += f"Вы авторизованы как {user_data[chat_id]['role']}."
