@@ -84,7 +84,179 @@ def get_product_by_article(article_number):
             logger.debug("Database connection closed for get_product_by_article.")
     return product
 
-def get_sale_and_product_details_by_sale_id(sale_id):
+def get_sales_summary_data(start_date, end_date):
+    """
+    Generates a summary of sales data for a given period, including overall totals
+    and a breakdown by payment type.
+    Returns a dictionary with 'overall_summary' and 'payment_type_breakdown'.
+    """
+    logger.debug(f"Generating sales summary for {start_date} to {end_date}")
+    connection = create_connection()
+    if not connection: 
+        logger.error("Failed to create database connection for get_sales_summary_data.")
+        return None
+
+    cursor = connection.cursor(dictionary=True)
+    summary_data = {
+        'overall_summary': {},
+        'payment_type_breakdown': []
+    }
+    try:
+        # Overall Summary
+        overall_query = """
+        SELECT
+            COUNT(s.id) AS total_sales_count,
+            SUM(s.sold_price) AS total_sales_amount,
+            AVG(s.sold_price) AS average_sale_price
+        FROM sales s
+        WHERE s.sale_date BETWEEN %s AND %s;
+        """
+        cursor.execute(overall_query, (start_date, end_date))
+        summary_data['overall_summary'] = cursor.fetchone()
+        logger.debug(f"Overall sales summary: {summary_data['overall_summary']}")
+
+        # Payment Type Breakdown
+        payment_type_query = """
+        SELECT
+            s.payment_type,
+            COUNT(s.id) AS payment_type_sales_count,
+            SUM(s.sold_price) AS payment_type_sales_amount
+        FROM sales s
+        WHERE s.sale_date BETWEEN %s AND %s
+        GROUP BY s.payment_type
+        ORDER BY s.payment_type;
+        """
+        cursor.execute(payment_type_query, (start_date, end_date))
+        summary_data['payment_type_breakdown'] = cursor.fetchall()
+        logger.debug(f"Payment type breakdown: {summary_data['payment_type_breakdown']}")
+
+    except Error as e:
+        logger.exception(f"Error generating sales summary: {e}")
+        return None
+    finally:
+        if connection.is_connected():
+            cursor.close()
+            connection.close()
+            logger.debug("Database connection closed after generating sales summary.")
+    return summary_data
+
+def get_returns_summary_data(start_date, end_date):
+    """Generates a summary of returns data for a given period."""
+    logger.debug(f"Generating returns summary for {start_date} to {end_date}")
+    connection = create_connection()
+    if not connection: return None
+    cursor = connection.cursor(dictionary=True)
+    summary = {}
+    try:
+        query = """
+        SELECT
+            COUNT(id) AS total_returns_count,
+            SUM(return_price) AS total_returns_amount
+        FROM returns
+        WHERE return_date BETWEEN %s AND %s;
+        """
+        cursor.execute(query, (start_date, end_date))
+        summary = cursor.fetchone()
+    except Error as e:
+        logger.exception(f"Error generating returns summary: {e}")
+        return None
+    finally:
+        if connection.is_connected():
+            cursor.close()
+            connection.close()
+    return summary
+
+def get_buybacks_summary_data(start_date, end_date):
+    """Generates a summary of buybacks data for a given period."""
+    logger.debug(f"Generating buybacks summary for {start_date} to {end_date}")
+    connection = create_connection()
+    if not connection: return None
+    cursor = connection.cursor(dictionary=True)
+    summary = {}
+    try:
+        query = """
+        SELECT
+            COUNT(id) AS total_buybacks_count,
+            SUM(buyback_price) AS total_buybacks_amount
+        FROM buybacks
+        WHERE buyback_date BETWEEN %s AND %s;
+        """
+        cursor.execute(query, (start_date, end_date))
+        summary = cursor.fetchone()
+    except Error as e:
+        logger.exception(f"Error generating buybacks summary: {e}")
+        return None
+    finally:
+        if connection.is_connected():
+            cursor.close()
+            connection.close()
+    return summary
+
+def get_low_stock_products(threshold):
+    """
+    Fetches products with quantity less than or equal to the threshold
+    and where track_stock is enabled.
+    """
+    logger.debug(f"Fetching products with quantity <= {threshold} and track_stock = 1.")
+    connection = create_connection()
+    if not connection: return []
+    cursor = connection.cursor(dictionary=True)
+    low_stock_items = []
+    try:
+        query = """
+        SELECT article_number, model, quantity, Store
+        FROM products
+        WHERE quantity <= %s AND track_stock = 1
+        ORDER BY Store, model;
+        """
+        cursor.execute(query, (threshold,))
+        low_stock_items = cursor.fetchall()
+        logger.info(f"Found {len(low_stock_items)} low stock items.")
+    except Error as e:
+        logger.exception(f"Error fetching low stock products: {e}")
+    finally:
+        if connection.is_connected():
+            cursor.close()
+            connection.close()
+    return low_stock_items
+
+def find_sales_by_article_and_date(article_number, sale_date):
+    """Finds all sales for a given article on a specific date."""
+    logger.debug(f"Searching for sales with article '{article_number}' on date '{sale_date}'")
+    connection = create_connection()
+    if not connection: return []
+    cursor = connection.cursor(dictionary=True)
+    sales_list = []
+    try:
+        # This query joins sales and products to find sales by article number and date.
+        # It retrieves all necessary details to present to the user or proceed.
+        query = """
+        SELECT 
+            s.id as sale_id, 
+            s.sold_price, 
+            s.payment_type as sale_payment_type, 
+            s.sale_date,
+            p.id as product_id, 
+            p.article_number, 
+            p.model as product_model, 
+            p.product_type
+        FROM sales s
+        JOIN products p ON s.product_id = p.id
+        WHERE p.article_number = %s AND DATE(s.sale_date) = %s
+        ORDER BY s.sale_date ASC
+        """
+        cursor.execute(query, (article_number, sale_date))
+        sales_list = cursor.fetchall()
+        logger.info(f"Found {len(sales_list)} sales for article '{article_number}' on {sale_date}.")
+    except Error as e:
+        logger.error(f"Error finding sales for article {article_number} on {sale_date}: {e}")
+    finally:
+        if connection.is_connected():
+            cursor.close()
+            connection.close()
+    return sales_list
+
+def get_sale_details_by_id(sale_id):
     logger.debug(f"Fetching sale and product details for sale_id: {sale_id}")
     connection = create_connection()
     if not connection: return None
@@ -117,7 +289,7 @@ def get_sale_and_product_details_by_sale_id(sale_id):
         if connection.is_connected():
             cursor.close()
             connection.close()
-            logger.debug(f"Database connection closed for get_sale_and_product_details_by_sale_id (sale_id: {sale_id}).")
+            logger.debug(f"Database connection closed for get_sale_details_by_id (sale_id: {sale_id}).")
     return details
 
 def _update_product_quantity_with_cursor(cursor, product_article, quantity_change):
@@ -548,7 +720,7 @@ def add_product_to_db(product_data: dict):
         # Ensure all required fields are present and have defaults if necessary
         # Assuming product_data contains all necessary keys from the products table structure
         # Changed 'store_id' to 'Store'
-        required_fields = ['Store', 'article_number', 'metal_type', 'product_type', 'model',
+        required_fields = ['Store', 'article_number', 'metal_type', 'product_type', 'model', 'track_stock', # Added track_stock
                            'weight', 'price_per_gram', 'price', 'min_price', 'quantity', 'manufacturer']
         for field in required_fields:
             if field not in product_data or product_data[field] is None:

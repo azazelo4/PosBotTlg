@@ -1,5 +1,6 @@
 import logging
 from telebot import types
+from apscheduler.schedulers.background import BackgroundScheduler
 from buttons import (
     create_cash_operations_buttons, create_staff_management_buttons, 
     create_admin_buttons, create_cashier_buttons, create_manager_buttons,
@@ -14,7 +15,10 @@ from handlers.buyback_handler import register_buyback_handlers # Corrected impor
 from handlers.return_handler import register_return_handlers # Corrected import
 from handlers.tradein_handler import register_tradein_handlers # Corrected import
 from handlers.stock_handler import register_stock_handlers, stock_operations_handler # Added stock_handler import
-from database import get_all_users, change_user_role_function
+from database import get_all_users, change_user_role_function # Keep these
+from utils.report_generator import generate_full_sales_report_excel # Import for scheduled reports
+from utils.stock_notifier import send_low_stock_notification # New import for stock notifications
+from config import DAILY_REPORT_TIME, REPORT_CHAT_ID # Import new config variables
 from user_management import configure_user_management, UserManagement
 
 logging.basicConfig(
@@ -25,6 +29,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 user_management_instance_global: UserManagement = None
+scheduler = BackgroundScheduler()
 
 def get_keyboard_by_role(chat_id):
     user_info = user_data.get(chat_id)
@@ -136,6 +141,28 @@ def handle_staff_menu_entry(message):
         logger.info(f"Chat {chat_id}: Admin accessing Staff Menu.")
         current_main_state = user_state.get(chat_id)
         # Clear previous UM state if re-entering "Персонал" menu
+
+def send_daily_sales_report():
+    """
+    Generates and sends a daily sales report for yesterday to a predefined chat ID.
+    This function is intended to be run by the scheduler.
+    """
+    logger.info("Attempting to send daily sales report.")
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+    
+    try:
+        report_buffer = generate_full_sales_report_excel(yesterday, yesterday)
+        filename = f"daily_sales_report_{yesterday.strftime('%Y%m%d')}.xlsx"
+        
+        if REPORT_CHAT_ID:
+            bot.send_document(REPORT_CHAT_ID, report_buffer, visible_file_name=filename, caption=f"Ежедневный отчет о продажах за {yesterday.strftime('%Y-%m-%d')}.")
+            logger.info(f"Daily sales report for {yesterday.strftime('%Y-%m-%d')} sent successfully to chat ID {REPORT_CHAT_ID}.")
+        else:
+            logger.warning("REPORT_CHAT_ID is not configured. Daily report not sent.")
+    except Exception as e:
+        logger.exception(f"Error sending daily sales report for {yesterday.strftime('%Y-%m-%d')}: {e}")
+
         if current_main_state and (current_main_state.startswith("UM_") or current_main_state.startswith("USER_MANAGEMENT")):
             user_state.pop(chat_id, None)
             if user_management_instance_global and chat_id in user_management_instance_global.current_operation_data:
@@ -251,6 +278,26 @@ def main():
     register_return_handlers()
     register_tradein_handlers()
     register_stock_handlers(bot, user_data, user_state) # Pass bot, user_data, user_state
+
+    # Schedule daily report
+    if DAILY_REPORT_TIME and REPORT_CHAT_ID:
+        hour, minute = map(int, DAILY_REPORT_TIME.split(':'))
+        scheduler.add_job(send_daily_sales_report, 'cron', hour=hour, minute=minute)
+        scheduler.start()
+        logger.info(f"Daily sales report scheduled for {DAILY_REPORT_TIME} to chat ID {REPORT_CHAT_ID}.")
+    else:
+        logger.warning("Daily report scheduling skipped: DAILY_REPORT_TIME or REPORT_CHAT_ID not configured.")
+
+    # Schedule low stock notification
+    # Assuming you want to check for low stock once a day, e.g., at 9:00 AM
+    # You can adjust the hour and minute as needed.
+    if LOW_STOCK_NOTIFICATION_CHAT_ID and LOW_STOCK_THRESHOLD is not None:
+        scheduler.add_job(send_low_stock_notification, 'cron', hour=9, minute=0)
+        logger.info(f"Low stock notification scheduled for 09:00 daily to chat ID {LOW_STOCK_NOTIFICATION_CHAT_ID}.")
+    else:
+        logger.warning("Low stock notification scheduling skipped: LOW_STOCK_NOTIFICATION_CHAT_ID or LOW_STOCK_THRESHOLD not configured.")
+
+    scheduler.start() # Start scheduler after all jobs are added.
 
     logger.info("Bot polling started...")
     try:

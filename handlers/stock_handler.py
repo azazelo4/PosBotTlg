@@ -31,6 +31,7 @@ STOCK_STATE_ADD_PRODUCT_MIN_PRICE = "STOCK_ADD_PRODUCT_MIN_PRICE"
 STOCK_STATE_ADD_PRODUCT_QUANTITY = "STOCK_ADD_PRODUCT_QUANTITY"
 STOCK_STATE_ADD_PRODUCT_MANUFACTURER = "STOCK_ADD_PRODUCT_MANUFACTURER"
 STOCK_STATE_ADD_PRODUCT_COMMENTARIES = "STOCK_ADD_PRODUCT_COMMENTARIES"
+STOCK_STATE_ADD_PRODUCT_TRACK_STOCK = "STOCK_ADD_PRODUCT_TRACK_STOCK" # New state
 STOCK_STATE_ADD_PRODUCT_CONFIRM = "STOCK_ADD_PRODUCT_CONFIRM"
 
 # Restock States
@@ -94,7 +95,7 @@ class StockOperation:
         self.product_data_buffer = {} 
         # Store selection will be the first step after article
         self._set_global_state(STOCK_STATE_ADD_PRODUCT_ARTICLE)
-        bot.send_message(self.chat_id, "Шаг 1/12: Введите Артикул нового товара:", reply_markup=create_cancel_markup())
+        bot.send_message(self.chat_id, "Шаг 1/13: Введите Артикул нового товара:", reply_markup=create_cancel_markup())
 
     def handle_add_product_message(self, message: types.Message):
         text = message.text.strip()
@@ -111,7 +112,8 @@ class StockOperation:
             STOCK_STATE_ADD_PRODUCT_MIN_PRICE: self._process_add_min_price,
             STOCK_STATE_ADD_PRODUCT_QUANTITY: self._process_add_quantity,
             STOCK_STATE_ADD_PRODUCT_MANUFACTURER: self._process_add_manufacturer,
-            STOCK_STATE_ADD_PRODUCT_COMMENTARIES: self._process_add_commentaries,
+            STOCK_STATE_ADD_PRODUCT_COMMENTARIES: self._process_add_commentaries, # This will now lead to track_stock
+            STOCK_STATE_ADD_PRODUCT_TRACK_STOCK: self._process_add_track_stock_dummy, # Dummy, as it's handled by callback
             STOCK_STATE_ADD_PRODUCT_CONFIRM: self._process_add_confirm
         }
 
@@ -136,7 +138,7 @@ class StockOperation:
         self._prompt_for_store() # First choice is store
 
     def _prompt_for_store(self):
-        self._set_global_state(STOCK_STATE_AWAITING_STORE_CHOICE)
+        self._set_global_state(STOCK_STATE_AWAITING_STORE_CHOICE) # Step 2
         # Fetch ENUM values for 'Store' column in 'products' table
         # Assuming 'Другое' is not applicable for store selection from a fixed ENUM list
         store_choices = get_enum_or_distinct_values('products', 'Store', add_other_option=False) 
@@ -161,7 +163,7 @@ class StockOperation:
         self._prompt_for_product_type()
 
     def _prompt_for_product_type(self):
-        self._set_global_state(STOCK_STATE_AWAITING_PRODUCT_TYPE_CHOICE)
+        self._set_global_state(STOCK_STATE_AWAITING_PRODUCT_TYPE_CHOICE) # Step 3
         
         product_types_from_db = get_enum_or_distinct_values('products', 'product_type', add_other_option=True)
         # Ensure "Другое" is always an option and avoid duplicates if it's already in DB
@@ -190,7 +192,7 @@ class StockOperation:
 
         self.product_data_buffer['product_type'] = product_type
         logger.info(f"Chat {chat_id}: Product type selected: {product_type}")
-        self._prompt_next_add_step(STOCK_STATE_ADD_PRODUCT_MODEL, "Шаг 4/12: Модель/Название товара:")
+        self._prompt_next_add_step(STOCK_STATE_ADD_PRODUCT_MODEL, "Шаг 4/13: Модель/Название товара:")
 
     def _process_add_model(self, text):
         if not text: bot.send_message(self.chat_id, "Модель не может быть пустой.",reply_markup=create_cancel_markup()); return
@@ -198,7 +200,7 @@ class StockOperation:
         self._prompt_for_metal_type()
 
     def _prompt_for_metal_type(self):
-        self._set_global_state(STOCK_STATE_AWAITING_METAL_TYPE_CHOICE)
+        self._set_global_state(STOCK_STATE_AWAITING_METAL_TYPE_CHOICE) # Step 5
         
         metal_types_from_db = get_enum_or_distinct_values('products', 'metal_type', add_other_option=True)
         choices = metal_types_from_db # get_enum_or_distinct_values already handles "Другое" and sorting
@@ -217,27 +219,27 @@ class StockOperation:
         bot.answer_callback_query(call.id)
         bot.delete_message(call.message.chat.id, call.message.message_id)
         metal_type = call.data.split("stock_add_metaltype_")[-1]
-        self.product_data_buffer['metal_type'] = metal_type
+        self.product_data_buffer['metal_type'] = metal_type # Step 6
         logger.info(f"Chat {call.message.chat.id}: Metal type selected: {metal_type}")
-        self._prompt_next_add_step(STOCK_STATE_ADD_PRODUCT_WEIGHT, "Шаг 6/12: Вес (в граммах, например, 2.53):")
+        self._prompt_next_add_step(STOCK_STATE_ADD_PRODUCT_WEIGHT, "Шаг 6/13: Вес (в граммах, например, 2.53):")
 
     def _process_add_weight(self, text):
         weight = parse_float_input(text)
         if weight is None or weight <= 0: bot.send_message(self.chat_id, "Вес должен быть положительным числом.",reply_markup=create_cancel_markup()); return
         self.product_data_buffer['weight'] = weight
-        self._prompt_next_add_step(STOCK_STATE_ADD_PRODUCT_PRICE_PER_GRAM, "Шаг 7/12: Цена за грамм (если применимо, иначе 0):")
+        self._prompt_next_add_step(STOCK_STATE_ADD_PRODUCT_PRICE_PER_GRAM, "Шаг 7/13: Цена за грамм (если применимо, иначе 0):")
 
     def _process_add_price_per_gram(self, text):
         ppg = parse_float_input(text)
         if ppg is None or ppg < 0: bot.send_message(self.chat_id, "Цена за грамм должна быть неотрицательным числом.",reply_markup=create_cancel_markup()); return
         self.product_data_buffer['price_per_gram'] = ppg
-        self._prompt_next_add_step(STOCK_STATE_ADD_PRODUCT_PRICE, "Шаг 8/12: Цена продажи товара (полная):")
+        self._prompt_next_add_step(STOCK_STATE_ADD_PRODUCT_PRICE, "Шаг 8/13: Цена продажи товара (полная):")
 
     def _process_add_price(self, text):
         price = parse_float_input(text)
         if price is None or price <= 0: bot.send_message(self.chat_id, "Цена продажи должна быть положительным числом.",reply_markup=create_cancel_markup()); return
         self.product_data_buffer['price'] = price
-        self._prompt_next_add_step(STOCK_STATE_ADD_PRODUCT_MIN_PRICE, "Шаг 9/12: Минимальная цена продажи:")
+        self._prompt_next_add_step(STOCK_STATE_ADD_PRODUCT_MIN_PRICE, "Шаг 9/13: Минимальная цена продажи:")
 
     def _process_add_min_price(self, text):
         min_price = parse_float_input(text)
@@ -245,34 +247,56 @@ class StockOperation:
         if min_price > self.product_data_buffer.get('price', float('inf')):
              bot.send_message(self.chat_id, "Мин. цена не может быть больше цены продажи.",reply_markup=create_cancel_markup()); return
         self.product_data_buffer['min_price'] = min_price
-        self._prompt_next_add_step(STOCK_STATE_ADD_PRODUCT_QUANTITY, "Шаг 10/12: Начальное количество на складе:")
+        self._prompt_next_add_step(STOCK_STATE_ADD_PRODUCT_QUANTITY, "Шаг 10/13: Начальное количество на складе:")
 
     def _process_add_quantity(self, text):
         quantity = parse_int_input(text)
         if quantity is None or quantity < 0: bot.send_message(self.chat_id, "Количество должно быть целым неотрицательным числом.",reply_markup=create_cancel_markup()); return
         self.product_data_buffer['quantity'] = quantity
-        self._prompt_next_add_step(STOCK_STATE_ADD_PRODUCT_MANUFACTURER, "Шаг 11/12: Производитель (если есть, иначе введите '-' ):")
+        self._prompt_next_add_step(STOCK_STATE_ADD_PRODUCT_MANUFACTURER, "Шаг 11/13: Производитель (если есть, иначе введите '-' ):")
 
     def _process_add_manufacturer(self, text):
         self.product_data_buffer['manufacturer'] = text if text != '-' else None # Store None if '-'
-        self._prompt_next_add_step(STOCK_STATE_ADD_PRODUCT_COMMENTARIES, "Шаг 12/12: Комментарии (если есть, иначе введите '-' ):")
+        self._prompt_next_add_step(STOCK_STATE_ADD_PRODUCT_COMMENTARIES, "Шаг 12/13: Комментарии (если есть, иначе введите '-' ):")
 
     def _process_add_commentaries(self, text):
         self.product_data_buffer['commentaries'] = text if text != '-' else None # Store None if '-'
+        self._prompt_for_track_stock() # New step after commentaries
+
+    def _prompt_for_track_stock(self):
+        self._set_global_state(STOCK_STATE_ADD_PRODUCT_TRACK_STOCK) # Step 13
+        keyboard = types.InlineKeyboardMarkup(row_width=2)
+        keyboard.add(types.InlineKeyboardButton(text="Да", callback_data="stock_add_track_stock_yes"))
+        keyboard.add(types.InlineKeyboardButton(text="Нет", callback_data="stock_add_track_stock_no"))
+        bot.send_message(self.chat_id, "Шаг 13/13: Отслеживать остаток этого товара для уведомлений о низком уровне?", reply_markup=keyboard)
+        bot.send_message(self.chat_id, "Или нажмите 'Отмена' на клавиатуре ниже.", reply_markup=create_cancel_markup())
+
+    def handle_track_stock_choice_callback(self, call: types.CallbackQuery):
+        bot.answer_callback_query(call.id)
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+        track_stock_choice = call.data.split("stock_add_track_stock_")[-1]
+        self.product_data_buffer['track_stock'] = 1 if track_stock_choice == 'yes' else 0
+        logger.info(f"Chat {call.message.chat.id}: Track stock selected: {self.product_data_buffer['track_stock']}")
+        
         self._set_global_state(STOCK_STATE_ADD_PRODUCT_CONFIRM)
         confirm_text = "Проверьте данные нового товара:\n"
         # Ensure all required fields for DB are present, even if None
         # Updated expected keys: 'Store' instead of 'store_id'
         expected_keys = ['Store', 'article_number', 'metal_type', 'product_type', 'model',
                            'weight', 'price_per_gram', 'price', 'min_price', 'quantity', 
-                           'manufacturer', 'commentaries']
+                           'manufacturer', 'commentaries', 'track_stock'] # Added track_stock
         for key in expected_keys:
             val = self.product_data_buffer.get(key)
             display_key = key.replace('_', ' ').capitalize()
             if key == 'Store': display_key = 'Магазин' # Changed display key
+            if key == 'track_stock': display_key = 'Отслеживать остаток'
             confirm_text += f"{display_key}: {val if val is not None else 'N/A'}\n"
         confirm_text += "\nДобавить этот товар на склад?"
         bot.send_message(self.chat_id, confirm_text, reply_markup=create_confirmation_markup())
+
+    # Dummy function for message handler, actual logic is in callback
+    def _process_add_track_stock_dummy(self, text):
+        bot.send_message(self.chat_id, "Пожалуйста, используйте кнопки 'Да' или 'Нет' для отслеживания остатка.", reply_markup=create_cancel_markup())
 
     def _process_add_confirm(self, text):
         if text == "Подтвердить":
@@ -475,6 +499,16 @@ def register_stock_handlers(bot_instance_main, global_user_data_ref, global_user
         if chat_id in stock_operations_handler and \
            stock_operations_handler[chat_id].current_internal_state == STOCK_STATE_AWAITING_STORE_CHOICE:
             stock_operations_handler[chat_id].handle_store_choice_callback(call)
+        else:
+            bot.answer_callback_query(call.id, "Истек срок действия выбора или операция отменена.")
+            bot.delete_message(chat_id, call.message.message_id) # Clean up
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("stock_add_track_stock_"))
+    def cb_track_stock_select(call: types.CallbackQuery):
+        chat_id = call.message.chat.id
+        if chat_id in stock_operations_handler and \
+           stock_operations_handler[chat_id].current_internal_state == STOCK_STATE_ADD_PRODUCT_TRACK_STOCK:
+            stock_operations_handler[chat_id].handle_track_stock_choice_callback(call)
         else:
             bot.answer_callback_query(call.id, "Истек срок действия выбора или операция отменена.")
             bot.delete_message(chat_id, call.message.message_id) # Clean up
