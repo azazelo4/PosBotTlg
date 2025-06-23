@@ -290,13 +290,13 @@ def main():
 
     # Schedule low stock notification
     # Check for LOW_STOCK_THRESHOLD from config, recipients are fetched dynamically
-    if LOW_STOCK_THRESHOLD is not None: 
-        scheduler.add_job(send_low_stock_notification, 'cron', hour=9, minute=0)
-        logger.info(f"Low stock notification scheduled for 09:00 daily.")
-    else:
-        logger.warning("Low stock notification scheduling skipped: LOW_STOCK_THRESHOLD not configured.")
+    # if LOW_STOCK_THRESHOLD is not None: 
+    #     scheduler.add_job(send_low_stock_notification, 'cron', hour=9, minute=0)
+    #     logger.info(f"Low stock notification scheduled for 09:00 daily.")
+    # else:
+    #     logger.warning("Low stock notification scheduling skipped: LOW_STOCK_THRESHOLD not configured.")
 
-    scheduler.start() # Start scheduler after all jobs are added.
+    # scheduler.start() # Start scheduler after all jobs are added.
 
     logger.info("Bot polling started...")
     try:
