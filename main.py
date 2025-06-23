@@ -17,7 +17,7 @@ from handlers.tradein_handler import register_tradein_handlers # Corrected impor
 from handlers.stock_handler import register_stock_handlers, stock_operations_handler # Added stock_handler import
 from database import get_all_users, change_user_role_function # Keep these
 from utils.report_generator import generate_full_sales_report_excel # Import for scheduled reports 
-from utils.stock_notifier import send_low_stock_notification # New import for stock notifications
+#from utils.stock_notifier import send_low_stock_notification # New import for stock notifications
 from config import DAILY_REPORT_TIME, REPORT_CHAT_ID # Import new config variables
 from user_management import configure_user_management, UserManagement
 
