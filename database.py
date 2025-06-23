@@ -219,7 +219,7 @@ def record_sale(product_id, product_article, user_id, sale_price, payment_type):
         _update_product_quantity_with_cursor(cursor, product_article, -1)
         connection.commit()
         logger.info(f"Sale recorded and product {product_article} quantity updated successfully.")
-        return True
+        return True, "Продажа успешно записана."
     except (Error, ValueError) as e:
         logger.exception(f"Error during record_sale transaction for product article {product_article}. Rolling back.")
         if connection.is_connected():
