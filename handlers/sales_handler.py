@@ -167,18 +167,17 @@ class Sale:
     def handle_confirmation(self, confirmation_text: str):
         if confirmation_text == "Подтвердить":
             user_db_id = self.user_db_data.get('id')
-            store_db_id = self.user_db_data.get('store_id')
+            # store_db_id is removed from record_sale call as sales.store_id is removed
 
-            if not user_db_id or not store_db_id:
-                logger.error(f"Chat {self.chat_id}: Missing user/store ID. User data: {self.user_db_data}")
-                global_bot.send_message(self.chat_id, "Ошибка: нет данных пользователя/магазина. Продажа отменена.", reply_markup=get_keyboard_by_role(self.chat_id, self.user_db_data.get('role')))
-                self.reset_and_remove_instance()
+            if not user_db_id: # Check only user_db_id now
+                logger.error(f"Chat {self.chat_id}: Missing user ID. User data: {self.user_db_data}")
+                global_bot.send_message(self.chat_id, "Ошибка: нет данных пользователя. Продажа отменена.", reply_markup=get_keyboard_by_role(self.chat_id, self.user_db_data.get('role')))
+                self.reset_and_remove_instance() # Ensure cleanup
                 return
 
-            success = record_sale(
+            success, db_msg = record_sale( # Capture the message
                 product_id=self.product_info['id'],
                 product_article=self.product_info['article_number'],
-                store_id=store_db_id,
                 user_id=user_db_id,
                 sale_price=self.sale_price_val,
                 payment_type=self.payment_type_text
@@ -186,9 +185,9 @@ class Sale:
 
             if success:
                 global_bot.send_message(self.chat_id, "Продажа успешно завершена!", reply_markup=get_keyboard_by_role(self.chat_id, self.user_db_data.get('role')))
-            else:
-                global_bot.send_message(self.chat_id, "Ошибка при записи продажи. Попробуйте позже.", reply_markup=get_keyboard_by_role(self.chat_id, self.user_db_data.get('role')))
-            self.reset_and_remove_instance()
+            else: # Use the message from the database function
+                global_bot.send_message(self.chat_id, db_msg, reply_markup=get_keyboard_by_role(self.chat_id, self.user_db_data.get('role')))
+            self.reset_and_remove_instance() # Ensure cleanup regardless of success
         elif confirmation_text == "Отмена": 
             self.cancel_sale()
         else:

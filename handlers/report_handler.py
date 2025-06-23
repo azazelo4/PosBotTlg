@@ -126,9 +126,9 @@ class Report:
         headers = [
             'ID Продажи', 'Дата продажи', 'Сумма продажи', 'Тип расчета',
             'Артикул', 'Тип товара', 'Модель', 'Тип металла',
-            'Вес', 'Цена за грамм', 'Цена товара (перв.)', 'Производитель',
-            'Комментарии',
-            'Продавец', 'Магазин'
+            'Вес', 'Цена за грамм', 'Цена товара (перв.)',
+            'Производитель', 'Комментарии',
+            'Продавец', 'Магазин товара' # 'Магазин пользователя' removed
         ]
         sheet.append(headers)
 
@@ -138,10 +138,10 @@ class Report:
             for row_tuple in report_data_list:
                 processed_row = list(row_tuple)
 
-                # Format datetime objects (assuming sale_date is at index 1)
+                # Format datetime objects (assuming sale_date is at index 1 based on query order)
                 if len(processed_row) > 1:
                     if isinstance(processed_row[1], datetime):
-                        processed_row[1] = processed_row[1].strftime('%Y-%m-%d %H:%M:%S')
+                        processed_row[1] = processed_row[1].strftime('%Y-%m-%d %H:%M:%S') # Assuming sale_date is the second column
                     elif isinstance(processed_row[1], date):
                          processed_row[1] = processed_row[1].strftime('%Y-%m-%d')
 
@@ -155,7 +155,8 @@ class Report:
                         # If it's not a standard type openpyxl likes, convert to string as a fallback
                         logger.debug(f"Converting non-standard type {type(cell_value)} to string for Excel: {cell_value}")
                         processed_row[i] = str(cell_value)
-                    elif cell_value is None:
+                    # product_store_name is now from p.Store
+                    elif cell_value is None: # Convert None to empty string for Excel
                         processed_row[i] = ""
                 
                 if len(processed_row) == len(headers):

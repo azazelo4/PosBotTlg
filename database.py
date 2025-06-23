@@ -84,26 +84,6 @@ def get_product_by_article(article_number):
             logger.debug("Database connection closed for get_product_by_article.")
     return product
 
-def get_store_by_id(store_id):
-    logger.debug(f"Fetching store with ID: {store_id}")
-    connection = create_connection()
-    if not connection: return None
-    cursor = connection.cursor(dictionary=True)
-    store = None
-    query = "SELECT * FROM stores WHERE id = %s"
-    try:
-        cursor.execute(query, (store_id,))
-        store = cursor.fetchone()
-        logger.debug(f"Query executed: {query} with store_id={store_id}, result: {store}")
-    except Error as e:
-        logger.error(f"Error fetching store by ID: {e}")
-    finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
-            logger.debug("Database connection closed.")
-    return store
-
 def get_sale_and_product_details_by_sale_id(sale_id):
     logger.debug(f"Fetching sale and product details for sale_id: {sale_id}")
     connection = create_connection()
@@ -165,8 +145,8 @@ def _update_product_quantity_with_cursor(cursor, product_article, quantity_chang
     return True
 
 # Standalone function for updating quantity, creates its own transaction
-def update_product_quantity(product_article, quantity_change, store_id_context=None): # Added store_id_context for logging
-    logger.debug(f"Standalone update_product_quantity for article: {product_article} by {quantity_change} (Store context: {store_id_context})")
+def update_product_quantity(product_article, quantity_change): 
+    logger.debug(f"Standalone update_product_quantity for article: {product_article} by {quantity_change}")
     connection = create_connection()
     if not connection: return False, "Ошибка подключения к БД."
     cursor = connection.cursor(dictionary=True)
@@ -222,19 +202,19 @@ def update_product_quantity(product_article, quantity_change, store_id_context=N
     return success, message
 
 
-def record_sale(product_id, product_article, store_id, user_id, sale_price, payment_type):
+def record_sale(product_id, product_article, user_id, sale_price, payment_type):
     # ... (remains the same, uses _update_product_quantity_with_cursor) ...
-    logger.debug(f"Recording sale for product_id: {product_id} (article: {product_article}), store_id: {store_id}, user_id: {user_id}, sale_price: {sale_price}, payment_type: {payment_type}")
+    logger.debug(f"Recording sale for product_id: {product_id} (article: {product_article}), user_id: {user_id}, sale_price: {sale_price}, payment_type: {payment_type}")
     connection = create_connection()
     if not connection:
         logger.error("Failed to create database connection for record_sale.")
-        return False
+        return False, "Ошибка подключения к БД."
         
     cursor = connection.cursor(dictionary=True)
     try:
-        insert_query = """INSERT INTO sales (product_id, store_id, user_id, sale_date, sold_price, payment_type) 
-        VALUES (%s, %s, %s, NOW(), %s, %s)"""
-        cursor.execute(insert_query, (product_id, store_id, user_id, sale_price, payment_type))
+        insert_query = """INSERT INTO sales (product_id, user_id, sale_date, sold_price, payment_type) 
+        VALUES (%s, %s, NOW(), %s, %s)"""
+        cursor.execute(insert_query, (product_id, user_id, sale_price, payment_type))
         logger.debug(f"Insert into sales executed. Product ID: {product_id}")
         _update_product_quantity_with_cursor(cursor, product_article, -1)
         connection.commit()
@@ -244,7 +224,7 @@ def record_sale(product_id, product_article, store_id, user_id, sale_price, paym
         logger.exception(f"Error during record_sale transaction for product article {product_article}. Rolling back.")
         if connection.is_connected():
             connection.rollback()
-        return False
+        return False, f"Ошибка записи продажи: {e}"
     finally:
         if connection.is_connected():
             cursor.close()
@@ -314,12 +294,11 @@ def generate_report(start_date, end_date):
                     p.price as product_original_price, 
                     p.manufacturer,
                     p.commentaries,
-                    u.name as user_name, 
-                    st.name as store_name
+                    u.name as user_name,
+                    p.Store as product_store_name -- Use Store from products table
                 FROM sales s
                 JOIN products p ON s.product_id = p.id
                 JOIN users u ON s.user_id = u.id
-                JOIN stores st ON s.store_id = st.id
                 WHERE s.sale_date BETWEEN %s AND %s
                 ORDER BY s.sale_date, s.id;
                 """
@@ -568,17 +547,17 @@ def add_product_to_db(product_data: dict):
 
         # Ensure all required fields are present and have defaults if necessary
         # Assuming product_data contains all necessary keys from the products table structure
-        # Example: store_id might come from user context or be a required input
-        required_fields = ['store_id', 'article_number', 'metal_type', 'product_type', 'model', 
+        # Changed 'store_id' to 'Store'
+        required_fields = ['Store', 'article_number', 'metal_type', 'product_type', 'model',
                            'weight', 'price_per_gram', 'price', 'min_price', 'quantity', 'manufacturer']
         for field in required_fields:
             if field not in product_data or product_data[field] is None:
                 # Allow quantity to be 0, but not None for other numeric fields if they are NOT NULL
                 if field == 'quantity' and product_data.get(field) is None:
                     product_data[field] = 0 # Default quantity to 0
-                elif field not in ['commentaries'] : # commentaries can be optional
+                elif field not in ['commentaries', 'arrival_date'] : # commentaries and arrival_date can be optional or handled
                     logger.error(f"Missing required field '{field}' for new product {product_data['article_number']}.")
-                    return False, f"Отсутствует обязательное поле: {field}"
+                    return False, f"Отсутствует обязательное поле: {field.replace('Store', 'Магазин')}"
         
         # Set arrival_date to now if not provided
         product_data.setdefault('arrival_date', Error) # Placeholder, will use NOW() in SQL
@@ -617,28 +596,20 @@ def add_product_to_db(product_data: dict):
             cursor.close()
             connection.close()
 
-def get_stock_report_data(store_id=None): # Optional filter by store_id
-    logger.info(f"Generating stock report data. Store filter: {store_id}")
+def get_stock_report_data(): # Removed store_id filter
+    logger.info(f"Generating stock report data for all stores.")
     connection = create_connection()
     if not connection: return []
     cursor = connection.cursor(dictionary=True) # Return as dicts
     try:
         base_query = """
             SELECT 
-                p.article_number, p.product_type, p.model, p.metal_type, 
+                p.article_number, p.product_type, p.model, p.metal_type, p.Store as store_name,
                 p.weight, p.quantity, p.price, p.min_price, 
-                p.manufacturer, s.name as store_name, p.arrival_date, p.commentaries
+                p.manufacturer, p.arrival_date, p.commentaries
             FROM products p
-            LEFT JOIN stores s ON p.store_id = s.id
-        """
-        params = []
-        if store_id:
-            base_query += " WHERE p.store_id = %s"
-            params.append(store_id)
-        
-        base_query += " ORDER BY p.product_type, p.model, p.article_number"
-
-        cursor.execute(base_query, params)
+            ORDER BY p.Store, p.product_type, p.model, p.article_number """
+        cursor.execute(base_query)
         stock_data = cursor.fetchall()
         logger.info(f"Stock report data fetched. Count: {len(stock_data)}")
         return stock_data
