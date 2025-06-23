@@ -16,7 +16,7 @@ from handlers.return_handler import register_return_handlers # Corrected import
 from handlers.tradein_handler import register_tradein_handlers # Corrected import
 from handlers.stock_handler import register_stock_handlers, stock_operations_handler # Added stock_handler import
 from database import get_all_users, change_user_role_function # Keep these
-from utils.report_generator import generate_full_sales_report_excel # Import for scheduled reports
+from utils.report_generator import generate_full_sales_report_excel # Import for scheduled reports 
 from utils.stock_notifier import send_low_stock_notification # New import for stock notifications
 from config import DAILY_REPORT_TIME, REPORT_CHAT_ID # Import new config variables
 from user_management import configure_user_management, UserManagement
@@ -289,13 +289,12 @@ def main():
         logger.warning("Daily report scheduling skipped: DAILY_REPORT_TIME or REPORT_CHAT_ID not configured.")
 
     # Schedule low stock notification
-    # Assuming you want to check for low stock once a day, e.g., at 9:00 AM
-    # You can adjust the hour and minute as needed.
-    if LOW_STOCK_NOTIFICATION_CHAT_ID and LOW_STOCK_THRESHOLD is not None:
+    # Check for LOW_STOCK_THRESHOLD from config, recipients are fetched dynamically
+    if LOW_STOCK_THRESHOLD is not None: 
         scheduler.add_job(send_low_stock_notification, 'cron', hour=9, minute=0)
-        logger.info(f"Low stock notification scheduled for 09:00 daily to chat ID {LOW_STOCK_NOTIFICATION_CHAT_ID}.")
+        logger.info(f"Low stock notification scheduled for 09:00 daily.")
     else:
-        logger.warning("Low stock notification scheduling skipped: LOW_STOCK_NOTIFICATION_CHAT_ID or LOW_STOCK_THRESHOLD not configured.")
+        logger.warning("Low stock notification scheduling skipped: LOW_STOCK_THRESHOLD not configured.")
 
     scheduler.start() # Start scheduler after all jobs are added.
 

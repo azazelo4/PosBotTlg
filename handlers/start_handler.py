@@ -2,7 +2,7 @@ import telebot
 from telebot import types
 # from config import TOKEN # TOKEN is used by state.py to initialize bot
 from auth import authorize_user
-from buttons import create_cashier_buttons, create_admin_buttons # These are main menu buttons
+from buttons import create_cashier_buttons, create_admin_buttons # These are main menu buttons 
 from state import bot, user_data # Import the shared bot instance and user_data
 import logging
 
@@ -59,6 +59,12 @@ def contact_handler(message: types.Message):
             }
             logger.info(f"Chat {chat_id}: User {phone_number} (DB ID: {user_data[chat_id]['id']}) authorized successfully. Role: {user_data[chat_id]['role']}.")
 
+            # --- NEW: Update user's chat_id in DB ---
+            from database import update_user_chat_id # Local import to avoid circular dependency
+            success, msg = update_user_chat_id(user_data[chat_id]['id'], chat_id)
+            if not success:
+                logger.warning(f"Chat {chat_id}: Failed to update chat_id for user {user_data[chat_id]['id']}: {msg}")
+            # --- END NEW ---
             reply_text = f"Здравствуйте, {user_data[chat_id].get('name', '')} {user_data[chat_id].get('surename', '')}!\n"
             reply_text += f"Вы авторизованы как {user_data[chat_id]['role']}."
             # reply_text += "\nДля справки введите команду /help." # Moved help to a separate command

@@ -8,7 +8,7 @@ WORKDIR /app
 RUN python3 -m venv venv
 
 # Активируем виртуальное окружение и устанавливаем зависимости
-RUN ./venv/bin/pip install aiogram telebot pymysql mysql-connector-python openpyxl
+RUN ./venv/bin/pip install aiogram telebot pymysql mysql-connector-python openpyxl APScheduler
 
 # Копируем код приложения
 COPY . /app
