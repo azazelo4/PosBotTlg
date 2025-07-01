@@ -703,6 +703,35 @@ def create_trade_in_record(old_product_article, new_product_article, price_diffe
             connection.close()
     return trade_in_id
 
+def create_cash_withdrawal_record(amount, comment, user_id, store_id):
+    """
+    Records a cash withdrawal (encashment) event in the database.
+    """
+    logger.debug(f"Creating cash withdrawal record: amount={amount}, user_id={user_id}, store_id={store_id}")
+    connection = create_connection()
+    if not connection:
+        return False, "Ошибка подключения к БД."
+    
+    cursor = connection.cursor()
+    try:
+        query = """
+        INSERT INTO cash_withdrawals (amount, comment, user_id, store_id, withdrawal_date)
+        VALUES (%s, %s, %s, %s, NOW())
+        """
+        cursor.execute(query, (amount, comment, user_id, store_id))
+        connection.commit()
+        withdrawal_id = cursor.lastrowid
+        logger.info(f"Cash withdrawal record created with ID: {withdrawal_id}")
+        return True, "Инкассация успешно зарегистрирована."
+    except Error as e:
+        logger.exception(f"Database error during cash withdrawal: {e}")
+        if connection.is_connected(): connection.rollback()
+        return False, f"Ошибка БД при регистрации инкассации: {e}"
+    finally:
+        if connection.is_connected():
+            cursor.close()
+            connection.close()
+
 # --- New functions for Stock Management ---
 def add_product_to_db(product_data: dict):
     logger.info(f"Attempting to add new product: {product_data.get('article_number')}")

@@ -24,6 +24,7 @@ STOCK_STATE_ADD_PRODUCT_ARTICLE = "STOCK_ADD_PRODUCT_ARTICLE"
 # STOCK_STATE_ADD_PRODUCT_TYPE removed as it's now a choice
 STOCK_STATE_ADD_PRODUCT_MODEL = "STOCK_ADD_PRODUCT_MODEL"
 # STOCK_STATE_ADD_PRODUCT_METAL_TYPE removed as it's now a choice
+STOCK_STATE_ADD_PRODUCT_SIZE = "STOCK_ADD_PRODUCT_SIZE"
 STOCK_STATE_ADD_PRODUCT_WEIGHT = "STOCK_ADD_PRODUCT_WEIGHT"
 STOCK_STATE_ADD_PRODUCT_PRICE_PER_GRAM = "STOCK_ADD_PRODUCT_PRICE_PER_GRAM"
 STOCK_STATE_ADD_PRODUCT_PRICE = "STOCK_ADD_PRODUCT_PRICE"
@@ -95,7 +96,7 @@ class StockOperation:
         self.product_data_buffer = {} 
         # Store selection will be the first step after article
         self._set_global_state(STOCK_STATE_ADD_PRODUCT_ARTICLE)
-        bot.send_message(self.chat_id, "Шаг 1/13: Введите Артикул нового товара:", reply_markup=create_cancel_markup())
+        bot.send_message(self.chat_id, "Шаг 1/14: Введите Артикул нового товара:", reply_markup=create_cancel_markup())
 
     def handle_add_product_message(self, message: types.Message):
         text = message.text.strip()
@@ -106,6 +107,7 @@ class StockOperation:
         state_actions = {
             STOCK_STATE_ADD_PRODUCT_ARTICLE: self._process_add_article,
             STOCK_STATE_ADD_PRODUCT_MODEL: self._process_add_model,
+            STOCK_STATE_ADD_PRODUCT_SIZE: self._process_add_size,
             STOCK_STATE_ADD_PRODUCT_WEIGHT: self._process_add_weight,
             STOCK_STATE_ADD_PRODUCT_PRICE_PER_GRAM: self._process_add_price_per_gram,
             STOCK_STATE_ADD_PRODUCT_PRICE: self._process_add_price,
@@ -151,7 +153,7 @@ class StockOperation:
         keyboard = types.InlineKeyboardMarkup(row_width=2)
         buttons = [types.InlineKeyboardButton(text=store_name, callback_data=f"stock_add_store_{store_name}") for store_name in store_choices]
         keyboard.add(*buttons)
-        bot.send_message(self.chat_id, "Шаг 2/12: Выберите Магазин:", reply_markup=keyboard)
+        bot.send_message(self.chat_id, "Шаг 2/14: Выберите Магазин:", reply_markup=keyboard)
         bot.send_message(self.chat_id, "Или нажмите 'Отмена' на клавиатуре ниже.", reply_markup=create_cancel_markup())
 
     def handle_store_choice_callback(self, call: types.CallbackQuery):
@@ -177,7 +179,7 @@ class StockOperation:
         buttons = [types.InlineKeyboardButton(text=ptype, callback_data=f"stock_add_prodtype_{ptype}") for ptype in choices]
         keyboard.add(*buttons)
         # Add a cancel inline button as well, or rely on the ReplyKeyboard "Отмена"
-        bot.send_message(self.chat_id, "Шаг 3/12: Выберите Тип товара:", reply_markup=keyboard)
+        bot.send_message(self.chat_id, "Шаг 3/14: Выберите Тип товара:", reply_markup=keyboard)
         # Send cancel reply keyboard as well, in case user wants to use that
         bot.send_message(self.chat_id, "Или нажмите 'Отмена' на клавиатуре ниже, чтобы прервать добавление.", reply_markup=create_cancel_markup())
 
@@ -192,15 +194,22 @@ class StockOperation:
 
         self.product_data_buffer['product_type'] = product_type
         logger.info(f"Chat {chat_id}: Product type selected: {product_type}")
-        self._prompt_next_add_step(STOCK_STATE_ADD_PRODUCT_MODEL, "Шаг 4/13: Модель/Название товара:")
+        self._prompt_next_add_step(STOCK_STATE_ADD_PRODUCT_MODEL, "Шаг 4/14: Модель/Название товара:")
 
     def _process_add_model(self, text):
         if not text: bot.send_message(self.chat_id, "Модель не может быть пустой.",reply_markup=create_cancel_markup()); return
         self.product_data_buffer['model'] = text
+        self._prompt_for_size()
+
+    def _prompt_for_size(self):
+        self._prompt_next_add_step(STOCK_STATE_ADD_PRODUCT_SIZE, "Шаг 5/14: Размер (если есть, иначе введите '-' ):")
+
+    def _process_add_size(self, text):
+        self.product_data_buffer['size'] = text if text != '-' else None
         self._prompt_for_metal_type()
 
     def _prompt_for_metal_type(self):
-        self._set_global_state(STOCK_STATE_AWAITING_METAL_TYPE_CHOICE) # Step 5
+        self._set_global_state(STOCK_STATE_AWAITING_METAL_TYPE_CHOICE) # Step 6
         
         metal_types_from_db = get_enum_or_distinct_values('products', 'metal_type', add_other_option=True)
         choices = metal_types_from_db # get_enum_or_distinct_values already handles "Другое" and sorting
@@ -212,7 +221,7 @@ class StockOperation:
         keyboard = types.InlineKeyboardMarkup(row_width=2)
         buttons = [types.InlineKeyboardButton(text=mtype, callback_data=f"stock_add_metaltype_{mtype}") for mtype in choices]
         keyboard.add(*buttons)
-        bot.send_message(self.chat_id, "Шаг 5/12: Выберите Тип металла:", reply_markup=keyboard)
+        bot.send_message(self.chat_id, "Шаг 6/14: Выберите Тип металла:", reply_markup=keyboard)
         bot.send_message(self.chat_id, "Или нажмите 'Отмена' на клавиатуре ниже.", reply_markup=create_cancel_markup())
 
     def handle_metal_type_choice_callback(self, call: types.CallbackQuery):
@@ -221,7 +230,7 @@ class StockOperation:
         metal_type = call.data.split("stock_add_metaltype_")[-1]
         self.product_data_buffer['metal_type'] = metal_type # Step 6
         logger.info(f"Chat {call.message.chat.id}: Metal type selected: {metal_type}")
-        self._prompt_next_add_step(STOCK_STATE_ADD_PRODUCT_WEIGHT, "Шаг 6/13: Вес (в граммах, например, 2.53):")
+        self._prompt_next_add_step(STOCK_STATE_ADD_PRODUCT_WEIGHT, "Шаг 7/14: Вес (в граммах, например, 2.53):")
 
     def _process_add_weight(self, text):
         weight = parse_float_input(text)

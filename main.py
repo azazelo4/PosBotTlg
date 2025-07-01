@@ -13,6 +13,7 @@ from handlers.help_handler import register_help_handlers
 from handlers.sales_handler import register_sales_handlers, sale_handler as global_sale_handler_instances
 from handlers.buyback_handler import register_buyback_handlers # Corrected import based on your file name
 from handlers.return_handler import register_return_handlers # Corrected import
+from handlers.cash_withdrawal_handler import register_withdrawal_handlers, withdrawal_handler_instances
 from handlers.tradein_handler import register_tradein_handlers # Corrected import
 from handlers.stock_handler import register_stock_handlers, stock_operations_handler # Added stock_handler import
 from database import get_all_users, change_user_role_function # Keep these
@@ -211,6 +212,10 @@ def handle_global_cancel(message: types.Message, called_from_back=False):
         from handlers.buyback_handler import cancel_buyback # Local import to avoid circular at top
         cancel_buyback(chat_id) # This will send its own reply_markup
         operation_cancelled_by_specific_handler = True
+    elif current_op_state.startswith("AWAITING_WITHDRAWAL_"):
+        if chat_id in withdrawal_handler_instances:
+            withdrawal_handler_instances[chat_id].cancel_withdrawal()
+        operation_cancelled_by_specific_handler = True
     elif current_op_state.startswith("RETURN_"):
         from handlers.return_handler import cancel_return
         cancel_return(chat_id)
@@ -276,6 +281,7 @@ def main():
     register_report_handlers(bot, user_data, user_state) # Pass bot, user_data, user_state
     register_buyback_handlers() 
     register_return_handlers()
+    register_withdrawal_handlers()
     register_tradein_handlers()
     register_stock_handlers(bot, user_data, user_state) # Pass bot, user_data, user_state
 

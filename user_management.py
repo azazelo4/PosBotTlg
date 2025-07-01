@@ -146,7 +146,7 @@ class UserManagement:
 
     def handle_role_management(self, chat_id): 
         self.logger.debug(f"UserManagement instance handling 'Права' for chat_id: {chat_id}")
-        global_main_user_state[chat_id] = 'USER_MANAGEMENT_USER_LIST' # New state for user list
+        global_main_user_state[chat_id] = 'USER_MANAGEMENT_USER_LIST'
         self.current_operation_data.pop(chat_id, None) 
 
         try:
@@ -160,7 +160,7 @@ class UserManagement:
                 button_text = f"{user_dict.get('name', 'N/A')} ({user_dict.get('role', 'N/A')}) - {user_dict.get('phone_number', 'N/A')}"
                 callback_data = f"um_select_user_{user_dict['id']}" 
                 keyboard.add(types.InlineKeyboardButton(text=button_text, callback_data=callback_data))
-            keyboard.add(types.InlineKeyboardButton(text="Отмена (в меню персонала)", callback_data="um_cancel_inline_to_staff_menu"))
+            keyboard.add(types.InlineKeyboardButton(text="Отмена (в меню персонала)", callback_data="um_cancel_inline_to_staff_menu")) # Corrected "назад" to "Отмена"
             sent_message = self.bot.send_message(chat_id, "Выберите пользователя для управления:", reply_markup=keyboard)
             self.current_operation_data[chat_id] = {'inline_message_id': sent_message.message_id} # Store message ID to edit later
         except Exception as e:

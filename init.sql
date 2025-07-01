@@ -41,6 +41,18 @@ CREATE TABLE `sales` (
   CONSTRAINT `sales_ibfk_4` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+DROP TABLE IF EXISTS `cash_withdrawals`;
+CREATE TABLE `cash_withdrawals` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `amount` decimal(12,2) NOT NULL,
+  `comment` text COLLATE utf8mb4_general_ci,
+  `user_id` int NOT NULL,
+  `store_id` int NOT NULL,
+  `withdrawal_date` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `user_id` (`user_id`),
+  CONSTRAINT `cash_withdrawals_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 DROP TABLE IF EXISTS `users`;
 CREATE TABLE `users` (
@@ -53,4 +65,3 @@ CREATE TABLE `users` (
   `store_id` int DEFAULT NULL, -- Эта колонка остается, но теперь это не FK к stores.id. Может хранить ID из старой системы или быть переосмыслена.
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-

@@ -41,9 +41,10 @@ def create_cash_operations_buttons():
     button_return = types.KeyboardButton("Возврат")
     button_trade_in = types.KeyboardButton("Trade-In")
     button_buyback = types.KeyboardButton("Скупка")
+    button_encashment = types.KeyboardButton("Инкассация") # Новая кнопка
     button_reports = types.KeyboardButton("Отчеты")
     button_back = types.KeyboardButton("Назад")
-    keyboard.add(button_sale, button_return, button_trade_in, button_buyback, button_reports, button_back)
+    keyboard.add(button_sale, button_return, button_trade_in, button_buyback, button_encashment, button_reports, button_back)
     return keyboard
 
 # New: Buttons for Stock Management menu
