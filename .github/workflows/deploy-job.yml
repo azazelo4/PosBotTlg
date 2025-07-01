@@ -24,18 +24,11 @@ jobs:
           fi
 
       - name: Stop existing containers
-        run: |
-          existing_containers=$(docker ps -q --filter "name=PosBotTest")
-          if [ -n "$existing_containers" ]; then
-            docker stop $existing_containers
-            docker rm $existing_containers
-          else
-            echo "No existing containers to stop"
-          fi
+        run: docker-compose down --remove-orphans || echo "No containers to stop"
 
       - name: Deploy with Docker Compose
         run: |
-          docker-compose up -d --build
+          docker-compose up -d --build --remove-orphans 
 
       - name: Verify services
         run: |

@@ -167,7 +167,7 @@ def send_daily_sales_report():
         if current_main_state and (current_main_state.startswith("UM_") or current_main_state.startswith("USER_MANAGEMENT")):
             user_state.pop(chat_id, None)
             if user_management_instance_global and chat_id in user_management_instance_global.current_operation_data:
-            logger.debug(f"Chat {chat_id}: Cleared previous user management state '{current_main_state}' before entering staff menu.")
+                logger.debug(f"Chat {chat_id}: Cleared previous user management state '{current_main_state}' before entering staff menu.")
         bot.send_message(chat_id, "Меню управления персоналом. Выберите действие:", reply_markup=create_staff_management_buttons())
     else:
         logger.warning(f"Chat {chat_id}: Unauthorized access attempt to Staff Menu. User data: {current_user_data}")

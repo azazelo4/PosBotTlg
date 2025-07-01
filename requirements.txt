@@ -1,0 +1,6 @@
+aiogram
+telebot
+pymysql
+mysql-connector-python
+openpyxl
+APScheduler
