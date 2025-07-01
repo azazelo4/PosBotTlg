@@ -459,7 +459,7 @@ def generate_report(start_date, end_date):
                     s.payment_type,
                     p.article_number, 
                     p.product_type, 
-                    p.model, 
+                    p.model, p.size,
                     p.metal_type,
                     p.weight,
                     p.price_per_gram,
