@@ -1,5 +1,3 @@
-# user_management.py
-
 from telebot import types
 from database import add_user_to_db, deactivate_user_in_db, update_user_phone, get_user_by_phone # get_user_by_phone needed
 import logging
@@ -9,8 +7,6 @@ from buttons import create_staff_management_buttons, create_cancel_markup
 logger = logging.getLogger(__name__)
 
 UM_STATE_AWAITING_ADD_USER_DETAILS = "UM_AWAITING_ADD_USER_DETAILS"
-# Новое состояние для ожидания роли после отправки контакта
-UM_STATE_AWAITING_ROLE_FOR_CONTACT = "UM_AWAITING_ROLE_FOR_CONTACT"
 # UM_STATE_AWAITING_DELETE_USER_PHONE is removed as "Удалить пользователя" button is removed
 UM_STATE_AWAITING_NEW_PHONE_FOR_USER = "UM_AWAITING_NEW_PHONE_FOR_USER"
 # UM_STATE_AWAITING_DEACTIVATE_CONFIRMATION for inline deactivation confirm
@@ -37,11 +33,9 @@ class UserManagement:
             admin_store_id = self.global_user_data.get(chat_id, {}).get('store_id')
             self.current_operation_data[chat_id] = {'admin_store_id': admin_store_id} # Store admin's store_id
             
-            # Обновляем текст-подсказку
             self.bot.send_message(
                 chat_id, 
-                "Введите данные нового пользователя в формате: Имя Фамилия, +7XXXXXXXXXX, Роль (admin/cashier/manager).\n\n"
-                "Или просто отправьте контакт пользователя, и я запрошу недостающие данные.", 
+                "Введите данные нового пользователя в формате: Имя Фамилия, +7XXXXXXXXXX, Роль (admin/cashier/manager).", 
                 reply_markup=create_cancel_markup()
             )
 
@@ -71,44 +65,6 @@ class UserManagement:
                 self.bot.send_message(chat_id, f"Ошибка добавления: {e}")
                 self.finish_um_operation_and_return_to_staff_menu(chat_id)
         
-        # --- НОВЫЙ ОБРАБОТЧИК ДЛЯ КОНТАКТОВ ---
-        @self.bot.message_handler(func=lambda message: global_main_user_state.get(message.chat.id) == UM_STATE_AWAITING_ADD_USER_DETAILS, content_types=['contact'])
-        def process_add_user_contact_handler(message: types.Message):
-            chat_id = message.chat.id
-            contact = message.contact
-            self.logger.info(f"Chat {chat_id}: Received contact to add user: {contact.phone_number}")
-
-            # Нормализация номера телефона
-            phone_number = contact.phone_number
-            if not phone_number.startswith('+'):
-                phone_number = '+' + phone_number
-
-            # Формирование имени
-            full_name = contact.first_name
-            if contact.last_name:
-                full_name += f" {contact.last_name}"
-
-            # Сохраняем полученные данные во временное хранилище
-            op_data = self.current_operation_data.get(chat_id, {})
-            op_data.update({
-                'new_user_phone': phone_number,
-                'new_user_name': full_name
-            })
-            self.current_operation_data[chat_id] = op_data
-
-            # Меняем состояние и запрашиваем роль
-            global_main_user_state[chat_id] = UM_STATE_AWAITING_ROLE_FOR_CONTACT
-
-            keyboard = types.InlineKeyboardMarkup()
-            roles = ['admin', 'cashier', 'manager']
-            for role in roles:
-                keyboard.add(types.InlineKeyboardButton(text=role.capitalize(), callback_data=f"um_setrole_contact_{role}"))
-            keyboard.add(types.InlineKeyboardButton(text="Отмена", callback_data="um_cancel_contact_add"))
-
-            self.bot.send_message(chat_id, f"Контакт получен: {full_name}, {phone_number}.\n\nТеперь выберите роль для нового пользователя:", reply_markup=keyboard)
-            self.bot.send_message(chat_id, "Чтобы отменить операцию, нажмите 'Отмена' на клавиатуре.", reply_markup=create_cancel_markup()) # На случай если inline-кнопки не сработают
-
-
         # Removed "Удалить пользователя" by phone handler as button is removed.
         # Deactivation is now through "Права" -> select user -> "Деактивировать".
 
@@ -270,44 +226,6 @@ class UserManagement:
         self.bot.answer_callback_query(call.id, text=db_message if success else "Ошибка")
         self.finish_um_operation_and_return_to_staff_menu(chat_id)
 
-    # --- НОВЫЙ ОБРАБОТЧИК ДЛЯ ВЫБОРА РОЛИ ПОСЛЕ ОТПРАВКИ КОНТАКТА ---
-    def handle_set_role_for_contact_callback(self, call: types.CallbackQuery):
-        chat_id = call.message.chat.id
-        message_id = call.message.message_id
-        
-        if call.data == "um_cancel_contact_add":
-            self.bot.delete_message(chat_id, message_id)
-            self.cancel_um_operation_and_return_to_staff_menu(chat_id, "Добавление пользователя отменено.")
-            self.bot.answer_callback_query(call.id)
-            return
-
-        try:
-            new_role = call.data.split("_")[-1]
-            op_data = self.current_operation_data.get(chat_id, {})
-            phone = op_data.get('new_user_phone')
-            name = op_data.get('new_user_name')
-            admin_store_id = op_data.get('admin_store_id', 1)
-
-            if not phone or not name:
-                self.logger.error(f"Chat {chat_id}: Missing phone or name in op_data for adding user via contact. Data: {op_data}")
-                self.bot.edit_message_text("Произошла ошибка: данные контакта были утеряны. Операция отменена.", chat_id, message_id, reply_markup=None)
-                self.finish_um_operation_and_return_to_staff_menu(chat_id)
-                self.bot.answer_callback_query(call.id, "Ошибка")
-                return
-
-            self.logger.info(f"Chat {chat_id}: Adding user from contact. Phone: {phone}, Name: {name}, Role: {new_role}")
-            response_msg = add_user_to_db(phone, new_role, name, admin_store_id)
-
-            self.bot.edit_message_text(response_msg, chat_id, message_id, reply_markup=None)
-            self.bot.answer_callback_query(call.id, "Пользователь добавлен")
-            self.finish_um_operation_and_return_to_staff_menu(chat_id)
-
-        except Exception as e:
-            self.logger.exception(f"Error in handle_set_role_for_contact_callback: {e}")
-            self.bot.edit_message_text(f"Произошла непредвиденная ошибка: {e}", chat_id, message_id, reply_markup=None)
-            self.bot.answer_callback_query(call.id, "Ошибка")
-            self.finish_um_operation_and_return_to_staff_menu(chat_id)
-
     def _prompt_for_new_phone(self, chat_id, user_id_to_edit):
         global_main_user_state[chat_id] = UM_STATE_AWAITING_NEW_PHONE_FOR_USER
         self.current_operation_data[chat_id].update({'action': 'change_phone', 'user_id_to_edit': user_id_to_edit})
@@ -358,7 +276,7 @@ class UserManagement:
 
     def register_callback_handlers(self):
         @self.bot.callback_query_handler(func=lambda call: call.data.startswith("um_select_user_") or \
-                                                           call.data == "um_cancel_inline_to_staff_menu")
+            call.data == "um_cancel_inline_to_staff_menu")
         def route_user_selection_callback(call):
             if call.data == "um_cancel_inline_to_staff_menu":
                  self.bot.delete_message(call.message.chat.id, call.message.message_id)
@@ -372,18 +290,7 @@ class UserManagement:
 
         @self.bot.callback_query_handler(func=lambda call: call.data.startswith("um_setrole_"))
         def route_set_new_role_callback(call):
-            # --- РАЗДЕЛЯЕМ ОБРАБОТКУ ---
-            # Это для добавления по контакту
-            if call.data.startswith("um_setrole_contact_"):
-                self.handle_set_role_for_contact_callback(call)
-            # Это для существующей логики изменения роли
-            else:
-                self.handle_set_new_role_callback(call)
-        
-        # --- НОВЫЙ ОТДЕЛЬНЫЙ ОБРАБОТЧИК ДЛЯ ОТМЕНЫ ДОБАВЛЕНИЯ ПО КОНТАКТУ ---
-        @self.bot.callback_query_handler(func=lambda call: call.data == "um_cancel_contact_add")
-        def route_cancel_contact_add(call):
-             self.handle_set_role_for_contact_callback(call) # Логика отмены уже внутри этой функции
+            self.handle_set_new_role_callback(call)
 
         @self.bot.callback_query_handler(func=lambda call: call.data.startswith("um_confirm_deactivate_"))
         def route_deactivation_confirm_callback(call):
