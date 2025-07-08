@@ -3,7 +3,7 @@ from telebot import types
 from datetime import date, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 from buttons import (
-    create_cash_operations_buttons, create_staff_management_buttons, 
+    create_cash_operations_buttons, create_staff_management_buttons,
     create_admin_buttons, create_cashier_buttons, create_manager_buttons,
     create_stock_management_buttons
 )
@@ -18,7 +18,7 @@ from handlers.cash_withdrawal_handler import register_withdrawal_handlers, withd
 from handlers.tradein_handler import register_tradein_handlers # Corrected import
 from handlers.stock_handler import register_stock_handlers, stock_operations_handler # Added stock_handler import
 from database import get_all_users, change_user_role_function # Keep these
-from utils.report_generator import generate_full_sales_report_excel # Import for scheduled reports 
+from utils.report_generator import generate_full_sales_report_excel # Import for scheduled reports
 #from utils.stock_notifier import send_low_stock_notification # New import for stock notifications
 from config import DAILY_REPORT_TIME, REPORT_CHAT_ID # Import new config variables
 from user_management import configure_user_management, UserManagement
@@ -69,7 +69,7 @@ def handle_stock_menu(message: types.Message):
     current_user = user_data.get(chat_id)
     if current_user and current_user.get('is_active') and current_user.get('role') in ['admin', 'manager']:
         logger.info(f"Chat {chat_id} (Role: {current_user.get('role')}): Accessing Stock Management Menu.")
-        
+
         # Clear any previous stock FSM state if re-entering
         current_main_state = user_state.get(chat_id)
         if current_main_state and current_main_state.startswith("STOCK_"):
@@ -78,7 +78,7 @@ def handle_stock_menu(message: types.Message):
             else: # Fallback if instance was somehow lost
                 user_state.pop(chat_id, None)
             logger.debug(f"Chat {chat_id}: Cleared previous stock operation state '{current_main_state}' before entering stock menu.")
-        
+
         bot.send_message(chat_id, "Меню управления складом:", reply_markup=create_stock_management_buttons())
     else:
         logger.warning(f"Chat {chat_id}: Unauthorized access to Stock menu. User: {current_user}")
@@ -89,17 +89,15 @@ def handle_stock_menu(message: types.Message):
 def go_back_to_main_menu(message: types.Message):
     chat_id = message.chat.id
     user = user_data.get(chat_id)
-    current_main_state = user_state.get(chat_id) 
+    current_main_state = user_state.get(chat_id)
 
     logger.info(f"Chat {chat_id}: 'Назад' pressed. Current global state: {current_main_state}")
 
     if current_main_state:
-        if current_main_state in ['USER_MANAGEMENT_USER_LIST', 'USER_MANAGEMENT_ACTION_SELECT', 
+        if current_main_state in ['USER_MANAGEMENT_USER_LIST', 'USER_MANAGEMENT_ACTION_SELECT',
                                   'USER_MANAGEMENT_ROLE_SELECT', 'USER_MANAGEMENT_DEACTIVATE_CONFIRM',
                                   'UM_AWAITING_ADD_USER_DETAILS', 'UM_AWAITING_NEW_PHONE_FOR_USER'] and user_management_instance_global: # Added more UM states
             logger.info(f"Chat {chat_id}: 'Назад' from user management flow ('{current_main_state}'). Returning to staff menu.")
-            # Let the "Отмена" logic or specific UM cancel handle state cleanup
-            # user_management_instance_global.cancel_um_operation_and_return_to_staff_menu(chat_id, "Операция отменена, возврат в меню персонала.")
             # For "Назад", it's better to just go to the staff menu directly after cleaning state.
             if chat_id in user_management_instance_global.current_operation_data:
                 del user_management_instance_global.current_operation_data[chat_id]
@@ -115,10 +113,6 @@ def go_back_to_main_menu(message: types.Message):
                  bot.send_message(chat_id, "Операция отменена. Возврат в меню склада.", reply_markup=create_stock_management_buttons())
              return
         else: # For cash operations, "Назад" usually means cancel current step and return to cash ops menu
-            # This is handled by "Отмена" now, so if state is not UM or STOCK, it means main menu from cash ops.
-            # However, if inside a cash op FSM, "Отмена" should be used.
-            # "Назад" from cash_ops_menu itself should go to main_menu.
-            # Let's assume this "Назад" is from cash_ops_menu going to main_menu, or after a generic cancel.
             logger.info(f"Chat {chat_id}: 'Назад' from cash operations menu or after a generic cancel. Clearing state {current_main_state} and going to main menu.")
             user_state.pop(chat_id, None) # Clear any residual state
             # Fall through to send main menu
@@ -143,6 +137,15 @@ def handle_staff_menu_entry(message):
         logger.info(f"Chat {chat_id}: Admin accessing Staff Menu.")
         current_main_state = user_state.get(chat_id)
         # Clear previous UM state if re-entering "Персонал" menu
+        if current_main_state and (current_main_state.startswith("UM_") or current_main_state.startswith("USER_MANAGEMENT")):
+            user_state.pop(chat_id, None)
+            if user_management_instance_global and chat_id in user_management_instance_global.current_operation_data:
+                del user_management_instance_global.current_operation_data[chat_id]
+            logger.debug(f"Chat {chat_id}: Cleared previous user management state '{current_main_state}' before entering staff menu.")
+        bot.send_message(chat_id, "Меню управления персоналом. Выберите действие:", reply_markup=create_staff_management_buttons())
+    else:
+        logger.warning(f"Chat {chat_id}: Unauthorized access attempt to Staff Menu. User data: {current_user_data}")
+        bot.send_message(chat_id, "Доступ запрещен. Команда доступна только администраторам.", reply_markup=get_keyboard_by_role(chat_id))
 
 def send_daily_sales_report():
     """
@@ -165,16 +168,6 @@ def send_daily_sales_report():
     except Exception as e:
         logger.exception(f"Error sending daily sales report for {yesterday.strftime('%Y-%m-%d')}: {e}")
 
-        if current_main_state and (current_main_state.startswith("UM_") or current_main_state.startswith("USER_MANAGEMENT")):
-            user_state.pop(chat_id, None)
-            if user_management_instance_global and chat_id in user_management_instance_global.current_operation_data:
-                logger.debug(f"Chat {chat_id}: Cleared previous user management state '{current_main_state}' before entering staff menu.")
-        bot.send_message(chat_id, "Меню управления персоналом. Выберите действие:", reply_markup=create_staff_management_buttons())
-    else:
-        logger.warning(f"Chat {chat_id}: Unauthorized access attempt to Staff Menu. User data: {current_user_data}")
-        bot.send_message(chat_id, "Доступ запрещен. Команда доступна только администраторам.", reply_markup=get_keyboard_by_role(chat_id))
-
-
 @bot.message_handler(func=lambda message: message.text == "Права" and \
                                    user_data.get(message.chat.id, {}).get('role') == 'admin' and \
                                    user_data.get(message.chat.id, {}).get('is_active', 0) == 1)
@@ -191,18 +184,18 @@ def handle_rights_button(message: types.Message):
 @bot.message_handler(func=lambda message: message.text == "Отмена")
 def handle_global_cancel(message: types.Message, called_from_back=False):
     chat_id = message.chat.id
-    current_op_state = user_state.get(chat_id) 
+    current_op_state = user_state.get(chat_id)
     action_source = "'Отмена'" if not called_from_back else "'Назад' (приравнивается к отмене)"
     logger.info(f"Chat {chat_id}: {action_source} pressed. Current global state: {current_op_state}")
 
     operation_cancelled_by_specific_handler = False
-    
+
     # Determine the correct main menu or section menu based on context
     # Default to main role-based keyboard
-    final_reply_markup = get_keyboard_by_role(chat_id) 
+    final_reply_markup = get_keyboard_by_role(chat_id)
 
     if not current_op_state:
-        if not called_from_back: 
+        if not called_from_back:
             bot.send_message(chat_id, "Нет активных операций для отмены.", reply_markup=final_reply_markup)
         # If called_from_back and no state, go_back_to_main_menu handles it.
         return
@@ -256,30 +249,30 @@ def handle_global_cancel(message: types.Message, called_from_back=False):
             if chat_id in user_data and 'stock_op_data' in user_data[chat_id]: del user_data[chat_id]['stock_op_data']
             bot.send_message(chat_id, "Операция со складом отменена.", reply_markup=create_stock_management_buttons())
         operation_cancelled_by_specific_handler = True
-    
+
     # If no specific handler dealt with it, and state was present, do a generic cleanup
     if not operation_cancelled_by_specific_handler and current_op_state:
         user_state.pop(chat_id, None)
         # Clean up any generic operation data if your design uses it
-        if chat_id in user_data and 'operation_data' in user_data[chat_id]: 
+        if chat_id in user_data and 'operation_data' in user_data[chat_id]:
             del user_data[chat_id]['operation_data']
         logger.info(f"Chat {chat_id}: Generic operation state '{current_op_state}' cancelled by global handler.")
         bot.send_message(chat_id, "Операция отменена.", reply_markup=final_reply_markup) # final_reply_markup is main role keyboard
-    
+
 
 def main():
     global user_management_instance_global
     logger.info("Bot starting...")
     register_start_handlers()
     register_help_handlers()
-    
+
     # User Management needs to be configured before other handlers that might depend on user roles
     user_management_instance_global = configure_user_management(bot, user_data, get_all_users, change_user_role_function)
-    
+
     # Register other handlers
     register_sales_handlers(bot, user_data, user_state) # Pass bot, user_data, user_state
     register_report_handlers(bot, user_data, user_state) # Pass bot, user_data, user_state
-    register_buyback_handlers() 
+    register_buyback_handlers()
     register_return_handlers()
     register_withdrawal_handlers()
     register_tradein_handlers()
@@ -296,7 +289,7 @@ def main():
 
     # Schedule low stock notification
     # Check for LOW_STOCK_THRESHOLD from config, recipients are fetched dynamically
-    # if LOW_STOCK_THRESHOLD is not None: 
+    # if LOW_STOCK_THRESHOLD is not None:
     #     scheduler.add_job(send_low_stock_notification, 'cron', hour=9, minute=0)
     #     logger.info(f"Low stock notification scheduled for 09:00 daily.")
     # else:
