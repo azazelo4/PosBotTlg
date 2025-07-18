@@ -194,8 +194,7 @@ class Report:
             excel_file_buffer = self.generate_excel_report_file(db_report_data)
             filename = f"report_{s_date.strftime('%Y%m%d')}_{e_date.strftime('%Y%m%d')}.xlsx"
 
-            bot.send_document(self.chat_id, excel_file_buffer, visible_file_name=filename, caption="Ваш отчет готов.")
-            bot.send_message(self.chat_id, "Выберите следующее действие:",reply_markup=create_cash_operations_buttons())
+            bot.send_document(self.chat_id, excel_file_buffer, visible_file_name=filename, caption="Ваш отчет готов. Выберите следующее действие:", reply_markup=create_cash_operations_buttons())
 
         except Exception as e:
             logger.exception(f"Chat {self.chat_id}: Error during report generation or sending.")
