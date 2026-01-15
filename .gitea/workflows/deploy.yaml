@@ -1,7 +1,7 @@
 name: Deploy Bot to Proxmox
 on:
   push:
-    branches: [ main ]
+    branches: [ POS-Bot ]
 
 jobs:
   deploy:
