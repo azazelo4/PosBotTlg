@@ -13,11 +13,19 @@ jobs:
       - name: Create .env file from Secrets
         # Создаем .env файл прямо перед сборкой
         run: |
-          echo "MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}" >> .env
-          echo "MYSQL_DATABASE=${{ secrets.MYSQL_DATABASE }}" >> .env
-          echo "MYSQL_USER=${{ secrets.MYSQL_USER }}" >> .env
-          echo "MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}" >> .env
-          echo "TOKEN=${{ secrets.TOKEN }}" >> .env
+          umask 077
+          cat > .env <<'EOF'
+          TOKEN=${{ secrets.TOKEN }}
+          DB_HOST=db
+          DB_USER=${{ secrets.MYSQL_USER }}
+          DB_PASS=${{ secrets.MYSQL_PASSWORD }}
+          DB_NAME=${{ secrets.MYSQL_DATABASE }}
+          MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}
+          MYSQL_DATABASE=${{ secrets.MYSQL_DATABASE }}
+          MYSQL_USER=${{ secrets.MYSQL_USER }}
+          MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}
+          REPORT_CHAT_ID=${{ secrets.REPORT_CHAT_ID }}
+          EOF
 
       - name: Deploy to Host Directory
         run: |

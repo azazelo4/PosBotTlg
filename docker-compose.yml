@@ -19,14 +19,16 @@ services:
       - db_data:/var/lib/mysql
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_0900_ai_ci
-    ports:
-      - "3306:3306"
+    # Порт MySQL наружу не публикуется: бот ходит в БД по внутренней сети compose.
+    # Для доступа с хоста раскомментируйте (только localhost):
+    # ports:
+    #   - "127.0.0.1:3306:3306"
 
   adminer:
     image: adminer
     restart: always
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"  # Adminer только с хоста (через SSH-туннель)
 
 volumes:
   db_data:
