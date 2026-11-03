@@ -1,17 +1,17 @@
-FROM python:3.10-slim-bullseye
+FROM python:3.10-slim-bookworm
 
-# Устанавливаем системные зависимости
-RUN apt-get update && apt-get install -y python3-venv && rm -rf /var/lib/apt/lists/*
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Создаём виртуальное окружение
 WORKDIR /app
-RUN python3 -m venv venv
 
-# Активируем виртуальное окружение и устанавливаем зависимости из requirements.txt
+# Зависимости отдельным слоем, чтобы кешировались между сборками
 COPY requirements.txt .
-RUN ./venv/bin/pip install -r requirements.txt
+RUN pip install -r requirements.txt
 
-# Копируем код приложения
+# Код приложения
 COPY . /app
-# Указываем точку входа
-CMD ["./venv/bin/python", "main.py"]
+
+CMD ["python", "main.py"]
