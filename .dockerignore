@@ -1,0 +1,6 @@
+.git
+.gitea
+.env
+.env.*
+__pycache__/
+*.log

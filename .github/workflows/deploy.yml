@@ -1,0 +1,103 @@
+name: Check & Deploy
+
+on:
+  push:
+    branches: [POS-Bot]
+  pull_request:
+    branches: [POS-Bot]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Проверка
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Синтаксис Python
+        run: python -m py_compile $(git ls-files '*.py')
+
+      - name: Валидация docker-compose
+        run: |
+          cp .env.example .env
+          docker compose config -q
+
+      - name: Сборка образа
+        run: docker build -t pos-bot:ci .
+
+  deploy:
+    name: Деплой на сервер
+    needs: check
+    # Деплой только из основной ветки, не из PR
+    if: github.event_name != 'pull_request'
+    runs-on: [self-hosted, linux, pos-bot]
+    environment: production
+    concurrency:
+      group: deploy-pos-bot
+      cancel-in-progress: false
+    env:
+      DEPLOY_DIR: /opt/pos-bot
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Обновить код в каталоге деплоя
+        run: |
+          mkdir -p "$DEPLOY_DIR"
+          # Только файлы из git: без .git, локального мусора и чужих .env
+          git archive HEAD | tar -x -C "$DEPLOY_DIR"
+
+      - name: Сформировать .env из секретов
+        env:
+          TOKEN: ${{ secrets.TOKEN }}
+          MYSQL_USER: ${{ secrets.MYSQL_USER }}
+          MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
+          MYSQL_DATABASE: ${{ secrets.MYSQL_DATABASE }}
+          MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
+          REPORT_CHAT_ID: ${{ vars.REPORT_CHAT_ID }}
+          DAILY_REPORT_TIME: ${{ vars.DAILY_REPORT_TIME || '23:00' }}
+          LOW_STOCK_THRESHOLD: ${{ vars.LOW_STOCK_THRESHOLD || '5' }}
+        run: |
+          for v in TOKEN MYSQL_USER MYSQL_PASSWORD MYSQL_DATABASE MYSQL_ROOT_PASSWORD; do
+            if [ -z "${!v}" ]; then echo "::error::Не задан секрет $v"; exit 1; fi
+          done
+          umask 077
+          {
+            echo "TOKEN=$TOKEN"
+            echo "DB_HOST=db"
+            echo "DB_USER=$MYSQL_USER"
+            echo "DB_PASS=$MYSQL_PASSWORD"
+            echo "DB_NAME=$MYSQL_DATABASE"
+            echo "MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD"
+            echo "MYSQL_DATABASE=$MYSQL_DATABASE"
+            echo "MYSQL_USER=$MYSQL_USER"
+            echo "MYSQL_PASSWORD=$MYSQL_PASSWORD"
+            echo "REPORT_CHAT_ID=$REPORT_CHAT_ID"
+            echo "DAILY_REPORT_TIME=$DAILY_REPORT_TIME"
+            echo "LOW_STOCK_THRESHOLD=$LOW_STOCK_THRESHOLD"
+          } > "$DEPLOY_DIR/.env"
+
+      - name: Перезапустить контейнеры
+        working-directory: ${{ env.DEPLOY_DIR }}
+        run: |
+          docker compose up -d --build --remove-orphans
+          docker image prune -f
+
+      - name: Проверить, что бот запустился
+        working-directory: ${{ env.DEPLOY_DIR }}
+        run: |
+          sleep 15
+          docker compose ps
+          status=$(docker inspect -f '{{.State.Status}}' PosBotTest)
+          if [ "$status" != "running" ]; then
+            docker compose logs --tail=100 bot
+            echo "::error::Контейнер бота в состоянии $status"
+            exit 1
+          fi
+          docker compose logs --tail=30 bot
