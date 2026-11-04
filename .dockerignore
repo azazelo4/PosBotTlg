@@ -7,3 +7,5 @@ __pycache__/
 tests/
 requirements-dev.txt
 *.md
+deploy/
+docs/

@@ -7,6 +7,8 @@
 
 Self-hosted runner сам подключается к GitHub исходящим HTTPS, входящие порты на сервер открывать не нужно.
 
+**Облако:** пошаговая инструкция для Oracle Cloud Always Free (VM, сеть, runner, бэкапы, перенос данных) — [`docs/DEPLOY_CLOUD.md`](docs/DEPLOY_CLOUD.md).
+
 ## 1. Секреты и переменные в GitHub
 
 Repo → Settings → Environments → создать `production` и задать в нём:
