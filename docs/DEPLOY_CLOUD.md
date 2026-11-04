@@ -1,180 +1,194 @@
-# Деплой в облако: Oracle Cloud Always Free
+# Деплой на VPS (is*hosting, Казахстан)
 
-Бесплатная навсегда VM в Oracle Cloud, бот и MySQL в Docker Compose, деплой — GitHub Actions
-через self-hosted runner на этой же VM. Общая часть про секреты и runner — в [`DEPLOY.md`](../DEPLOY.md),
-здесь — всё, что относится к облаку.
+Бот и MySQL работают в Docker Compose на Ubuntu-VPS, деплой — GitHub Actions через self-hosted
+runner на этом же сервере. Общая часть про секреты GitHub — в [`DEPLOY.md`](../DEPLOY.md).
+
+Выбранный сервер: **is*hosting VPS Kazakhstan, тариф Start** — 2 vCPU, 2 GB RAM, 30 GB SSD.
+Сервер в Казахстане выбран и из-за требования закона РК о персональных данных хранить такие базы
+на территории РК (в БД — имена и телефоны сотрудников).
 
 ```
 GitHub (push в POS-Bot)
    │  job check + test — на раннерах GitHub
    │  job deploy ──────────────┐
    ▼                           │ runner сам забирает задачу исходящим HTTPS
-Oracle Cloud VM (ARM, Ubuntu)  │
+VPS (Ubuntu 24.04)             │
    ├─ GitHub runner  ◄─────────┘
    └─ docker compose: bot ──► api.telegram.org (long polling)
                       db (MySQL, volume pos-bot_db_data)
                       adminer (только 127.0.0.1:8080)
 ```
 
-Входящих портов, кроме SSH, не нужно: бот опрашивает Telegram сам, runner сам ходит в GitHub.
+Входящих портов, кроме SSH, не нужно: бот сам опрашивает Telegram, runner сам ходит в GitHub.
 
 ---
 
-## 1. Аккаунт Oracle Cloud
+## 1. Заказ сервера
 
-1. Регистрация на <https://www.oracle.com/cloud/free/>. Нужна банковская карта для проверки — блокируется небольшая сумма и возвращается.
-2. **Home region выбирается один раз и не меняется.** Always Free ресурсы создаются только в нём. Для бота задержка не важна, важнее свободные мощности: популярные регионы (Frankfurt, Amsterdam) чаще отвечают «Out of capacity».
-3. Рекомендуется перевести аккаунт на **Pay As You Go** (Billing → Upgrade). В пределах Always Free это по-прежнему бесплатно, но:
-   - простаивающие Always Free инстансы на бесплатном аккаунте Oracle может забрать — у бота нагрузка почти нулевая, это как раз наш случай;
-   - ARM-мощности выдаются охотнее.
-4. Сразу после апгрейда — **Billing → Budgets → Create budget** на 1 $ с уведомлением на почту, чтобы случайно созданный платный ресурс не остался незамеченным.
-
-## 2. Сеть
-
-**Networking → Virtual Cloud Networks → Start VCN Wizard → Create VCN with Internet Connectivity**, имя `pos-bot-vcn`, остальное по умолчанию.
-
-Затем в созданной VCN: **Security Lists → Default Security List → Ingress Rules**:
-
-- оставить только правило TCP **22**;
-- если у тебя статический IP — заменить источник `0.0.0.0/0` на `<твой IP>/32`;
-- ничего больше не открывать (MySQL и Adminer наружу не публикуются).
-
-## 3. Виртуальная машина
-
-**Compute → Instances → Create instance**:
+В панели is*hosting: **VPS → Kazakhstan → Start**.
 
 | Параметр | Значение |
 |---|---|
-| Name | `pos-bot` |
-| Image | Canonical Ubuntu 24.04 (aarch64) |
-| Shape | `VM.Standard.A1.Flex` — **2 OCPU, 12 GB** (предел Always Free для ARM с июня 2026) |
-| Networking | `pos-bot-vcn`, public subnet, **Assign a public IPv4 address** |
-| SSH keys | загрузить свой публичный ключ (`~/.ssh/id_ed25519.pub`) |
-| Boot volume | 50 GB (бесплатно до 200 GB суммарно) |
-| Advanced → Management → cloud-init | вставить содержимое [`deploy/cloud-init.yaml`](../deploy/cloud-init.yaml) |
+| ОС | Ubuntu 24.04 |
+| Панель управления | не нужна |
+| SSH-ключ | добавить свой публичный ключ, если панель позволяет (иначе — шаг 2) |
+| Оплата | помесячно; при оплате за год обычно дешевле |
 
-Если «Out of capacity for shape» — попробовать другой Availability Domain, повторить через несколько часов или после перехода на Pay As You Go.
+После активации в панели будут IP-адрес и пароль root.
 
-Проверка после создания (2–5 минут):
+## 2. Первый вход и SSH-ключ
+
+С ноутбука (если ключа ещё нет — `ssh-keygen -t ed25519`):
 
 ```bash
-ssh ubuntu@<PUBLIC_IP>
-cloud-init status --wait          # должно быть: status: done
-docker run --rm hello-world       # через sudo, если от ubuntu
-timedatectl | grep "Time zone"    # Asia/Almaty
+ssh-copy-id root@<IP>     # ввести пароль root из панели
+ssh root@<IP>             # теперь без пароля
 ```
 
-## 4. GitHub: секреты и переменные
+Ключ нужен до следующего шага: скрипт подготовки отключит вход по паролю, только если увидит ключ.
 
-Как в [`DEPLOY.md`, раздел 1](../DEPLOY.md#1-секреты-и-переменные-в-github): environment `production`,
-секреты `TOKEN`, `MYSQL_*`, переменная **`ADMIN_PHONE`** (без неё на новой БД никто не войдёт).
-В **Deployment branches** environment ограничить веткой `POS-Bot`.
+## 3. Подготовка сервера
+
+С ноутбука, из каталога репозитория:
+
+```bash
+scp deploy/setup-server.sh root@<IP>:~
+ssh root@<IP> 'bash setup-server.sh'
+```
+
+[`deploy/setup-server.sh`](../deploy/setup-server.sh) (повторный запуск безопасен):
+
+- часовой пояс `Asia/Almaty`, обновление системы и автообновления безопасности;
+- swap 2 GB — запас для сборки образа и пиков MySQL;
+- Docker и ротация логов контейнеров;
+- пользователь `gh-runner` для GitHub runner, каталог `/opt/pos-bot`;
+- ежедневный бэкап БД в 03:30;
+- firewall `ufw`: входящие только SSH; `fail2ban`;
+- вход по SSH только по ключу.
+
+Проверка:
+
+```bash
+ssh root@<IP>
+docker run --rm hello-world
+free -h          # Swap: 2.0Gi
+ufw status       # 22/tcp (OpenSSH) ALLOW
+```
+
+> Если провайдер поддерживает cloud-init при создании сервера, вместо шагов 2–3 можно вставить
+> [`deploy/cloud-init.yaml`](../deploy/cloud-init.yaml) — он делает то же, кроме swap, ufw и fail2ban.
+
+## 4. GitHub: секреты, переменные, runner
+
+**Секреты и переменные** — как в [`DEPLOY.md`, раздел 1](../DEPLOY.md#1-секреты-и-переменные-в-github):
+environment `production`, секреты `TOKEN`, `MYSQL_*`, переменная **`ADMIN_PHONE`** (без неё на новой
+БД никто не войдёт). В **Deployment branches** ограничить environment веткой `POS-Bot`.
 
 Если токен бота ещё не перевыпущен после утечки в истории git — сделать это сейчас: @BotFather → `/revoke`.
 
-## 5. Runner на VM
-
-GitHub: **Settings → Actions → Runners → New self-hosted runner → Linux → ARM64**. Страница покажет
-команды с актуальной версией и одноразовым токеном (действует час). Выполнить их от пользователя `gh-runner`:
+**Runner.** GitHub: **Settings → Actions → Runners → New self-hosted runner → Linux → x64**. Страница
+покажет команды с актуальной версией и одноразовым токеном (действует час). Выполнить на сервере:
 
 ```bash
 sudo -iu gh-runner
 cd ~/actions-runner
 # curl ... и tar ... — скопировать со страницы GitHub
 ./config.sh --url https://github.com/azazelo4/PosBotTlg --token <ТОКЕН_СО_СТРАНИЦЫ> \
-            --name oracle-pos-bot --labels pos-bot --unattended
+            --name ishosting-pos-bot --labels pos-bot --unattended
 exit
-```
 
-Сервис, чтобы runner переживал перезагрузку:
-
-```bash
 cd /home/gh-runner/actions-runner
-sudo ./svc.sh install gh-runner
-sudo ./svc.sh start
+./svc.sh install gh-runner      # от root: runner как сервис, переживает перезагрузку
+./svc.sh start
 ```
 
-В GitHub runner должен появиться со статусом **Idle** и метками `self-hosted, Linux, ARM64, pos-bot`.
+В GitHub runner должен появиться со статусом **Idle** и метками `self-hosted, Linux, X64, pos-bot`.
 
-## 6. Первый деплой
+## 5. Первый деплой
 
-1. Смержить PR в `POS-Bot` (или **Actions → Check & Deploy → Run workflow**).
+1. **Actions → Check & Deploy → Run workflow** (ветка `POS-Bot`) или любой push в `POS-Bot`.
+   Если деплой уже стоял в очереди «Waiting for a runner», он запустится сам.
 2. Job `deploy` разложит код в `/opt/pos-bot`, соберёт `.env` из секретов и поднимет контейнеры.
-3. Проверка на VM:
+3. Проверка на сервере:
 
    ```bash
    cd /opt/pos-bot
-   sudo docker compose ps                  # bot, db (healthy), adminer — Up
-   sudo docker compose logs --tail=50 bot  # «Бот запущен, начинаю опрос Telegram.»
+   docker compose ps                  # bot, db (healthy), adminer — Up
+   docker compose logs --tail=50 bot  # «Бот запущен, начинаю опрос Telegram.»
    ```
 
 4. В Telegram с номера из `ADMIN_PHONE`: `/start` → «Поделиться номером» → меню администратора.
 5. Добавить сотрудников: **Персонал → Добавить пользователя**.
 
-## 7. Бэкапы
+## 6. Бэкапы
 
-cloud-init уже настроил ежедневный бэкап в 03:30: [`deploy/backup.sh`](../deploy/backup.sh) делает
-`mysqldump` в `/opt/pos-bot-backups` и хранит 14 дней. Проверить вручную:
+Ежедневно в 03:30 [`deploy/backup.sh`](../deploy/backup.sh) делает `mysqldump` в `/opt/pos-bot-backups`
+и хранит 14 дней. Проверить вручную:
 
 ```bash
-sudo /opt/pos-bot/deploy/backup.sh
+/opt/pos-bot/deploy/backup.sh
 ls -lh /opt/pos-bot-backups
 ```
 
-**Копия вне сервера** (рекомендуется: без неё бэкап пропадёт вместе с VM). Object Storage — 20 GB бесплатно:
+**Копия вне сервера.** Бэкап на том же диске пропадёт вместе с сервером, поэтому стоит регулярно
+забирать копии к себе:
 
-1. **Storage → Buckets → Create bucket** `pos-bot-backups`, Standard, приватный.
-2. В бакете: **Lifecycle Policy Rules → Create** — удалять объекты старше 30 дней.
-3. **Pre-Authenticated Requests → Create**: target *Bucket*, access *Permit object writes*, срок — год. Скопировать URL (заканчивается на `/o/`).
-4. На VM: `sudo nano /etc/pos-bot-backup.env` → `BACKUP_PAR_URL=<URL>`.
-5. `sudo /opt/pos-bot/deploy/backup.sh` — в конце «копия загружена в Object Storage». Поставить в календарь продление PAR через год.
+```bash
+# с ноутбука или другого сервера, например раз в неделю по cron
+rsync -av root@<IP>:/opt/pos-bot-backups/ ~/pos-bot-backups/
+```
 
-**Восстановление** из бэкапа:
+Либо автоматически в S3-совместимое хранилище: в `/etc/pos-bot-backup.env` задать `BACKUP_PAR_URL` —
+URL, по которому разрешена PUT-загрузка (имя файла дописывается в конец).
+
+**Восстановление:**
 
 ```bash
 cd /opt/pos-bot
-sudo docker compose stop bot
+docker compose stop bot
 gunzip -c /opt/pos-bot-backups/bot_YYYYMMDD_HHMM.sql.gz | \
-  sudo docker compose exec -T -e MYSQL_PWD="$(sudo grep -m1 '^MYSQL_ROOT_PASSWORD=' .env | cut -d= -f2-)" db mysql -uroot bot
-sudo docker compose start bot
+  docker compose exec -T -e MYSQL_PWD="$(grep -m1 '^MYSQL_ROOT_PASSWORD=' .env | cut -d= -f2-)" db mysql -uroot bot
+docker compose start bot
 ```
 
-## 8. Перенос данных со старого сервера
+## 7. Перенос данных со старого сервера
 
 Когда старый сервер снова будет доступен:
 
 ```bash
 # на старом сервере
 cd /opt/pos-bot
-sudo docker compose stop bot          # важно: два бота с одним токеном конфликтуют (ошибка 409)
-sudo docker compose exec -T -e MYSQL_PWD=<root-пароль> db \
+docker compose stop bot          # важно: два бота с одним токеном конфликтуют (ошибка 409)
+docker compose exec -T -e MYSQL_PWD=<root-пароль> db \
   mysqldump -uroot --single-transaction --routines --triggers --no-tablespaces bot | gzip > old_bot.sql.gz
-scp old_bot.sql.gz ubuntu@<PUBLIC_IP>:/tmp/
+scp old_bot.sql.gz root@<IP>:/tmp/
 ```
 
-На новой VM — шаги «Восстановление» с файлом `/tmp/old_bot.sql.gz`. При старте бот сам добавит
-недостающие таблицы и колонки. Затем на старом сервере `sudo docker compose down` и отключить
-автозапуск, чтобы он не поднялся с тем же токеном.
+На новом сервере — шаги «Восстановление» с файлом `/tmp/old_bot.sql.gz`. При старте бот сам добавит
+недостающие таблицы и колонки. Затем на старом сервере `docker compose down` и отключить автозапуск,
+чтобы он не поднялся с тем же токеном.
 
-## 9. Обслуживание
+## 8. Обслуживание
 
-| Задача | Команда (на VM, в `/opt/pos-bot`) |
+| Задача | Команда (на сервере, в `/opt/pos-bot`) |
 |---|---|
-| Логи бота | `sudo docker compose logs -f --tail=100 bot` |
-| Перезапуск | `sudo docker compose restart bot` |
-| Adminer | с ноутбука: `ssh -L 8080:127.0.0.1:8080 ubuntu@<PUBLIC_IP>`, затем <http://localhost:8080> (сервер `db`) |
-| Место на диске | `df -h /` и `sudo docker system df` |
-| Статус runner | `sudo /home/gh-runner/actions-runner/svc.sh status` |
+| Логи бота | `docker compose logs -f --tail=100 bot` |
+| Перезапуск | `docker compose restart bot` |
+| Adminer | с ноутбука: `ssh -L 8080:127.0.0.1:8080 root@<IP>`, затем <http://localhost:8080> (сервер `db`) |
+| Память и диск | `free -h`, `df -h /`, `docker system df` |
+| Статус runner | `/home/gh-runner/actions-runner/svc.sh status` |
+| Очистка старых образов | `docker image prune -f` (деплой делает это сам) |
 
-Обновления безопасности ОС ставятся автоматически (`unattended-upgrades`). Раз в пару месяцев стоит
-зайти и выполнить `sudo apt full-upgrade && sudo reboot`.
+Обновления безопасности ставятся автоматически. Раз в пару месяцев: `apt full-upgrade && reboot` —
+контейнеры (`restart: always`) и runner (сервис) поднимутся сами.
 
-## 10. Если что-то не так
+## 9. Если что-то не так
 
 | Симптом | Причина и решение |
 |---|---|
-| Job `deploy` висит «Waiting for a runner» | Runner offline или без метки `pos-bot`. Проверить статус сервиса и метки в Settings → Actions → Runners. |
+| Job `deploy` висит «Waiting for a runner» | Runner offline или без метки `pos-bot`: `svc.sh status`, метки в Settings → Actions → Runners. |
 | Jobs `check`/`test` висят в очереди | Раннеры GitHub для приватного репо расходуют бесплатные минуты (2000 в месяц на Free). Проверить Settings → Billing. |
 | Бот падает с «Не задана обязательная переменная» | Не заведён секрет в environment `production`. |
 | В логах `409 Conflict: terminated by other getUpdates request` | Тот же токен опрашивает другой экземпляр бота (старый сервер, локальный запуск). Остановить лишний. |
-| VM пропала из консоли | Free-аккаунт и простой — Oracle забрал инстанс. Перейти на Pay As You Go, поднять VM заново по шагам 3–6, восстановить БД из Object Storage. |
+| Сборка образа падает или сервер «задыхается» | Мало памяти: `free -h`, проверить, что swap включён (`swapon --show`). |
+| Нет доступа по SSH после настройки | Войти через консоль (VNC) в панели is*hosting, проверить `/etc/ssh/sshd_config.d/10-pos-bot.conf` и ключ в `~/.ssh/authorized_keys`. |

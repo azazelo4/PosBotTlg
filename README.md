@@ -116,8 +116,9 @@ Push в ветку `POS-Bot` → GitHub Actions прогоняет провер�
 пересобирает и перезапускает контейнеры.
 
 - [`DEPLOY.md`](DEPLOY.md) — секреты GitHub, установка runner, первый деплой.
-- [`docs/DEPLOY_CLOUD.md`](docs/DEPLOY_CLOUD.md) — пошагово для **Oracle Cloud Always Free**: VM, сеть, бэкапы БД, перенос данных, обслуживание.
-- [`deploy/cloud-init.yaml`](deploy/cloud-init.yaml) — подготовка новой VM одной вставкой.
+- [`docs/DEPLOY_CLOUD.md`](docs/DEPLOY_CLOUD.md) — пошагово для **VPS is\*hosting (Казахстан)**: сервер, runner, бэкапы БД, перенос данных, обслуживание.
+- [`deploy/setup-server.sh`](deploy/setup-server.sh) — подготовка чистого Ubuntu-VPS одной командой (Docker, swap, firewall, бэкапы).
+- [`deploy/cloud-init.yaml`](deploy/cloud-init.yaml) — то же для провайдеров с cloud-init.
 - [`deploy/backup.sh`](deploy/backup.sh) — ежедневный дамп БД с ротацией и копией в Object Storage.
 
 ## База данных
@@ -166,7 +167,7 @@ utils/
   report_generator.py    сводка и Excel за период
   scheduled_jobs.py      ежедневный отчёт, уведомление о низком остатке
 tests/                   сценарные тесты на реальной БД
-deploy/                  cloud-init и скрипт бэкапа
+deploy/                  подготовка сервера и скрипт бэкапа
 docs/                    инструкции по деплою
 ```
 

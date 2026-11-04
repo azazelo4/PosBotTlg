@@ -1,6 +1,7 @@
 #cloud-config
 # Подготовка VM для POS-бота (Ubuntu 22.04/24.04, x86_64 или ARM).
-# Вставляется в Oracle Cloud: Create instance → Show advanced options → Management → Paste cloud-init script.
+# Вставляется в поле user-data / cloud-init при создании сервера (если провайдер это поддерживает).
+# Для VPS без cloud-init — deploy/setup-server.sh.
 # Ставит Docker, создаёт пользователя для GitHub runner, каталоги, автообновления и ежедневный бэкап БД.
 # Сам runner регистрируется вручную (нужен одноразовый токен из GitHub), см. docs/DEPLOY_CLOUD.md.
 

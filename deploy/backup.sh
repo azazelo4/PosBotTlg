@@ -9,8 +9,8 @@ APP_DIR=${APP_DIR:-/opt/pos-bot}
 BACKUP_DIR=${BACKUP_DIR:-/opt/pos-bot-backups}
 KEEP_DAYS=14
 BACKUP_PAR_URL=""
-# shellcheck disable=SC1091
 CONFIG=${BACKUP_CONFIG:-/etc/pos-bot-backup.env}
+# shellcheck disable=SC1090
 if [ -f "$CONFIG" ]; then . "$CONFIG"; fi
 
 env_value() {
