@@ -342,3 +342,27 @@ def test_user_management(tg):
     calls = tg.send(2001, "Касса")
     assert "поделитесь номером" in tg.texts(calls).lower()
     assert "деактивирован" in tg.texts(tg.contact(2001, "77015554433"))
+
+
+def test_reads_see_fresh_data_on_every_pooled_connection(tg):
+    """Регрессия: соединения из пула не должны держать старый снимок данных."""
+    from database import get_user_by_phone, change_user_role_function
+    user = get_user_by_phone(PHONES[CASHIER])
+    for _ in range(25):  # прогреть все соединения пула чтением
+        assert get_user_by_phone(PHONES[CASHIER])['role'] == 'cashier'
+    ok, _ = change_user_role_function(user['id'], 'manager')
+    assert ok
+    roles = {get_user_by_phone(PHONES[CASHIER])['role'] for _ in range(25)}
+    assert roles == {'manager'}
+
+
+def test_role_change_applies_right_after_server_boot(tg, monkeypatch):
+    """Регрессия: сброс сессии должен работать и в первые минуты после загрузки системы."""
+    import auth
+    monkeypatch.setattr(auth.time, "monotonic", lambda: 10.0)  # «система загрузилась 10 секунд назад»
+    login(tg, CASHIER)
+    user_id = user_data[CASHIER]['id']
+    db_query("UPDATE users SET role = 'manager' WHERE id = %s", (user_id,))
+    auth.invalidate_user_sessions(user_id)
+    tg.send(CASHIER, "Склад")
+    assert user_data[CASHIER]['role'] == 'manager'

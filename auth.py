@@ -67,7 +67,10 @@ def drop_session(chat_id):
 def ensure_session(chat_id):
     """Восстанавливает/обновляет сессию из БД. Возвращает данные сессии или None."""
     session = user_data.get(chat_id)
-    if session and session.get('id') and time.monotonic() - session.get('checked_at', 0) < SESSION_TTL:
+    checked_at = session.get('checked_at') if session else None
+    # None = сессию нужно перечитать. Нельзя сравнивать с 0: monotonic() считает
+    # от загрузки системы и первые SESSION_TTL секунд после старта меньше TTL.
+    if session and session.get('id') and checked_at is not None and time.monotonic() - checked_at < SESSION_TTL:
         return session
     try:
         db_user = get_user_by_id(session['id']) if session and session.get('id') else get_user_by_chat_id(chat_id)
@@ -97,7 +100,7 @@ def invalidate_user_sessions(user_id):
     """После смены роли/телефона/деактивации — перечитать сессии этого пользователя."""
     for chat_id, session in list(user_data.items()):
         if session.get('id') == int(user_id):
-            session['checked_at'] = 0
+            session['checked_at'] = None
 
 
 def has_role(chat_id, *roles):

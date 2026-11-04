@@ -4,7 +4,6 @@ on:
   push:
     branches: [POS-Bot]
   pull_request:
-    branches: [POS-Bot]
   workflow_dispatch:
 
 permissions:
@@ -19,7 +18,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.12"
 
       - name: Синтаксис Python
         run: python -m py_compile $(git ls-files '*.py')

@@ -4,3 +4,8 @@
 .env.*
 __pycache__/
 *.log
+tests/
+requirements-dev.txt
+*.md
+deploy/
+docs/

@@ -37,6 +37,10 @@ def init_pool(retries=30, delay=2):
                     charset="utf8mb4",
                     collation="utf8mb4_general_ci",
                     connection_timeout=10,
+                    # Чтение не держит открытую транзакцию (и старый снимок REPEATABLE READ),
+                    # даже если сброс сессии пула не сработает.
+                    # Записи идут через явный start_transaction() в with_transaction.
+                    autocommit=True,
                 )
                 logger.info("Пул соединений с БД создан.")
                 return _pool
