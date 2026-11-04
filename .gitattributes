@@ -1,0 +1,7 @@
+# Скрипты и конфиги для Linux-сервера — всегда с LF, даже при клонировании на Windows
+*.sh text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.sql text eol=lf
+Dockerfile text eol=lf
+.env.example text eol=lf
