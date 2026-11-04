@@ -21,7 +21,18 @@ Repo → Settings → Environments → создать `production` и задат
 | `MYSQL_DATABASE` | Имя БД (сейчас `bot`) |
 | `MYSQL_ROOT_PASSWORD` | Пароль root MySQL |
 
-**Variables** (необязательные): `REPORT_CHAT_ID`, `DAILY_REPORT_TIME` (по умолчанию `23:00`), `LOW_STOCK_THRESHOLD` (по умолчанию `5`).
+**Variables**:
+
+| Имя | По умолчанию | Что это |
+|---|---|---|
+| `ADMIN_PHONE` | — | Телефон первого администратора. На пустой БД без него никто не войдёт. |
+| `TZ` | `Asia/Almaty` | Часовой пояс: даты операций, периоды отчётов, расписание |
+| `REPORT_CHAT_ID` | — | Куда слать ежедневный отчёт. Если пусто — всем администраторам |
+| `DAILY_REPORT_TIME` | `23:00` | Время ежедневного отчёта |
+| `LOW_STOCK_TIME` | `09:00` | Время уведомления о низком остатке (пусто — выключено) |
+| `LOW_STOCK_THRESHOLD` | `5` | Порог низкого остатка, шт. |
+
+Схему БД создаёт и обновляет сам бот при старте (`schema.py`): на новой базе создаются все таблицы, на существующей добавляются недостающие колонки, данные не трогаются.
 
 Рекомендуется в настройках environment `production` ограничить деплой веткой `POS-Bot` (Deployment branches).
 
@@ -56,6 +67,17 @@ Runner должен появиться в списке со статусом **I
 ## 3. Первый деплой
 
 Actions → **Check & Deploy** → Run workflow (ветка `POS-Bot`), либо просто push в `POS-Bot`.
+
+## Тесты
+
+Сценарные тесты гоняют все процессы бота через настоящую БД и имитацию Telegram:
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+TEST_DB_HOST=127.0.0.1 TEST_DB_USER=root TEST_DB_PASS=... TEST_DB_NAME=bot_test pytest -q tests
+```
+
+В CI они запускаются на MySQL 8.4 и latest перед каждым деплоем.
 
 ## Локальный запуск
 

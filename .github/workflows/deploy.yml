@@ -4,7 +4,6 @@ on:
   push:
     branches: [POS-Bot]
   pull_request:
-    branches: [POS-Bot]
   workflow_dispatch:
 
 permissions:
@@ -32,9 +31,45 @@ jobs:
       - name: Сборка образа
         run: docker build -t pos-bot:ci .
 
+  test:
+    name: Тесты (MySQL ${{ matrix.mysql }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mysql: ["8.4", "latest"]
+    services:
+      mysql:
+        image: mysql:${{ matrix.mysql }}
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: bot_test
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot --silent"
+          --health-interval=5s --health-timeout=5s --health-retries=30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Зависимости
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Сценарные тесты на реальной БД
+        env:
+          TEST_DB_HOST: 127.0.0.1
+          TEST_DB_USER: root
+          TEST_DB_PASS: root
+          TEST_DB_NAME: bot_test
+        run: python -m pytest -q tests
+
   deploy:
     name: Деплой на сервер
-    needs: check
+    needs: [check, test]
     # Деплой только из основной ветки, не из PR
     if: github.event_name != 'pull_request'
     runs-on: [self-hosted, linux, pos-bot]
@@ -60,8 +95,11 @@ jobs:
           MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
           MYSQL_DATABASE: ${{ secrets.MYSQL_DATABASE }}
           MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
+          ADMIN_PHONE: ${{ vars.ADMIN_PHONE }}
           REPORT_CHAT_ID: ${{ vars.REPORT_CHAT_ID }}
+          TZ: ${{ vars.TZ || 'Asia/Almaty' }}
           DAILY_REPORT_TIME: ${{ vars.DAILY_REPORT_TIME || '23:00' }}
+          LOW_STOCK_TIME: ${{ vars.LOW_STOCK_TIME || '09:00' }}
           LOW_STOCK_THRESHOLD: ${{ vars.LOW_STOCK_THRESHOLD || '5' }}
         run: |
           for v in TOKEN MYSQL_USER MYSQL_PASSWORD MYSQL_DATABASE MYSQL_ROOT_PASSWORD; do
@@ -78,8 +116,11 @@ jobs:
             echo "MYSQL_DATABASE=$MYSQL_DATABASE"
             echo "MYSQL_USER=$MYSQL_USER"
             echo "MYSQL_PASSWORD=$MYSQL_PASSWORD"
+            echo "ADMIN_PHONE=$ADMIN_PHONE"
             echo "REPORT_CHAT_ID=$REPORT_CHAT_ID"
+            echo "TZ=$TZ"
             echo "DAILY_REPORT_TIME=$DAILY_REPORT_TIME"
+            echo "LOW_STOCK_TIME=$LOW_STOCK_TIME"
             echo "LOW_STOCK_THRESHOLD=$LOW_STOCK_THRESHOLD"
           } > "$DEPLOY_DIR/.env"
 

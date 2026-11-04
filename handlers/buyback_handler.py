@@ -1,148 +1,83 @@
+"""Скупка изделия у клиента: изделие → цена → способ выплаты → подтверждение."""
 import logging
-from telebot import types
-from state import bot, user_data, user_state # Assuming state.py is in the parent directory or PYTHONPATH is set
-from database import get_product_by_article, create_buyback_record
-from buttons import create_cancel_markup, create_payment_type_markup, create_confirmation_markup
-# Assuming get_keyboard_by_role is accessible, e.g., from main or a utils module
-# For now, let's define a placeholder or import if available.
-# from main import get_keyboard_by_role # This would be a circular import, handle carefully
 
-# States for buyback
-AWAITING_BUYBACK_ARTICLE = "AWAITING_BUYBACK_ARTICLE"
-AWAITING_BUYBACK_PRICE = "AWAITING_BUYBACK_PRICE"
-AWAITING_BUYBACK_PAYMENT_TYPE = "AWAITING_BUYBACK_PAYMENT_TYPE"
-AWAITING_BUYBACK_CONFIRMATION = "AWAITING_BUYBACK_CONFIRMATION"
+from buttons import create_cancel_markup, create_confirmation_markup, create_payment_type_markup, PAYMENT_TYPES, BTN_CONFIRM
+from database import create_buyback_record
+from handlers.common import (CASH_ROLES, CustomerItemIntake, in_state, is_button, user_ids, cash_menu,
+                             register_simple_cancel, ask_money, read_money)
+from state import bot, user_state, get_op, start_op, end_op, cancel_current_operation
+from utils.common import money, h
 
 logger = logging.getLogger(__name__)
 
-def get_main_keyboard_by_role(chat_id):
-    # This function needs to be defined globally or passed, temporary placeholder
-    # Ideally, import from where it's defined, e.g., a 'keyboards_management.py' or 'main.py'
-    # For now, let's assume it returns a generic main menu keyboard if role specific is complex.
-    # from main import get_keyboard_by_role # Avoid circular if possible
-    # Fallback to a simple message if function not available
-    from main import get_keyboard_by_role # Assuming main.py can be imported for this
-    return get_keyboard_by_role(chat_id)
+PRICE, PAYMENT, CONFIRM = "BUYBACK_PRICE", "BUYBACK_PAYMENT", "BUYBACK_CONFIRM"
 
 
-def start_buyback_handler(message: types.Message):
+def _after_item(chat_id):
+    item = get_op(chat_id)['item']
+    user_state[chat_id] = PRICE
+    note = "\nИзделие вернётся на склад." if item.get('article') else ""
+    ask_money(chat_id, f"Изделие: {item['title']}{note}\n\nВведите сумму скупки:")
+
+
+intake = CustomerItemIntake("BUYBACK", _after_item)
+
+
+def start(message):
     chat_id = message.chat.id
-    logger.info(f"Chat {chat_id}: Starting buyback process.")
-    user_state[chat_id] = AWAITING_BUYBACK_ARTICLE
-    user_data[chat_id]['buyback_data'] = {}
-    bot.send_message(chat_id, "Введите артикул товара для скупки:", reply_markup=create_cancel_markup())
+    cancel_current_operation(chat_id, notify=False)
+    start_op(chat_id, intake.ARTICLE)
+    intake.start(chat_id, "Скупка изделия у клиента.")
 
-def handle_buyback_article(message: types.Message):
+
+def on_price(message):
     chat_id = message.chat.id
-    article = message.text.strip()
-    
-    if message.text == "Отмена":
-        cancel_buyback(chat_id)
+    price = read_money(message)
+    if price is None:
+        bot.send_message(chat_id, "Введите сумму числом, например 85000.", reply_markup=create_cancel_markup())
         return
+    get_op(chat_id)['price'] = price
+    user_state[chat_id] = PAYMENT
+    bot.send_message(chat_id, "Способ выплаты клиенту:", reply_markup=create_payment_type_markup())
 
-    logger.debug(f"Chat {chat_id}: Received article for buyback: {article}")
-    product = get_product_by_article(article)
 
-    if product:
-        user_data[chat_id]['buyback_data']['product'] = product
-        user_state[chat_id] = AWAITING_BUYBACK_PRICE
-        bot.send_message(chat_id, f"Найден товар: {product.get('model', product.get('product_type', 'N/A'))}. Введите цену скупки:", reply_markup=create_cancel_markup())
+def on_payment(message):
+    chat_id, text = message.chat.id, (message.text or '').strip()
+    if text not in PAYMENT_TYPES:
+        bot.send_message(chat_id, "Выберите способ выплаты кнопкой.", reply_markup=create_payment_type_markup())
+        return
+    op = get_op(chat_id)
+    op['payment'] = text
+    user_state[chat_id] = CONFIRM
+    bot.send_message(chat_id,
+                     f"<b>Подтвердите скупку</b>\nИзделие: {op['item']['title']}\n"
+                     f"Выплата клиенту: <b>{money(op['price'])}</b>, {h(text)}",
+                     parse_mode='HTML', reply_markup=create_confirmation_markup())
+
+
+def on_confirm(message):
+    chat_id = message.chat.id
+    if message.text != BTN_CONFIRM:
+        bot.send_message(chat_id, "Нажмите «Подтвердить» или «Отмена».", reply_markup=create_confirmation_markup())
+        return
+    op = get_op(chat_id)
+    item = op['item']
+    user_id, store_id = user_ids(chat_id)
+    ok, result = create_buyback_record(item.get('article'), op['price'], op['payment'], user_id, store_id,
+                                       description=item.get('description'), metal_type=item.get('metal_type'),
+                                       weight=item.get('weight'))
+    end_op(chat_id)
+    if ok:
+        logger.info("Chat %s: скупка #%s на %s", chat_id, result, op['price'])
+        cash_menu(chat_id, f"✅ Скупка №{result} оформлена: {money(op['price'])}, {op['payment']}.")
     else:
-        bot.send_message(chat_id, "Товар не найден. Попробуйте еще раз или нажмите 'Отмена'.", reply_markup=create_cancel_markup())
+        cash_menu(chat_id, f"❌ Скупка не оформлена: {result}")
 
-def handle_buyback_price(message: types.Message):
-    chat_id = message.chat.id
-    
-    if message.text == "Отмена":
-        cancel_buyback(chat_id)
-        return
-
-    try:
-        price = float(message.text.strip())
-        if price <= 0:
-            raise ValueError("Price must be positive.")
-        user_data[chat_id]['buyback_data']['price'] = price
-        user_state[chat_id] = AWAITING_BUYBACK_PAYMENT_TYPE
-        logger.debug(f"Chat {chat_id}: Received buyback price: {price}")
-        bot.send_message(chat_id, "Выберите тип оплаты:", reply_markup=create_payment_type_markup())
-    except ValueError:
-        logger.warning(f"Chat {chat_id}: Invalid price format for buyback: {message.text}")
-        bot.send_message(chat_id, "Неверный формат цены. Введите положительное число (например, 100.50) или нажмите 'Отмена'.", reply_markup=create_cancel_markup())
-
-def handle_buyback_payment_type(message: types.Message):
-    chat_id = message.chat.id
-    payment_type = message.text.strip()
-
-    if payment_type == "Отмена":
-        cancel_buyback(chat_id)
-        return
-
-    if payment_type not in ["Наличные", "Безналичные"]:
-        bot.send_message(chat_id, "Пожалуйста, выберите тип оплаты с помощью кнопок или нажмите 'Отмена'.", reply_markup=create_payment_type_markup())
-        return
-
-    user_data[chat_id]['buyback_data']['payment_type'] = payment_type
-    logger.debug(f"Chat {chat_id}: Received payment type for buyback: {payment_type}")
-
-    product = user_data[chat_id]['buyback_data']['product']
-    price = user_data[chat_id]['buyback_data']['price']
-
-    user_state[chat_id] = AWAITING_BUYBACK_CONFIRMATION
-    confirmation_text = (f"Проверьте информацию о скупке:\n\n"
-                         f"Товар: {product.get('model', product.get('product_type', 'N/A'))} (Арт: {product['article_number']})\n"
-                         f"Цена скупки: {price:.2f}\n"
-                         f"Тип оплаты: {payment_type}\n\n"
-                         f"Подтвердите скупку или отмените:")
-    bot.send_message(chat_id, confirmation_text, reply_markup=create_confirmation_markup())
-
-def handle_buyback_confirmation(message: types.Message):
-    chat_id = message.chat.id
-    choice = message.text.strip()
-
-    if choice == "Подтвердить":
-        logger.info(f"Chat {chat_id}: Buyback confirmed.")
-        buyback_data = user_data[chat_id]['buyback_data']
-        product_article = buyback_data['product']['article_number']
-        price = buyback_data['price']
-        payment_type = buyback_data['payment_type']
-        
-        db_user_id = user_data[chat_id].get('id') # Authenticated user's DB ID
-        store_id = user_data[chat_id].get('store_id') # User's store ID, ensure this is in user_data
-
-        if not db_user_id or not store_id: # Basic check
-             logger.error(f"Chat {chat_id}: User ID or Store ID not found in user_data for buyback. User data: {user_data[chat_id]}")
-             bot.send_message(chat_id, "Ошибка: Не удалось определить пользователя или магазин. Операция отменена.", reply_markup=get_main_keyboard_by_role(chat_id))
-             clean_up_buyback_state(chat_id)
-             return
-
-        buyback_id = create_buyback_record(product_article, price, payment_type, db_user_id, store_id)
-        if buyback_id:
-            bot.send_message(chat_id, "Скупка успешно завершена!", reply_markup=get_main_keyboard_by_role(chat_id))
-        else:
-            bot.send_message(chat_id, "Произошла ошибка при записи скупки. Попробуйте позже.", reply_markup=get_main_keyboard_by_role(chat_id))
-    elif choice == "Отмена":
-        logger.info(f"Chat {chat_id}: Buyback cancelled at confirmation stage.")
-        cancel_buyback(chat_id)
-    else:
-        bot.send_message(chat_id, "Пожалуйста, используйте кнопки 'Подтвердить' или 'Отмена'.", reply_markup=create_confirmation_markup())
-        return # Remain in confirmation state
-
-    clean_up_buyback_state(chat_id)
-
-def cancel_buyback(chat_id):
-    logger.info(f"Chat {chat_id}: Buyback operation cancelled by user.")
-    bot.send_message(chat_id, "Скупка отменена.", reply_markup=get_main_keyboard_by_role(chat_id))
-    clean_up_buyback_state(chat_id)
-
-def clean_up_buyback_state(chat_id):
-    user_state.pop(chat_id, None)
-    if chat_id in user_data and 'buyback_data' in user_data[chat_id]:
-        del user_data[chat_id]['buyback_data']
-    logger.debug(f"Chat {chat_id}: Cleaned up buyback state.")
 
 def register_buyback_handlers():
-    bot.register_message_handler(start_buyback_handler, func=lambda message: message.text == "Скупка" and user_data.get(message.chat.id, {}).get('role') in ['admin', 'cashier'], pass_bot=False)
-    bot.register_message_handler(handle_buyback_article, func=lambda message: user_state.get(message.chat.id) == AWAITING_BUYBACK_ARTICLE, pass_bot=False)
-    bot.register_message_handler(handle_buyback_price, func=lambda message: user_state.get(message.chat.id) == AWAITING_BUYBACK_PRICE, pass_bot=False)
-    bot.register_message_handler(handle_buyback_payment_type, func=lambda message: user_state.get(message.chat.id) == AWAITING_BUYBACK_PAYMENT_TYPE, pass_bot=False)
-    bot.register_message_handler(handle_buyback_confirmation, func=lambda message: user_state.get(message.chat.id) == AWAITING_BUYBACK_CONFIRMATION, pass_bot=False)
+    register_simple_cancel("BUYBACK_", "Скупка")
+    bot.register_message_handler(start, func=is_button("Скупка", *CASH_ROLES))
+    intake.register()
+    bot.register_message_handler(on_price, func=in_state(PRICE))
+    bot.register_message_handler(on_payment, func=in_state(PAYMENT))
+    bot.register_message_handler(on_confirm, func=in_state(CONFIRM))

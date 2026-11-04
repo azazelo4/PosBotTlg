@@ -65,3 +65,45 @@ CREATE TABLE `users` (
   `store_id` int DEFAULT NULL, -- Эта колонка остается, но теперь это не FK к stores.id. Может хранить ID из старой системы или быть переосмыслена.
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Таблицы, которые старый код ожидал, но которых не было в init.sql
+-- (так они могли быть созданы вручную на сервере)
+CREATE TABLE IF NOT EXISTS `returns` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `original_sale_id` int NOT NULL,
+  `product_article` varchar(255) NOT NULL,
+  `return_price` decimal(12,2) NOT NULL,
+  `payment_type` varchar(50) NOT NULL,
+  `user_id` int NOT NULL,
+  `store_id` int NOT NULL,
+  `return_date` datetime NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `buybacks` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `product_article` varchar(255) NOT NULL,
+  `buyback_price` decimal(12,2) NOT NULL,
+  `payment_type` varchar(50) NOT NULL,
+  `user_id` int NOT NULL,
+  `store_id` int NOT NULL,
+  `buyback_date` datetime NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `trade_ins` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `old_product_article` varchar(255) NOT NULL,
+  `new_product_article` varchar(255) NOT NULL,
+  `price_difference` decimal(12,2) NOT NULL,
+  `payment_type_difference` varchar(50) NOT NULL,
+  `user_id` int NOT NULL,
+  `store_id` int NOT NULL,
+  `trade_in_date` datetime NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+INSERT INTO users (phone_number, role, name, is_active, store_id) VALUES ('77010000009', 'cashier', 'Старый кассир', 1, 2);
+INSERT INTO products (article_number, Store, metal_type, product_type, model, weight, price_per_gram, price, min_price, arrival_date, quantity, manufacturer, commentaries)
+  VALUES ('OLD1', 'ЦУМ', 'золото', 'кольцо', 'Старое кольцо', 2, 1, 100000, 90000, '2025-01-01', 2, 'Завод', '');
+INSERT INTO sales (product_id, user_id, sale_date, sold_price, payment_type) VALUES (1, 1, '2025-06-01 12:00:00', 95000, 'Наличные');

@@ -1,7 +1,7 @@
 """Конфигурация бота.
 
 Все секреты и параметры окружения читаются из переменных окружения
-(в Docker — из файла .env, который создаётся пайплайном из секретов Gitea).
+(в Docker — из файла .env, который создаётся пайплайном из секретов).
 Шаблон переменных — в .env.example. Никаких секретов в этом файле.
 """
 import os
@@ -21,21 +21,39 @@ def _optional_int(name: str, default=None):
     return int(value)
 
 
+def _optional_str(name: str, default=None):
+    value = os.environ.get(name)
+    if value is None or value.strip() == "":
+        return default
+    return value.strip()
+
+
 # Токен телеграм-бота
 TOKEN = _require("TOKEN")
 
 # Параметры подключения к базе данных MySQL
-DB_HOST = os.environ.get("DB_HOST", "db")
+DB_HOST = _optional_str("DB_HOST", "db")
+DB_PORT = _optional_int("DB_PORT", 3306)
 DB_USER = _require("DB_USER")
 DB_PASS = _require("DB_PASS")
 DB_NAME = _require("DB_NAME")
 
-# Время ежедневного отчёта, формат HH:MM
-DAILY_REPORT_TIME = os.environ.get("DAILY_REPORT_TIME", "23:00")
+# Часовой пояс магазинов: даты операций, периоды отчётов и расписание
+TIMEZONE = _optional_str("TZ", "Asia/Almaty")
 
-# ID чата для отчётов (личный chat_id или ID группы — отрицательное число).
-# Если не задан, ежедневный отчёт не отправляется.
+# Телефон первого администратора. Если в БД нет такого активного пользователя,
+# он будет создан при старте — иначе на пустой базе никто не сможет войти.
+ADMIN_PHONE = _optional_str("ADMIN_PHONE")
+ADMIN_NAME = _optional_str("ADMIN_NAME", "Администратор")
+
+# Ежедневный отчёт, формат HH:MM. Отправляется в REPORT_CHAT_ID,
+# а если он не задан — всем активным администраторам.
+DAILY_REPORT_TIME = _optional_str("DAILY_REPORT_TIME", "23:00")
 REPORT_CHAT_ID = _optional_int("REPORT_CHAT_ID")
 
-# Порог остатка для уведомлений о низком запасе
+# Уведомление о низком остатке (администраторам и менеджерам), формат HH:MM.
+# Пустое значение отключает уведомление.
+LOW_STOCK_TIME = _optional_str("LOW_STOCK_TIME", "09:00")
 LOW_STOCK_THRESHOLD = _optional_int("LOW_STOCK_THRESHOLD", 5)
+
+LOG_LEVEL = _optional_str("LOG_LEVEL", "INFO")
