@@ -1,0 +1,41 @@
+#cloud-config
+# Подготовка VM для POS-бота (Ubuntu 22.04/24.04, x86_64 или ARM).
+# Вставляется в Oracle Cloud: Create instance → Show advanced options → Management → Paste cloud-init script.
+# Ставит Docker, создаёт пользователя для GitHub runner, каталоги, автообновления и ежедневный бэкап БД.
+# Сам runner регистрируется вручную (нужен одноразовый токен из GitHub), см. docs/DEPLOY_CLOUD.md.
+
+timezone: Asia/Almaty
+package_update: true
+package_upgrade: true
+packages:
+  - ca-certificates
+  - curl
+  - jq
+  - unattended-upgrades
+
+write_files:
+  - path: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+  - path: /etc/cron.d/pos-bot-backup
+    content: |
+      # Ежедневный бэкап БД POS-бота в 03:30 (скрипт появляется после первого деплоя)
+      30 3 * * * root [ -x /opt/pos-bot/deploy/backup.sh ] && /opt/pos-bot/deploy/backup.sh >> /var/log/pos-bot-backup.log 2>&1
+  - path: /etc/pos-bot-backup.env
+    permissions: "0600"
+    content: |
+      # Сколько дней хранить локальные копии
+      KEEP_DAYS=14
+      # Необязательно: URL pre-authenticated request бакета Object Storage (заканчивается на /o/)
+      # для копии бэкапа вне сервера. Пусто — только локально.
+      BACKUP_PAR_URL=
+
+runcmd:
+  - curl -fsSL https://get.docker.com | sh
+  - systemctl enable --now docker
+  - id gh-runner || useradd -m -s /bin/bash gh-runner
+  - usermod -aG docker gh-runner
+  - mkdir -p /opt/pos-bot /opt/pos-bot-backups /home/gh-runner/actions-runner
+  - chown gh-runner:gh-runner /opt/pos-bot /home/gh-runner/actions-runner
+  - chmod 700 /opt/pos-bot-backups

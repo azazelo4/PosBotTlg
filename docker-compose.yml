@@ -4,21 +4,36 @@ services:
     container_name: PosBotTest
     restart: always
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     env_file:
       - .env
+    environment:
+      TZ: ${TZ:-Asia/Almaty}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
   db:
     image: mysql:latest
     container_name: mysql-db
-    #container_name: mariadb
     restart: always
     env_file:
       - .env
+    environment:
+      TZ: ${TZ:-Asia/Almaty}
     volumes:
       - db_data:/var/lib/mysql
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    # Схему создаёт и обновляет сам бот при старте (schema.py), init.sql больше не нужен
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_0900_ai_ci
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$$MYSQL_USER -p$$MYSQL_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
     # Порт MySQL наружу не публикуется: бот ходит в БД по внутренней сети compose.
     # Для доступа с хоста раскомментируйте (только localhost):
     # ports:

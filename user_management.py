@@ -1,304 +1,196 @@
-from telebot import types
-from database import add_user_to_db, deactivate_user_in_db, update_user_phone, get_user_by_phone # get_user_by_phone needed
+"""Управление персоналом (только администратор)."""
 import logging
-from state import user_state as global_main_user_state, user_data as global_main_user_data 
-from buttons import create_staff_management_buttons, create_cancel_markup
+
+from telebot import types
+
+from auth import has_role, invalidate_user_sessions
+from buttons import create_cancel_markup, create_choice_markup, create_staff_management_buttons, ROLE_TITLES
+from database import (add_user_to_db, get_all_users, get_user_by_id, change_user_role_function, update_user_phone,
+                      deactivate_user_in_db)
+from handlers.common import in_state, is_button
+from state import bot, user_data, user_state, get_op, start_op, end_op, register_cancel, cancel_current_operation
+from utils.common import normalize_phone, h
 
 logger = logging.getLogger(__name__)
 
-UM_STATE_AWAITING_ADD_USER_DETAILS = "UM_AWAITING_ADD_USER_DETAILS"
-# UM_STATE_AWAITING_DELETE_USER_PHONE is removed as "Удалить пользователя" button is removed
-UM_STATE_AWAITING_NEW_PHONE_FOR_USER = "UM_AWAITING_NEW_PHONE_FOR_USER"
-# UM_STATE_AWAITING_DEACTIVATE_CONFIRMATION for inline deactivation confirm
-
-class UserManagement:
-    def __init__(self, bot_instance, global_user_data_ref, get_users_func, change_role_func):
-        self.bot = bot_instance
-        self.global_user_data = global_user_data_ref
-        self.get_all_users_function = get_users_func
-        self.change_user_role_function = change_role_func 
-        self.logger = logging.getLogger(__name__)
-        self.current_operation_data = {} 
+ADD_NAME, ADD_PHONE, ADD_ROLE, EDIT_PHONE = "UM_ADD_NAME", "UM_ADD_PHONE", "UM_ADD_ROLE", "UM_EDIT_PHONE"
+ROLE_BY_TITLE = {"Кассир": 'cashier', "Менеджер": 'manager', "Администратор": 'admin'}
 
 
-    def configure_handlers(self):
-        @self.bot.message_handler(func=lambda message: message.text == "Добавить пользователя" and \
-                                   self.global_user_data.get(message.chat.id, {}).get('role') == 'admin' and \
-                                   self.global_user_data.get(message.chat.id, {}).get('is_active', 0) == 1)
-        def add_user_prompt_handler(message):
-            chat_id = message.chat.id
-            self.logger.info(f"Chat {chat_id}: Admin initiated 'Добавить пользователя'.")
-            global_main_user_state[chat_id] = UM_STATE_AWAITING_ADD_USER_DETAILS
-            # Assuming admin adding user implies user is for their store_id
-            admin_store_id = self.global_user_data.get(chat_id, {}).get('store_id')
-            self.current_operation_data[chat_id] = {'admin_store_id': admin_store_id} # Store admin's store_id
-            
-            self.bot.send_message(
-                chat_id, 
-                "Введите данные нового пользователя в формате: Имя Фамилия, +7XXXXXXXXXX, Роль (admin/cashier/manager).", 
-                reply_markup=create_cancel_markup()
-            )
-
-        @self.bot.message_handler(func=lambda message: global_main_user_state.get(message.chat.id) == UM_STATE_AWAITING_ADD_USER_DETAILS, content_types=['text'])
-        def process_add_user_data_handler(message):
-            chat_id = message.chat.id; text = message.text.strip()
-            if text == "Отмена": self.cancel_um_operation_and_return_to_staff_menu(chat_id, "Добавление отменено."); return
-            try:
-                parts = text.split(",", 2) # Expect 3 parts now: Name, Phone, Role
-                if len(parts) != 3: 
-                    self.bot.send_message(chat_id, "Неверный формат. Ожидается: Имя Фамилия, +7XXXXXXXXXX, Роль.", reply_markup=create_cancel_markup()); return
-                
-                name_surname, phone, role_text = parts[0].strip(), parts[1].strip(), parts[2].strip().lower()
-
-                if not (phone.startswith("+7") and len(phone) == 12 and phone[1:].isdigit()):
-                    self.bot.send_message(chat_id, "Неверный формат телефона: +7XXXXXXXXXX.", reply_markup=create_cancel_markup()); return
-                if role_text not in ['admin', 'cashier', 'manager']:
-                    self.bot.send_message(chat_id, "Неверная роль. Доступные роли: admin, cashier, manager.", reply_markup=create_cancel_markup()); return
-
-                admin_store_id = self.current_operation_data.get(chat_id, {}).get('admin_store_id', 1) # Default to 1 if not found
-                
-                response_msg = add_user_to_db(phone, role_text, name_surname, admin_store_id) # Pass store_id
-                self.bot.send_message(chat_id, response_msg)
-                self.finish_um_operation_and_return_to_staff_menu(chat_id)
-            except Exception as e: 
-                self.logger.exception(f"Chat {chat_id}: Error adding user from text.")
-                self.bot.send_message(chat_id, f"Ошибка добавления: {e}")
-                self.finish_um_operation_and_return_to_staff_menu(chat_id)
-        
-        # Removed "Удалить пользователя" by phone handler as button is removed.
-        # Deactivation is now through "Права" -> select user -> "Деактивировать".
-
-        @self.bot.message_handler(func=lambda message: global_main_user_state.get(message.chat.id) == UM_STATE_AWAITING_NEW_PHONE_FOR_USER)
-        def process_new_phone_input(message: types.Message):
-            chat_id = message.chat.id
-            new_phone_text = message.text.strip()
-            operation_data = self.current_operation_data.get(chat_id, {})
-            user_id_being_edited = operation_data.get('user_id_to_edit')
-            original_inline_message_id = operation_data.get('inline_message_id')
+def staff_menu(chat_id, text):
+    bot.send_message(chat_id, text, reply_markup=create_staff_management_buttons())
 
 
-            if new_phone_text == "Отмена":
-                global_main_user_state.pop(chat_id, None) # Clear current state
-                if user_id_being_edited and original_inline_message_id:
-                    self.bot.delete_message(chat_id, message.message_id) # Delete "Отмена" message
-                    self._send_user_action_menu_as_new(chat_id, user_id_being_edited, "Изменение телефона отменено.")
-                else:
-                    self.cancel_um_operation_and_return_to_staff_menu(chat_id, "Операция отменена.")
-                return
-
-            if not (new_phone_text.startswith("+7") and len(new_phone_text) == 12 and new_phone_text[1:].isdigit()):
-                self.bot.send_message(chat_id, "Неверный формат телефона (+7XXXXXXXXXX). Введите снова или 'Отмена':", reply_markup=create_cancel_markup())
-                return
-
-            if not user_id_being_edited:
-                self.logger.error(f"Chat {chat_id}: State is {UM_STATE_AWAITING_NEW_PHONE_FOR_USER} but no user_id_to_edit found.")
-                self.cancel_um_operation_and_return_to_staff_menu(chat_id, "Произошла ошибка, операция отменена.")
-                return
-            
-            success, db_message = update_user_phone(user_id_being_edited, new_phone_text)
-            self.bot.send_message(chat_id, db_message, reply_markup=create_staff_management_buttons()) # ReplyMarkup to remove "Отмена"
-            self.finish_um_operation_and_return_to_staff_menu(chat_id)
+def _cancel(chat_id, notify):
+    end_op(chat_id)
+    if notify:
+        staff_menu(chat_id, "Операция с персоналом отменена.")
 
 
-    def handle_role_management(self, chat_id): 
-        self.logger.debug(f"UserManagement instance handling 'Права' for chat_id: {chat_id}")
-        global_main_user_state[chat_id] = 'USER_MANAGEMENT_USER_LIST'
-        self.current_operation_data.pop(chat_id, None) 
+# ------------------------------------------------------------ добавление
 
-        try:
-            active_users = self.get_all_users_function()
-            if not active_users:
-                self.bot.send_message(chat_id, "Активные пользователи не найдены.")
-                self.finish_um_operation_and_return_to_staff_menu(chat_id); return
-            
-            keyboard = types.InlineKeyboardMarkup(row_width=1)
-            for user_dict in active_users:
-                button_text = f"{user_dict.get('name', 'N/A')} ({user_dict.get('role', 'N/A')}) - {user_dict.get('phone_number', 'N/A')}"
-                callback_data = f"um_select_user_{user_dict['id']}" 
-                keyboard.add(types.InlineKeyboardButton(text=button_text, callback_data=callback_data))
-            keyboard.add(types.InlineKeyboardButton(text="Отмена (в меню персонала)", callback_data="um_cancel_inline_to_staff_menu")) # Corrected "назад" to "Отмена"
-            sent_message = self.bot.send_message(chat_id, "Выберите пользователя для управления:", reply_markup=keyboard)
-            self.current_operation_data[chat_id] = {'inline_message_id': sent_message.message_id} # Store message ID to edit later
-        except Exception as e:
-            self.logger.exception(f"Error in UserManagement.handle_role_management: {e}")
-            self.bot.send_message(chat_id, "Ошибка получения списка пользователей.")
-            self.finish_um_operation_and_return_to_staff_menu(chat_id)
-
-    def _send_user_action_menu_as_new(self, chat_id, user_id_to_edit, message_text_intro="Выберите действие:"):
-        """Sends the user action menu as a new message."""
-        global_main_user_state[chat_id] = 'USER_MANAGEMENT_ACTION_SELECT'
-        if chat_id not in self.current_operation_data: self.current_operation_data[chat_id] = {}
-        self.current_operation_data[chat_id]['user_id_to_edit'] = user_id_to_edit
-        
-        keyboard = types.InlineKeyboardMarkup(row_width=1)
-        keyboard.add(types.InlineKeyboardButton(text="Изменить роль", callback_data=f"um_action_changerole_{user_id_to_edit}"))
-        keyboard.add(types.InlineKeyboardButton(text="Изменить телефон", callback_data=f"um_action_changephone_{user_id_to_edit}"))
-        keyboard.add(types.InlineKeyboardButton(text="Деактивировать", callback_data=f"um_action_deactivate_{user_id_to_edit}"))
-        keyboard.add(types.InlineKeyboardButton(text="< Назад (к списку)", callback_data="um_action_back_to_user_list"))
-        
-        sent_msg = self.bot.send_message(chat_id, message_text_intro, reply_markup=keyboard)
-        self.current_operation_data[chat_id]['inline_message_id'] = sent_msg.message_id # Store new message_id
+def start_add(message):
+    chat_id = message.chat.id
+    cancel_current_operation(chat_id, notify=False)
+    start_op(chat_id, ADD_NAME)
+    bot.send_message(chat_id, "Новый сотрудник. Имя и фамилия:", reply_markup=create_cancel_markup())
 
 
-    def handle_user_selection_callback(self, call: types.CallbackQuery): 
-        chat_id = call.message.chat.id
-        message_id = call.message.message_id 
-        self.logger.debug(f"Chat {chat_id}: User selected via callback: {call.data}")
-
-        if call.data == "um_cancel_inline_to_staff_menu":
-            self.bot.delete_message(chat_id, message_id)
-            self.finish_um_operation_and_return_to_staff_menu(chat_id, "Операция отменена.")
-            return
-        
-        try:
-            user_id_to_edit = call.data.split("_")[-1]
-            self.current_operation_data[chat_id] = {'user_id_to_edit': user_id_to_edit, 'inline_message_id': message_id}
-            
-            self.bot.delete_message(chat_id, message_id) 
-            self._send_user_action_menu_as_new(chat_id, user_id_to_edit, f"Управление пользователем ID {user_id_to_edit}:")
-            self.bot.answer_callback_query(call.id)
-
-        except Exception as e:
-            self.logger.exception(f"Error in handle_user_selection_callback: {e}")
-            self.bot.answer_callback_query(call.id, "Ошибка выбора пользователя.")
-            self.finish_um_operation_and_return_to_staff_menu(chat_id)
-
-    def handle_user_action_callback(self, call: types.CallbackQuery):
-        chat_id = call.message.chat.id
-        action_data = call.data
-        message_id = call.message.message_id 
-        self.logger.debug(f"Chat {chat_id}: User action callback: {action_data}")
-
-        user_id_to_edit = self.current_operation_data.get(chat_id, {}).get('user_id_to_edit')
-        if not user_id_to_edit and not action_data.startswith("um_action_back_to_user_list"):
-             try: user_id_to_edit = action_data.split("_")[-1] 
-             except IndexError: pass
-        
-        if not user_id_to_edit and not action_data.startswith("um_action_back_to_user_list"):
-            self.logger.error(f"Chat {chat_id}: Could not determine user_id for action '{action_data}'. current_op_data: {self.current_operation_data.get(chat_id)}")
-            self.bot.edit_message_text("Ошибка: пользователь не определен. Операция прервана.", chat_id, message_id, reply_markup=None)
-            self.finish_um_operation_and_return_to_staff_menu(chat_id)
-            return
-        
-        self.bot.delete_message(chat_id, message_id) 
-
-        if action_data.startswith("um_action_changerole_"):
-            self._prompt_for_new_role(chat_id, user_id_to_edit)
-        elif action_data.startswith("um_action_changephone_"):
-            self._prompt_for_new_phone(chat_id, user_id_to_edit)
-        elif action_data.startswith("um_action_deactivate_"):
-            self._prompt_for_deactivation_confirm(chat_id, user_id_to_edit)
-        elif action_data == "um_action_back_to_user_list":
-            self.handle_role_management(chat_id)
-        else:
-            self.bot.answer_callback_query(call.id, "Неизвестное действие.")
-            self.finish_um_operation_and_return_to_staff_menu(chat_id)
-        self.bot.answer_callback_query(call.id)
+def on_add_name(message):
+    chat_id, text = message.chat.id, (message.text or '').strip()
+    if len(text) < 2:
+        bot.send_message(chat_id, "Введите имя сотрудника.", reply_markup=create_cancel_markup())
+        return
+    get_op(chat_id)['name'] = text[:255]
+    user_state[chat_id] = ADD_PHONE
+    bot.send_message(chat_id, "Телефон сотрудника (+7XXXXXXXXXX или 8XXXXXXXXXX). Именно с этого номера он войдёт в бот:",
+                     reply_markup=create_cancel_markup())
 
 
-    def _prompt_for_new_role(self, chat_id, user_id_to_edit):
-        global_main_user_state[chat_id] = 'USER_MANAGEMENT_ROLE_SELECT' 
-        self.current_operation_data[chat_id].update({'action': 'change_role', 'user_id_to_edit': user_id_to_edit})
-
-        keyboard = types.InlineKeyboardMarkup(row_width=1)
-        roles = ['admin', 'cashier', 'manager']
-        for role in roles:
-            keyboard.add(types.InlineKeyboardButton(
-                text=role.capitalize(),
-                callback_data=f"um_setrole_{user_id_to_edit}_{role}" 
-            ))
-        keyboard.add(types.InlineKeyboardButton(text="< Назад (к действиям)", callback_data=f"um_select_user_{user_id_to_edit}"))
-        sent_msg = self.bot.send_message(chat_id, f"Выберите новую роль для пользователя ID {user_id_to_edit}:", reply_markup=keyboard)
-        self.current_operation_data[chat_id]['inline_message_id'] = sent_msg.message_id
+def on_add_phone(message):
+    chat_id = message.chat.id
+    phone = normalize_phone(message.text)
+    if not phone:
+        bot.send_message(chat_id, "Некорректный номер. Пример: +77011234567.", reply_markup=create_cancel_markup())
+        return
+    get_op(chat_id)['phone'] = phone
+    user_state[chat_id] = ADD_ROLE
+    bot.send_message(chat_id, "Роль:", reply_markup=create_choice_markup(list(ROLE_BY_TITLE), 3))
 
 
-    def handle_set_new_role_callback(self, call: types.CallbackQuery):
-        chat_id = call.message.chat.id
-        message_id = call.message.message_id 
-        data_parts = call.data.split("_") 
-        user_id_to_change = data_parts[2]
-        new_role = data_parts[3]
-
-        self.logger.info(f"Chat {chat_id}: Attempting to set role for user {user_id_to_change} to {new_role}")
-        success, db_message = self.change_user_role_function(user_id_to_change, new_role)
-        
-        self.bot.edit_message_text(text=db_message, chat_id=chat_id, message_id=message_id, reply_markup=None)
-        self.bot.answer_callback_query(call.id, text=db_message if success else "Ошибка")
-        self.finish_um_operation_and_return_to_staff_menu(chat_id)
-
-    def _prompt_for_new_phone(self, chat_id, user_id_to_edit):
-        global_main_user_state[chat_id] = UM_STATE_AWAITING_NEW_PHONE_FOR_USER
-        self.current_operation_data[chat_id].update({'action': 'change_phone', 'user_id_to_edit': user_id_to_edit})
-        self.bot.send_message(chat_id, f"Введите новый номер телефона для пользователя ID {user_id_to_edit} (формат: +7XXXXXXXXXX) или 'Отмена':", reply_markup=create_cancel_markup())
-
-    def _prompt_for_deactivation_confirm(self, chat_id, user_id_to_deactivate):
-        global_main_user_state[chat_id] = 'USER_MANAGEMENT_DEACTIVATE_CONFIRM' # Specific state
-        self.current_operation_data[chat_id].update({'action': 'deactivate', 'user_id_to_deactivate': user_id_to_deactivate})
-
-        keyboard = types.InlineKeyboardMarkup(row_width=1)
-        keyboard.add(types.InlineKeyboardButton(text="Да, деактивировать", callback_data=f"um_confirm_deactivate_{user_id_to_deactivate}"))
-        keyboard.add(types.InlineKeyboardButton(text="< Назад (к действиям)", callback_data=f"um_select_user_{user_id_to_deactivate}"))
-        sent_msg = self.bot.send_message(chat_id, f"Вы уверены, что хотите деактивировать пользователя ID {user_id_to_deactivate}?", reply_markup=keyboard)
-        self.current_operation_data[chat_id]['inline_message_id'] = sent_msg.message_id
+def on_add_role(message):
+    chat_id, text = message.chat.id, (message.text or '').strip()
+    role = ROLE_BY_TITLE.get(text)
+    if not role:
+        bot.send_message(chat_id, "Выберите роль кнопкой.", reply_markup=create_choice_markup(list(ROLE_BY_TITLE), 3))
+        return
+    op = get_op(chat_id)
+    store_id = (user_data.get(chat_id) or {}).get('store_id')
+    ok, msg = add_user_to_db(op['phone'], role, op['name'], store_id)
+    end_op(chat_id)
+    if ok:
+        msg += f"\nТелефон: {op['phone']}. Сотруднику нужно открыть бота и нажать /start."
+    staff_menu(chat_id, ("✅ " if ok else "❌ ") + msg)
 
 
-    def handle_deactivation_confirmation_callback(self, call: types.CallbackQuery):
-        chat_id = call.message.chat.id
-        message_id = call.message.message_id
-        user_id_to_deactivate = call.data.split("_")[-1]
+# ------------------------------------------------------------ права
 
-        self.logger.info(f"Chat {chat_id}: Deactivating user ID {user_id_to_deactivate}")
-        response_message = deactivate_user_in_db(user_id_to_deactivate)
-        
-        self.bot.edit_message_text(text=response_message, chat_id=chat_id, message_id=message_id, reply_markup=None)
-        self.bot.answer_callback_query(call.id, text=response_message)
-        self.finish_um_operation_and_return_to_staff_menu(chat_id)
-
-    def cancel_um_operation_and_return_to_staff_menu(self, chat_id, message_text="Операция с персоналом отменена."):
-        self.logger.info(f"Chat {chat_id}: User management operation cancelled. Returning to staff menu.")
-        current_state = global_main_user_state.get(chat_id, "")
-        if current_state.startswith("UM_") or current_state.startswith("USER_MANAGEMENT"):
-            global_main_user_state.pop(chat_id, None)
-        self.current_operation_data.pop(chat_id, None) 
-        self.bot.send_message(chat_id, message_text, reply_markup=create_staff_management_buttons())
+def _user_title(u):
+    name = " ".join(p for p in (u.get('name'), u.get('surename')) if p)
+    return f"{name} · {ROLE_TITLES.get(u.get('role'), u.get('role'))} · {u.get('phone_number')}"
 
 
-    def finish_um_operation_and_return_to_staff_menu(self, chat_id, message_text=None):
-        self.logger.debug(f"Chat {chat_id}: Finishing UM operation. Returning to staff menu.")
-        current_state = global_main_user_state.get(chat_id, "")
-        if current_state.startswith("UM_") or current_state.startswith("USER_MANAGEMENT"):
-            global_main_user_state.pop(chat_id, None)
-        self.current_operation_data.pop(chat_id, None)
-        
-        reply_message = message_text if message_text else "Выберите следующее действие в меню персонала:"
-        self.bot.send_message(chat_id, reply_message, reply_markup=create_staff_management_buttons())
+def show_users(chat_id, message_id=None):
+    users = get_all_users()
+    if users is None:
+        staff_menu(chat_id, "❌ Ошибка базы данных.")
+        return
+    keyboard = types.InlineKeyboardMarkup(row_width=1)
+    for u in users:
+        keyboard.add(types.InlineKeyboardButton(_user_title(u), callback_data=f"um_user_{u['id']}"))
+    keyboard.add(types.InlineKeyboardButton("Закрыть", callback_data="um_close"))
+    text = "Выберите сотрудника:" if users else "Активных сотрудников нет."
+    if message_id:
+        bot.edit_message_text(text, chat_id, message_id, reply_markup=keyboard)
+    else:
+        bot.send_message(chat_id, text, reply_markup=keyboard)
 
 
-    def register_callback_handlers(self):
-        @self.bot.callback_query_handler(func=lambda call: call.data.startswith("um_select_user_") or \
-            call.data == "um_cancel_inline_to_staff_menu")
-        def route_user_selection_callback(call):
-            if call.data == "um_cancel_inline_to_staff_menu":
-                 self.bot.delete_message(call.message.chat.id, call.message.message_id)
-                 self.finish_um_operation_and_return_to_staff_menu(call.message.chat.id, "Операция отменена.")
-            else:
-                self.handle_user_selection_callback(call)
-
-        @self.bot.callback_query_handler(func=lambda call: call.data.startswith("um_action_"))
-        def route_user_action_callback(call):
-            self.handle_user_action_callback(call)
-
-        @self.bot.callback_query_handler(func=lambda call: call.data.startswith("um_setrole_"))
-        def route_set_new_role_callback(call):
-            self.handle_set_new_role_callback(call)
-
-        @self.bot.callback_query_handler(func=lambda call: call.data.startswith("um_confirm_deactivate_"))
-        def route_deactivation_confirm_callback(call):
-            self.handle_deactivation_confirmation_callback(call)
+def start_rights(message):
+    cancel_current_operation(message.chat.id, notify=False)
+    show_users(message.chat.id)
 
 
-def configure_user_management(bot_instance, global_user_data_ref, get_users_func, change_role_func):
-    um_instance = UserManagement(bot_instance, global_user_data_ref, get_users_func, change_role_func)
-    um_instance.configure_handlers()
-    um_instance.register_callback_handlers()
-    return um_instance
+def _actions_keyboard(user_id, is_self):
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    if not is_self:
+        kb.add(types.InlineKeyboardButton("Изменить роль", callback_data=f"um_role_{user_id}"))
+    kb.add(types.InlineKeyboardButton("Изменить телефон", callback_data=f"um_phone_{user_id}"))
+    if not is_self:
+        kb.add(types.InlineKeyboardButton("Деактивировать", callback_data=f"um_deact_{user_id}"))
+    kb.add(types.InlineKeyboardButton("« К списку", callback_data="um_list"))
+    return kb
+
+
+def on_callback(call):
+    chat_id, message_id = call.message.chat.id, call.message.message_id
+    if not has_role(chat_id, 'admin'):
+        bot.answer_callback_query(call.id, "Доступно только администратору.")
+        return
+    bot.answer_callback_query(call.id)
+    data = call.data
+    me = (user_data.get(chat_id) or {}).get('id')
+
+    if data == "um_close":
+        bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
+        return
+    if data == "um_list":
+        show_users(chat_id, message_id)
+        return
+
+    action, _, rest = data[3:].partition('_')
+    user_id_str, _, extra = rest.partition('_')
+    user_id = int(user_id_str)
+    user = get_user_by_id(user_id)
+    if not user or not user.get('is_active'):
+        bot.edit_message_text("Сотрудник не найден или уже деактивирован.", chat_id, message_id)
+        return
+    is_self = user_id == me
+    title = h(_user_title(user))
+
+    if action == "user":
+        bot.edit_message_text(f"<b>{title}</b>\nЧто сделать?", chat_id, message_id, parse_mode='HTML',
+                              reply_markup=_actions_keyboard(user_id, is_self))
+    elif action == "role" and not is_self:
+        kb = types.InlineKeyboardMarkup(row_width=3)
+        kb.add(*[types.InlineKeyboardButton(t, callback_data=f"um_setrole_{user_id}_{r}") for t, r in ROLE_BY_TITLE.items()])
+        kb.add(types.InlineKeyboardButton("« Назад", callback_data=f"um_user_{user_id}"))
+        bot.edit_message_text(f"<b>{title}</b>\nНовая роль:", chat_id, message_id, parse_mode='HTML', reply_markup=kb)
+    elif action == "setrole" and not is_self:
+        ok, msg = change_user_role_function(user_id, extra)
+        invalidate_user_sessions(user_id)
+        bot.edit_message_text(("✅ " if ok else "❌ ") + f"{h(user['name'])}: {h(msg)}", chat_id, message_id)
+    elif action == "deact" and not is_self:
+        kb = types.InlineKeyboardMarkup(row_width=1)
+        kb.add(types.InlineKeyboardButton("Да, деактивировать", callback_data=f"um_deactok_{user_id}"))
+        kb.add(types.InlineKeyboardButton("« Назад", callback_data=f"um_user_{user_id}"))
+        bot.edit_message_text(f"Деактивировать <b>{title}</b>? Сотрудник потеряет доступ к боту.", chat_id, message_id,
+                              parse_mode='HTML', reply_markup=kb)
+    elif action == "deactok" and not is_self:
+        ok, msg = deactivate_user_in_db(user_id)
+        invalidate_user_sessions(user_id)
+        bot.edit_message_text(("✅ " if ok else "❌ ") + f"{h(user['name'])}: {h(msg)}", chat_id, message_id)
+    elif action == "phone":
+        bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
+        cancel_current_operation(chat_id, notify=False)
+        start_op(chat_id, EDIT_PHONE)
+        get_op(chat_id)['user'] = user
+        bot.send_message(chat_id, f"Новый телефон для {h(user['name'])} (+7XXXXXXXXXX):", reply_markup=create_cancel_markup())
+    else:
+        bot.edit_message_text("Нельзя изменить собственную роль или деактивировать себя.", chat_id, message_id)
+
+
+def on_edit_phone(message):
+    chat_id = message.chat.id
+    phone = normalize_phone(message.text)
+    if not phone:
+        bot.send_message(chat_id, "Некорректный номер. Пример: +77011234567.", reply_markup=create_cancel_markup())
+        return
+    user = get_op(chat_id)['user']
+    ok, msg = update_user_phone(user['id'], phone)
+    end_op(chat_id)
+    if ok and user['id'] != (user_data.get(chat_id) or {}).get('id'):
+        invalidate_user_sessions(user['id'])
+        msg += " Сотруднику нужно заново войти через /start."
+    staff_menu(chat_id, ("✅ " if ok else "❌ ") + msg)
+
+
+def configure_user_management():
+    register_cancel("UM_", _cancel)
+    bot.register_message_handler(start_add, func=is_button("Добавить пользователя", 'admin'))
+    bot.register_message_handler(start_rights, func=is_button("Права", 'admin'))
+    bot.register_message_handler(on_add_name, func=in_state(ADD_NAME))
+    bot.register_message_handler(on_add_phone, func=in_state(ADD_PHONE))
+    bot.register_message_handler(on_add_role, func=in_state(ADD_ROLE))
+    bot.register_message_handler(on_edit_phone, func=in_state(EDIT_PHONE))
+    bot.register_callback_query_handler(on_callback, func=lambda c: c.data.startswith("um_"))
