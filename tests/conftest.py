@@ -95,12 +95,15 @@ class FakeTelegram:
             "from": {"id": chat_id, "is_bot": False, "first_name": "T"}, "text": text}})
         return self.calls[start:]
 
+    NO_OWNER = object()
+
     def contact(self, chat_id, phone, owner=None):
         start = len(self.calls)
         self._process({"update_id": next(_ids), "message": {
             "message_id": next(_ids), "date": 0, "chat": {"id": chat_id, "type": "private"},
             "from": {"id": chat_id, "is_bot": False, "first_name": "T"},
-            "contact": {"phone_number": phone, "first_name": "T", "user_id": owner or chat_id}}})
+            "contact": {"phone_number": phone, "first_name": "T",
+                        **({} if owner is self.NO_OWNER else {"user_id": owner or chat_id})}}})
         return self.calls[start:]
 
     def document(self, chat_id, data, file_name):

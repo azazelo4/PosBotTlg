@@ -23,6 +23,14 @@ def test_login_rejects_unknown_and_foreign_contact(tg):
     assert STRANGER not in user_data
 
 
+def test_login_rejects_contact_card_without_owner(tg):
+    """Карточка контакта из телефонной книги (без user_id) — не доказательство владения номером."""
+    calls = tg.contact(STRANGER, PHONES[CASHIER], owner=tg.NO_OWNER)
+    assert "свой номер" in tg.texts(calls)
+    assert STRANGER not in user_data
+    assert "поделитесь номером" in tg.texts(tg.send(STRANGER, "Касса")).lower()
+
+
 def test_unauthorized_user_cannot_use_menu(tg):
     calls = tg.send(STRANGER, "Касса")
     assert "поделитесь номером" in tg.texts(calls).lower()
