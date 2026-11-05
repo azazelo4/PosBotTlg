@@ -261,6 +261,11 @@ def update_product_quantity(cursor, product_article, quantity_change):
     return True, f"Остаток товара {product_article} изменён на {quantity_change:+d} шт."
 
 
+PRODUCT_FIELDS = ('article_number', 'Store', 'metal_type', 'product_type', 'model', 'size', 'fineness', 'inserts',
+                  'weight', 'price_per_gram', 'price', 'min_price', 'arrival_date', 'quantity', 'manufacturer',
+                  'commentaries', 'track_stock')
+
+
 @with_transaction
 def add_product_to_db(cursor, product_data: dict):
     cursor.execute("SELECT id FROM products WHERE article_number = %s", (product_data['article_number'],))
@@ -268,10 +273,7 @@ def add_product_to_db(cursor, product_data: dict):
         raise BusinessError(f"Товар с артикулом {product_data['article_number']} уже существует.")
     data = dict(product_data)
     data.setdefault('arrival_date', today())
-    allowed = {'article_number', 'Store', 'metal_type', 'product_type', 'model', 'size', 'weight',
-               'price_per_gram', 'price', 'min_price', 'arrival_date', 'quantity', 'manufacturer',
-               'commentaries', 'track_stock'}
-    data = {k: v for k, v in data.items() if k in allowed}
+    data = {k: v for k, v in data.items() if k in PRODUCT_FIELDS}
     cols = ", ".join(f"`{k}`" for k in data)
     placeholders = ", ".join(["%s"] * len(data))
     cursor.execute(f"INSERT INTO products ({cols}) VALUES ({placeholders})", list(data.values()))
@@ -282,6 +284,7 @@ def add_product_to_db(cursor, product_data: dict):
 def get_stock_report_data(cursor):
     cursor.execute("""
         SELECT p.article_number, p.product_type, p.model, p.metal_type, p.Store AS store_name, p.size,
+               p.fineness, p.inserts,
                p.weight, p.quantity, p.price, p.min_price, p.manufacturer, p.arrival_date, p.commentaries
         FROM products p
         ORDER BY p.Store, p.product_type, p.model, p.article_number
@@ -314,6 +317,137 @@ def get_enum_or_distinct_values(cursor, table_name, column_name, add_other_optio
     if add_other_option and "Другое" not in values:
         values.append("Другое")
     return values
+
+
+@with_connection
+def search_products(cursor, query=None, store=None, in_stock=None, limit=50, offset=0):
+    """Поиск товаров для админки. Возвращает (строки, всего)."""
+    where, params = [], []
+    if query:
+        where.append("(p.article_number LIKE %s OR p.model LIKE %s)")
+        params += [f"%{query}%", f"%{query}%"]
+    if store:
+        where.append("p.Store = %s")
+        params.append(store)
+    if in_stock is True:
+        where.append("p.quantity > 0")
+    elif in_stock is False:
+        where.append("p.quantity <= 0")
+    clause = ("WHERE " + " AND ".join(where)) if where else ""
+    cursor.execute(f"SELECT COUNT(*) AS c FROM products p {clause}", params)
+    total = cursor.fetchone()['c']
+    cursor.execute(f"SELECT p.* FROM products p {clause} ORDER BY p.arrival_date DESC, p.id DESC LIMIT %s OFFSET %s",
+                   params + [int(limit), int(offset)])
+    return cursor.fetchall(), total
+
+
+@with_connection
+def get_product_by_id(cursor, product_id):
+    cursor.execute("SELECT * FROM products WHERE id = %s", (product_id,))
+    return cursor.fetchone()
+
+
+@with_connection
+def get_products_by_articles(cursor, articles):
+    if not articles:
+        return []
+    placeholders = ",".join(["%s"] * len(articles))
+    cursor.execute(f"SELECT * FROM products WHERE article_number IN ({placeholders})", list(articles))
+    rows = {r['article_number']: r for r in cursor.fetchall()}
+    return [rows[a] for a in articles if a in rows]
+
+
+@with_connection
+def get_products_for_labels(cursor, store=None, arrived_from=None, only_in_stock=True):
+    where, params = [], []
+    if store:
+        where.append("Store = %s")
+        params.append(store)
+    if arrived_from:
+        where.append("arrival_date >= %s")
+        params.append(arrived_from)
+    if only_in_stock:
+        where.append("quantity > 0")
+    clause = ("WHERE " + " AND ".join(where)) if where else ""
+    cursor.execute(f"SELECT * FROM products {clause} ORDER BY Store, product_type, article_number", params)
+    return cursor.fetchall()
+
+
+@with_transaction
+def update_product(cursor, product_id, data: dict):
+    data = {k: v for k, v in data.items() if k in PRODUCT_FIELDS}
+    if not data:
+        raise BusinessError("Нет данных для сохранения.")
+    if 'article_number' in data:
+        cursor.execute("SELECT id FROM products WHERE article_number = %s AND id != %s", (data['article_number'], product_id))
+        if cursor.fetchone():
+            raise BusinessError(f"Артикул {data['article_number']} уже занят другим товаром.")
+    if data.get('min_price') is not None and data.get('price') is not None and data['min_price'] > data['price']:
+        raise BusinessError("Минимальная цена не может быть выше цены.")
+    sets = ", ".join(f"`{k}` = %s" for k in data)
+    cursor.execute(f"UPDATE products SET {sets} WHERE id = %s", list(data.values()) + [product_id])
+    cursor.execute("SELECT id FROM products WHERE id = %s", (product_id,))
+    if not cursor.fetchone():
+        raise BusinessError("Товар не найден.")
+    return True, "Товар сохранён."
+
+
+@with_transaction
+def import_products(cursor, rows, update_existing=True):
+    """Загружает товары: новые добавляет, существующие (по артикулу) обновляет."""
+    created = updated = skipped = 0
+    for row in rows:
+        data = {k: v for k, v in row.items() if k in PRODUCT_FIELDS}
+        cursor.execute("SELECT id FROM products WHERE article_number = %s ORDER BY id LIMIT 1 FOR UPDATE", (data['article_number'],))
+        existing = cursor.fetchone()
+        if existing:
+            if not update_existing:
+                skipped += 1
+                continue
+            fields = {k: v for k, v in data.items() if k != 'article_number' and v is not None}
+            if fields:
+                sets = ", ".join(f"`{k}` = %s" for k in fields)
+                cursor.execute(f"UPDATE products SET {sets} WHERE id = %s", list(fields.values()) + [existing['id']])
+                # новая цена могла стать ниже прежней минимальной
+                cursor.execute("UPDATE products SET min_price = LEAST(min_price, price) WHERE id = %s", (existing['id'],))
+            updated += 1
+        else:
+            data.setdefault('arrival_date', today())
+            cols = ", ".join(f"`{k}`" for k in data)
+            cursor.execute(f"INSERT INTO products ({cols}) VALUES ({', '.join(['%s'] * len(data))})", list(data.values()))
+            created += 1
+    return True, {'created': created, 'updated': updated, 'skipped': skipped}
+
+
+@with_connection
+def get_today_sales_by_user(cursor, user_id, start_dt, end_dt):
+    cursor.execute("""
+        SELECT s.id, s.sale_date, s.sold_price, s.payment_type, p.article_number, p.model
+        FROM sales s JOIN products p ON p.id = s.product_id
+        WHERE s.user_id = %s AND s.sale_date >= %s AND s.sale_date < %s
+        ORDER BY s.sale_date DESC""", (user_id, start_dt, end_dt))
+    return cursor.fetchall()
+
+
+# ---------------------------------------------------------------- вход в веб-админку
+
+@with_transaction
+def create_login_token(cursor, user_id, token_hash, expires_at):
+    cursor.execute("DELETE FROM web_login_tokens WHERE expires_at < %s OR used_at IS NOT NULL", (now(),))
+    cursor.execute("INSERT INTO web_login_tokens (token_hash, user_id, expires_at) VALUES (%s, %s, %s)",
+                   (token_hash, user_id, expires_at))
+    return True, "ok"
+
+
+@with_transaction
+def consume_login_token(cursor, token_hash):
+    """Одноразовый токен: возвращает (True, user_id) или (False, причина)."""
+    cursor.execute("SELECT user_id, expires_at, used_at FROM web_login_tokens WHERE token_hash = %s FOR UPDATE", (token_hash,))
+    row = cursor.fetchone()
+    if not row or row['used_at'] is not None or row['expires_at'] < now():
+        raise BusinessError("Ссылка для входа недействительна или устарела. Запросите новую в боте.")
+    cursor.execute("UPDATE web_login_tokens SET used_at = %s WHERE token_hash = %s", (now(), token_hash))
+    return True, row['user_id']
 
 
 # ---------------------------------------------------------------- кассовые операции

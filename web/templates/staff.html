@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Персонал{% endblock %}
+{% block content %}
+<h2>Персонал</h2>
+<div class="table-wrap"><table class="striped">
+  <thead><tr><th>Имя</th><th>Телефон</th><th>Роль</th><th>В боте</th><th></th></tr></thead>
+  <tbody>
+  {% for u in users %}
+    <tr>
+      <td>{{ u.name }} {{ u.surename or '' }}</td>
+      <td>{{ u.phone_number }}</td>
+      <td>
+        {% if u.id != user.id %}
+        <form method="post" class="row-actions">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="role">
+          <input type="hidden" name="user_id" value="{{ u.id }}">
+          <select name="role" onchange="this.form.submit()" aria-label="Роль">
+            {% for key in ['cashier', 'manager', 'admin'] %}<option value="{{ key }}" {% if key == u.role %}selected{% endif %}>{{ ROLE_TITLES[key] }}</option>{% endfor %}
+          </select>
+        </form>
+        {% else %}{{ ROLE_TITLES.get(u.role, u.role) }} <span class="muted">(вы)</span>{% endif %}
+      </td>
+      <td>{% if u.chat_id %}✅{% else %}<span class="muted">ещё не входил</span>{% endif %}</td>
+      <td>
+        {% if u.id != user.id %}
+        <form method="post" class="inline" onsubmit='return confirm({{ ("Деактивировать " ~ u.name ~ "? Сотрудник сразу потеряет доступ.") | tojson }})'>
+          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="deactivate">
+          <input type="hidden" name="user_id" value="{{ u.id }}">
+          <button class="secondary outline" style="padding:.25rem .6rem;margin:0">Деактивировать</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+
+<article>
+  <header><strong>Добавить сотрудника</strong></header>
+  <form method="post">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="add">
+    <div class="grid">
+      <label>Имя и фамилия<input name="name" required minlength="2"></label>
+      <label>Телефон<input name="phone" required placeholder="+77011234567" inputmode="tel"></label>
+      <label>Роль<select name="role">
+        {% for key in ['cashier', 'manager', 'admin'] %}<option value="{{ key }}">{{ ROLE_TITLES[key] }}</option>{% endfor %}
+      </select></label>
+    </div>
+    <button type="submit">Добавить</button>
+  </form>
+  <small class="muted">Сотрудник входит в бота по этому номеру: /start → «Поделиться номером».</small>
+</article>
+{% endblock %}

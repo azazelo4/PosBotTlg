@@ -1,6 +1,7 @@
 services:
   bot:
     build: .
+    image: posbot-app
     container_name: PosBotTest
     restart: always
     depends_on:
@@ -10,11 +11,46 @@ services:
       - .env
     environment:
       TZ: ${TZ:-Asia/Almaty}
-    logging:
+    logging: &logging
       driver: json-file
       options:
         max-size: "10m"
         max-file: "5"
+
+  # Веб-админка и Telegram Mini App. Включаются профилем web (COMPOSE_PROFILES=web в .env)
+  web:
+    build: .
+    image: posbot-app
+    container_name: PosBotWeb
+    restart: always
+    profiles: ["web"]
+    command: ["uvicorn", "web.app:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      TZ: ${TZ:-Asia/Almaty}
+    logging: *logging
+
+  caddy:
+    image: caddy:2
+    container_name: PosBotCaddy
+    restart: always
+    profiles: ["web"]
+    depends_on:
+      - web
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      WEB_DOMAIN: ${WEB_DOMAIN:-localhost}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    logging: *logging
 
   db:
     image: mysql:latest
@@ -47,3 +83,5 @@ services:
 
 volumes:
   db_data:
+  caddy_data:
+  caddy_config:

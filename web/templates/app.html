@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>Касса</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root {
+      --bg: var(--tg-theme-bg-color, #fff); --text: var(--tg-theme-text-color, #111);
+      --hint: var(--tg-theme-hint-color, #888); --link: var(--tg-theme-link-color, #2481cc);
+      --btn: var(--tg-theme-button-color, #2481cc); --btn-text: var(--tg-theme-button-text-color, #fff);
+      --card: var(--tg-theme-secondary-bg-color, #f2f2f5); --danger: var(--tg-theme-destructive-text-color, #d33);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 16px; font: 16px/1.4 -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+           background: var(--bg); color: var(--text); }
+    h1 { font-size: 20px; margin: 0 0 12px; }
+    .card { background: var(--card); border-radius: 14px; padding: 14px; margin-bottom: 12px; }
+    .muted { color: var(--hint); font-size: 14px; }
+    button, input { font: inherit; }
+    .btn { width: 100%; border: 0; border-radius: 12px; padding: 14px; background: var(--btn); color: var(--btn-text);
+           font-weight: 600; cursor: pointer; }
+    .btn.secondary { background: transparent; color: var(--link); padding: 10px; }
+    .row { display: flex; gap: 8px; }
+    input { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--hint); background: var(--bg); color: var(--text); }
+    .row input { flex: 1; }
+    .row .btn { width: auto; padding: 12px 16px; }
+    .price { font-size: 28px; font-weight: 700; }
+    .pays { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+    .pay { border: 1px solid var(--hint); background: transparent; color: var(--text); border-radius: 10px; padding: 10px 4px; }
+    .pay.on { border-color: var(--btn); background: var(--btn); color: var(--btn-text); }
+    .err { color: var(--danger); margin: 8px 0 0; min-height: 1em; }
+    .hidden { display: none; }
+    .sale { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--bg); font-size: 14px; }
+    .sale span:first-child { flex: 1; min-width: 0; }
+    .sale span:last-child { white-space: nowrap; text-align: right; }
+    .sale small { display: block; color: var(--hint); }
+    .scan { font-size: 18px; padding: 18px; }
+    label { display: block; margin: 12px 0 6px; font-size: 14px; color: var(--hint); }
+  </style>
+</head>
+<body>
+<div id="outside" class="card hidden">Откройте кассу из Telegram-бота: кнопка «Касса» рядом с полем ввода.</div>
+
+<div id="search">
+  <h1>Продажа</h1>
+  <button class="btn scan" id="scan-btn">📷 Сканировать ценник</button>
+  <label for="article">или введите артикул</label>
+  <div class="row">
+    <input id="article" autocomplete="off" autocapitalize="characters" enterkeyhint="search" placeholder="Артикул">
+    <button class="btn" id="find-btn">Найти</button>
+  </div>
+  <p class="err" id="search-err"></p>
+
+  <div class="card" style="margin-top:16px">
+    <div style="display:flex;justify-content:space-between"><strong>Мои продажи сегодня</strong><span id="today-total" class="muted"></span></div>
+    <div id="today"></div>
+  </div>
+</div>
+
+<div id="product" class="hidden">
+  <div class="card">
+    <div class="muted" id="p-article"></div>
+    <div style="font-size:18px;font-weight:600" id="p-model"></div>
+    <div class="muted" id="p-details"></div>
+    <div class="muted" id="p-store"></div>
+    <div class="price" id="p-price" style="margin-top:8px"></div>
+    <div class="muted" id="p-min"></div>
+  </div>
+  <label for="price">Сумма продажи, ₸</label>
+  <input id="price" inputmode="numeric">
+  <label>Оплата</label>
+  <div class="pays" id="pays">
+    {% for p in payment_types %}<button class="pay" data-pay="{{ p }}">{{ p }}</button>{% endfor %}
+  </div>
+  <p class="err" id="sale-err"></p>
+  <button class="btn secondary" id="back-btn">← Другой товар</button>
+</div>
+
+<script>
+const tg = window.Telegram && window.Telegram.WebApp;
+const $ = id => document.getElementById(id);
+const fmt = n => Number(n).toLocaleString('ru-RU').replace(/,/g, ' ') + ' ₸';
+let product = null, payment = null;
+
+function api(path, opts = {}) {
+  return fetch(path, {...opts, headers: {'Content-Type': 'application/json', 'X-Telegram-Init-Data': tg.initData, ...(opts.headers || {})}})
+    .then(async r => { const data = await r.json().catch(() => ({})); if (!r.ok) throw new Error(data.error || 'Ошибка ' + r.status); return data; });
+}
+
+function showSearch() {
+  product = null; payment = null;
+  $('product').classList.add('hidden'); $('search').classList.remove('hidden');
+  tg.MainButton.hide(); tg.BackButton.hide(); $('article').value = ''; loadToday();
+}
+
+function showProduct(p) {
+  product = p; payment = null;
+  $('p-article').textContent = 'Арт. ' + p.article + ' · остаток ' + p.quantity + ' шт.';
+  $('p-model').textContent = p.model;
+  $('p-details').textContent = [p.type, p.details, p.inserts].filter(Boolean).join(' · ');
+  $('p-store').textContent = p.store;
+  $('p-price').textContent = fmt(p.price);
+  $('p-min').textContent = 'Минимальная цена: ' + fmt(p.min_price);
+  $('price').value = p.price;
+  document.querySelectorAll('.pay').forEach(b => b.classList.remove('on'));
+  $('sale-err').textContent = p.quantity > 0 ? '' : 'Товара нет в наличии.';
+  $('search').classList.add('hidden'); $('product').classList.remove('hidden');
+  tg.BackButton.show(); updateMain();
+}
+
+function updateMain() {
+  const price = parseInt(String($('price').value).replace(/\D/g, ''), 10);
+  if (!product || product.quantity <= 0 || !payment || !price) { tg.MainButton.hide(); return; }
+  tg.MainButton.setText('Продать за ' + fmt(price) + ' · ' + payment);
+  tg.MainButton.show();
+}
+
+function find(article) {
+  article = (article || '').trim();
+  if (!article) return;
+  $('search-err').textContent = '';
+  api('/api/app/product?article=' + encodeURIComponent(article))
+    .then(showProduct)
+    .catch(e => { $('search-err').textContent = e.message; tg.HapticFeedback.notificationOccurred('error'); });
+}
+
+function sell() {
+  const price = parseInt(String($('price').value).replace(/\D/g, ''), 10);
+  if (price < product.min_price) { $('sale-err').textContent = 'Сумма ниже минимальной цены ' + fmt(product.min_price) + '.'; return; }
+  tg.showConfirm('Продать ' + product.model + ' за ' + fmt(price) + ' (' + payment + ')?', ok => {
+    if (!ok) return;
+    tg.MainButton.showProgress();
+    api('/api/app/sale', {method: 'POST', body: JSON.stringify({article: product.article, price, payment})})
+      .then(r => { tg.HapticFeedback.notificationOccurred('success'); tg.showAlert('✅ Продажа №' + r.sale_id + ' оформлена: ' + fmt(r.price) + ', ' + r.payment); showSearch(); })
+      .catch(e => { $('sale-err').textContent = e.message; tg.HapticFeedback.notificationOccurred('error'); })
+      .finally(() => tg.MainButton.hideProgress());
+  });
+}
+
+function loadToday() {
+  api('/api/app/me').then(me => {
+    const box = $('today'); box.replaceChildren();
+    let total = 0;
+    me.today.forEach(s => {
+      total += s.price;
+      const row = document.createElement('div'); row.className = 'sale';
+      const left = document.createElement('span'); left.textContent = s.model;
+      const leftNote = document.createElement('small'); leftNote.textContent = s.time + ' · ' + s.article; left.append(leftNote);
+      const right = document.createElement('span'); right.textContent = fmt(s.price);
+      const rightNote = document.createElement('small'); rightNote.textContent = s.payment; right.append(rightNote);
+      row.append(left, right); box.append(row);
+    });
+    if (!me.today.length) { const p = document.createElement('div'); p.className = 'muted'; p.textContent = 'Пока продаж нет.'; box.append(p); }
+    $('today-total').textContent = me.today.length ? me.today.length + ' шт. · ' + fmt(total) : '';
+  }).catch(e => { $('search-err').textContent = e.message; });
+}
+
+if (!tg || !tg.initData) {
+  $('outside').classList.remove('hidden'); $('search').classList.add('hidden');
+} else {
+  tg.ready(); tg.expand();
+  $('scan-btn').onclick = () => {
+    if (!tg.showScanQrPopup) { $('search-err').textContent = 'Обновите Telegram, чтобы сканировать QR.'; return; }
+    tg.showScanQrPopup({text: 'Наведите камеру на QR-код ценника'}, text => { find(text); return true; });
+  };
+  $('find-btn').onclick = () => find($('article').value);
+  $('article').addEventListener('keydown', e => { if (e.key === 'Enter') find($('article').value); });
+  $('back-btn').onclick = showSearch;
+  tg.BackButton.onClick(showSearch);
+  $('price').addEventListener('input', updateMain);
+  document.querySelectorAll('.pay').forEach(b => b.onclick = () => {
+    payment = b.dataset.pay;
+    document.querySelectorAll('.pay').forEach(x => x.classList.toggle('on', x === b));
+    tg.HapticFeedback.selectionChanged(); updateMain();
+  });
+  tg.MainButton.onClick(() => { if (product && payment) sell(); });
+  loadToday();
+}
+</script>
+</body>
+</html>

@@ -34,6 +34,8 @@ def contact_handler(message: types.Message):
         return
 
     login(chat_id, user)
+    from handlers.web_handler import set_app_menu_button
+    set_app_menu_button(chat_id)
     logger.info("Chat %s: вошёл пользователь id=%s, роль %s", chat_id, user['id'], user['role'])
     name = " ".join(p for p in (user.get('name'), user.get('surename')) if p)
     bot.send_message(chat_id, f"Здравствуйте, {name}!\nВы вошли как {ROLE_TITLES[user['role']]}. Справка — /help.",

@@ -1,11 +1,7 @@
 """Склад: добавление товара, пополнение остатков, отчёт об остатках."""
-import io
 import logging
-from collections import defaultdict
 from decimal import Decimal
 
-import openpyxl
-from openpyxl.styles import Font
 from telebot import types
 
 from buttons import (create_cancel_markup, create_confirmation_markup, create_choice_markup, create_skip_cancel_markup,
@@ -14,6 +10,7 @@ from database import add_product_to_db, get_stock_report_data, update_product_qu
 from handlers.common import STOCK_ROLES, in_state, is_button, register_simple_cancel, product_line, SKIP
 from schema import STORES, METAL_TYPES, PRODUCT_TYPES
 from state import bot, user_state, get_op, start_op, end_op, cancel_current_operation
+from utils.stock_report import build_stock_excel, stock_totals
 from utils.common import parse_float, parse_int, parse_money, money, h, now
 
 logger = logging.getLogger(__name__)
@@ -37,6 +34,8 @@ ADD_STEPS = [
     ("STOCK_ADD_MODEL", 'model', "Модель / название:"),
     ("STOCK_ADD_METAL", 'metal_type', "Металл:"),
     ("STOCK_ADD_SIZE", 'size', "Размер (если есть):"),
+    ("STOCK_ADD_FINENESS", 'fineness', "Проба (например, 585):"),
+    ("STOCK_ADD_INSERTS", 'inserts', "Вставки / камни (например, фианит, бриллиант 0.1 ct):"),
     ("STOCK_ADD_WEIGHT", 'weight', "Вес в граммах (например, 2.53):"),
     ("STOCK_ADD_PPG", 'price_per_gram', "Цена за грамм (если не применяется — «Пропустить»):"),
     ("STOCK_ADD_PRICE", 'price', "Цена продажи:"),
@@ -50,7 +49,7 @@ ADD_CONFIRM = "STOCK_ADD_CONFIRM"
 STEP_INDEX = {state: i for i, (state, _, _) in enumerate(ADD_STEPS)}
 FIELD_TITLES = {
     'article_number': 'Артикул', 'Store': 'Магазин', 'product_type': 'Тип', 'model': 'Модель', 'metal_type': 'Металл',
-    'size': 'Размер', 'weight': 'Вес, г', 'price_per_gram': 'Цена за грамм', 'price': 'Цена', 'min_price': 'Мин. цена',
+    'size': 'Размер', 'fineness': 'Проба', 'inserts': 'Вставки', 'weight': 'Вес, г', 'price_per_gram': 'Цена за грамм', 'price': 'Цена', 'min_price': 'Мин. цена',
     'quantity': 'Количество', 'manufacturer': 'Производитель', 'commentaries': 'Комментарий', 'track_stock': 'Уведомлять об остатке',
 }
 
@@ -66,8 +65,10 @@ def _ask_step(chat_id, index):
         markup = create_choice_markup(_choices('product_type', PRODUCT_TYPES), 3)
     elif key == 'metal_type':
         markup = create_choice_markup(_choices('metal_type', METAL_TYPES), 3)
-    elif key in ('size', 'price_per_gram', 'manufacturer', 'commentaries'):
+    elif key in ('size', 'inserts', 'price_per_gram', 'manufacturer', 'commentaries'):
         markup = create_skip_cancel_markup(SKIP)
+    elif key == 'fineness':
+        markup = create_choice_markup(["585", "750", "925", SKIP], 4)
     elif key == 'min_price':
         markup = create_skip_cancel_markup(money(op['data']['price']))
     elif key == 'quantity':
@@ -106,6 +107,12 @@ def _validate(chat_id, key, text):
         return (True, text[:255]) if text else (False, "Модель не может быть пустой.")
     if key == 'size':
         return True, (None if skip else text[:32])
+    if key == 'fineness':
+        if skip:
+            return True, None
+        return (True, text[:16]) if len(text) <= 16 else (False, "Проба — короткое значение, например 585.")
+    if key == 'inserts':
+        return True, (None if skip else text[:255])
     if key == 'weight':
         w = parse_float(text)
         return (True, round(w, 3)) if w and 0 < w < 10000 else (False, "Вес — положительное число, например 2.53.")
@@ -240,36 +247,9 @@ def stock_report(message):
     if not items:
         stock_menu(chat_id, "Товаров на складе пока нет.")
         return
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Остатки"
-    headers = ['Магазин', 'Артикул', 'Тип', 'Модель', 'Металл', 'Размер', 'Вес, г', 'Остаток, шт', 'Цена', 'Мин. цена',
-               'Сумма по цене', 'Производитель', 'Дата поступления', 'Комментарий']
-    ws.append(headers)
-    for cell in ws[1]:
-        cell.font = Font(bold=True)
-    totals = defaultdict(lambda: [0, 0, Decimal(0)])  # магазин -> позиций, штук, сумма
-    for it in items:
-        qty = it['quantity'] or 0
-        value = (it['price'] or 0) * qty
-        t = totals[it['store_name']]
-        t[0] += 1 if qty > 0 else 0
-        t[1] += qty
-        t[2] += value
-        ws.append([it['store_name'], it['article_number'], it['product_type'], it['model'], it['metal_type'], it['size'],
-                   it['weight'], qty, float(it['price'] or 0), float(it['min_price'] or 0), float(value),
-                   it['manufacturer'], it['arrival_date'], it['commentaries']])
-    for row in ws.iter_rows(min_row=2, min_col=13, max_col=13):
-        for cell in row:
-            cell.number_format = 'DD.MM.YYYY'
-    for col, width in zip("ABCDEFGHIJKLMN", (12, 14, 14, 30, 11, 8, 8, 10, 12, 12, 14, 18, 14, 30)):
-        ws.column_dimensions[col].width = width
-    ws.freeze_panes = "A2"
-    buffer = io.BytesIO()
-    wb.save(buffer)
-    buffer.seek(0)
+    buffer = build_stock_excel(items)
     lines = ["<b>Остатки на складе</b>"]
-    for store, (positions, qty, value) in sorted(totals.items()):
+    for store, (positions, qty, value) in stock_totals(items).items():
         lines.append(f"{h(store)}: в наличии позиций — {positions}, всего {qty} шт. на {money(value)}")
     bot.send_message(chat_id, "\n".join(lines), parse_mode='HTML')
     bot.send_document(chat_id, types.InputFile(buffer, file_name=f"stock_{now():%Y%m%d_%H%M}.xlsx"))

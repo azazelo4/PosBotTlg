@@ -23,6 +23,7 @@ os.environ["DB_NAME"] = os.environ.get("TEST_DB_NAME", "bot_test")
 os.environ["ADMIN_PHONE"] = "+77010000001"
 os.environ["ADMIN_NAME"] = "Админ"
 os.environ.setdefault("LOG_LEVEL", "WARNING")
+os.environ["WEB_URL"] = "https://pos.test"
 
 from telebot import types  # noqa: E402
 
@@ -40,6 +41,7 @@ class FakeTelegram:
     def __init__(self):
         self.calls = []
         self.documents = []
+        self.menu_buttons = {}
 
     def _record(self, kind, chat_id, text=None, markup=None, **extra):
         self.calls.append(SimpleNamespace(kind=kind, chat_id=chat_id, text=text, markup=markup, **extra))
@@ -58,11 +60,23 @@ class FakeTelegram:
     def answer_callback_query(self, callback_query_id, text=None, **kw):
         return True
 
+    def set_chat_menu_button(self, chat_id=None, menu_button=None, **kw):
+        self.menu_buttons[chat_id] = menu_button
+        return True
+
     def send_chat_action(self, chat_id, action, **kw):
         return True
 
     def delete_message(self, chat_id, message_id, **kw):
         return True
+
+    files = {}
+
+    def get_file(self, file_id):
+        return SimpleNamespace(file_path=file_id)
+
+    def download_file(self, file_path):
+        return self.files[file_path]
 
     def send_document(self, chat_id, document, caption=None, reply_markup=None, **kw):
         f = getattr(document, 'file', document)
@@ -87,6 +101,16 @@ class FakeTelegram:
             "message_id": next(_ids), "date": 0, "chat": {"id": chat_id, "type": "private"},
             "from": {"id": chat_id, "is_bot": False, "first_name": "T"},
             "contact": {"phone_number": phone, "first_name": "T", "user_id": owner or chat_id}}})
+        return self.calls[start:]
+
+    def document(self, chat_id, data, file_name):
+        file_id = f"f{next(_ids)}"
+        self.files[file_id] = data
+        start = len(self.calls)
+        self._process({"update_id": next(_ids), "message": {
+            "message_id": next(_ids), "date": 0, "chat": {"id": chat_id, "type": "private"},
+            "from": {"id": chat_id, "is_bot": False, "first_name": "T"},
+            "document": {"file_id": file_id, "file_unique_id": file_id, "file_name": file_name, "file_size": len(data)}}})
         return self.calls[start:]
 
     def press(self, chat_id, data, message_id=1):
@@ -152,7 +176,7 @@ def _reset_db():
 def fake():
     tg = FakeTelegram()
     for name in ("send_message", "edit_message_text", "edit_message_reply_markup", "answer_callback_query",
-                 "send_chat_action", "delete_message", "send_document"):
+                 "send_chat_action", "delete_message", "send_document", "get_file", "download_file", "set_chat_menu_button"):
         setattr(bot, name, getattr(tg, name))
     bot.threaded = False
     from database import init_pool

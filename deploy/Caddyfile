@@ -1,0 +1,12 @@
+# HTTPS-прокси для веб-админки и Mini App. Сертификат Let's Encrypt выпускается автоматически.
+# Домен берётся из переменной WEB_DOMAIN (.env), DNS-запись A должна указывать на IP сервера.
+{$WEB_DOMAIN} {
+	encode gzip
+	reverse_proxy web:8000
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "same-origin"
+		-Server
+	}
+}

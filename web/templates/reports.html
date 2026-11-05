@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Отчёты{% endblock %}
+{% block content %}
+<h2>Отчёт по кассе</h2>
+<form method="get" class="grid">
+  <label>С<input type="date" name="start" value="{{ start.isoformat() }}"></label>
+  <label>По<input type="date" name="end" value="{{ end.isoformat() }}"></label>
+  <label>&nbsp;<button type="submit">Показать</button></label>
+  <label>&nbsp;<a role="button" class="secondary outline" href="/reports.xlsx?start={{ start.isoformat() }}&end={{ end.isoformat() }}">Скачать Excel</a></label>
+</form>
+
+<div class="grid-cards">
+  <article><div class="muted">Продажи</div><div class="stat">{{ s.sales_total | money }}</div><small class="muted">{{ s.sales_count }} шт., средний чек {{ s.sales_avg | money }}</small></article>
+  <article><div class="muted">Возвраты</div><div class="stat">{{ s.returns_total | money }}</div><small class="muted">{{ s.returns_count }} шт.</small></article>
+  <article><div class="muted">За вычетом возвратов</div><div class="stat">{{ s.net_sales | money }}</div></article>
+  <article><div class="muted">Наличные после инкассации</div><div class="stat">{{ s.cash_balance | money }}</div><small class="muted">инкассация {{ s.withdrawals_total | money }}</small></article>
+</div>
+
+<div class="grid" style="margin-top:1.5rem">
+  <div>
+    <h4>Способы оплаты</h4>
+    <table><thead><tr><th>Способ</th><th class="num">Продажи</th><th class="num">Движение денег</th></tr></thead><tbody>
+    {% for pt in payment_types %}{% set sp = s.sales_by_payment.get(pt) %}
+      <tr><td>{{ pt }}</td><td class="num">{{ (sp[1] if sp else 0) | money }}</td><td class="num">{{ s.flow.get(pt, 0) | money }}</td></tr>
+    {% endfor %}</tbody></table>
+  </div>
+  <div>
+    <h4>Прочие операции</h4>
+    <table><tbody>
+      <tr><td>Скупка</td><td class="num">{{ s.buybacks_count }} шт.</td><td class="num">{{ s.buybacks_total | money }}</td></tr>
+      <tr><td>Trade-In: доплаты клиентов</td><td class="num">{{ s.trade_ins_count }} шт.</td><td class="num">{{ s.tradein_in | money }}</td></tr>
+      <tr><td>Trade-In: выплаты клиентам</td><td></td><td class="num">{{ s.tradein_out | money }}</td></tr>
+      <tr><td>Инкассация</td><td class="num">{{ s.withdrawals_count }}</td><td class="num">{{ s.withdrawals_total | money }}</td></tr>
+    </tbody></table>
+  </div>
+</div>
+
+<h4>Продажи</h4>
+<div class="table-wrap"><table class="striped">
+  <thead><tr><th>№</th><th>Дата</th><th>Артикул</th><th>Название</th><th>Продавец</th><th>Оплата</th><th class="num">Сумма</th></tr></thead>
+  <tbody>{% for r in ops.sales | reverse %}
+    <tr><td>{{ r.id }}</td><td>{{ r.sale_date | ddmmhhmm }}</td><td>{{ r.article_number }}</td><td>{{ r.model }}</td>
+      <td>{{ r.user_name or '' }}</td><td>{{ r.payment_type }}</td>
+      <td class="num">{{ r.sold_price | money }}{% if r.return_id %} <span class="badge zero">возврат</span>{% endif %}</td></tr>
+  {% else %}<tr><td colspan="7" class="muted">Продаж за период нет.</td></tr>{% endfor %}</tbody>
+</table></div>
+{% endblock %}

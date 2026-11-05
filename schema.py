@@ -47,6 +47,8 @@ TABLES = {
           `product_type` {_enum(PRODUCT_TYPES)} NOT NULL,
           `model` text NOT NULL,
           `size` varchar(32) DEFAULT NULL,
+          `fineness` varchar(16) DEFAULT NULL,
+          `inserts` varchar(255) DEFAULT NULL,
           `weight` float NOT NULL,
           `price_per_gram` decimal(10,0) NOT NULL DEFAULT 0,
           `price` decimal(10,0) NOT NULL,
@@ -126,6 +128,15 @@ TABLES = {
           KEY `idx_trade_ins_date` (`trade_in_date`),
           CONSTRAINT `trade_ins_user_fk` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
         ) {CHARSET}""",
+    "web_login_tokens": f"""
+        CREATE TABLE IF NOT EXISTS `web_login_tokens` (
+          `token_hash` char(64) NOT NULL,
+          `user_id` int NOT NULL,
+          `expires_at` datetime NOT NULL,
+          `used_at` datetime DEFAULT NULL,
+          PRIMARY KEY (`token_hash`),
+          KEY `idx_wlt_user` (`user_id`)
+        ) {CHARSET}""",
     "cash_withdrawals": f"""
         CREATE TABLE IF NOT EXISTS `cash_withdrawals` (
           `id` int NOT NULL AUTO_INCREMENT,
@@ -146,6 +157,8 @@ COLUMNS = [
     ("users", "chat_id", "bigint DEFAULT NULL"),
     ("products", "size", "varchar(32) DEFAULT NULL"),
     ("products", "track_stock", "tinyint(1) NOT NULL DEFAULT 1"),
+    ("products", "fineness", "varchar(16) DEFAULT NULL"),
+    ("products", "inserts", "varchar(255) DEFAULT NULL"),
     ("returns", "store_id", "int DEFAULT NULL"),
     ("buybacks", "description", "text DEFAULT NULL"),
     ("buybacks", "metal_type", "varchar(32) DEFAULT NULL"),

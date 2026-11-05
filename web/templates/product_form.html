@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}{% if product.id %}{{ product.article_number }}{% else %}Новый товар{% endif %}{% endblock %}
+{% block content %}
+<div class="row-actions" style="justify-content:space-between">
+  <h2>{% if product.id %}Товар {{ product.article_number }}{% else %}Новый товар{% endif %}</h2>
+  {% if product.id %}<a href="/labels?articles={{ product.article_number | urlencode }}" role="button" class="secondary outline">Ценник</a>{% endif %}
+</div>
+{% for e in errors or [] %}<div class="flash error">{{ e }}</div>{% endfor %}
+
+<form method="post">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <div class="grid">
+    <label>Артикул *<input name="article_number" value="{{ product.article_number or '' }}" required maxlength="64"></label>
+    <label>Магазин *
+      <select name="Store" required>
+        {% for s in stores %}<option {% if s == product.Store %}selected{% endif %}>{{ s }}</option>{% endfor %}
+      </select></label>
+  </div>
+  <label>Название *<input name="model" value="{{ product.model or '' }}" required maxlength="255"></label>
+  <div class="grid">
+    <label>Тип *
+      <select name="product_type" required>
+        {% for t in types %}<option {% if t == product.product_type %}selected{% endif %}>{{ t }}</option>{% endfor %}
+      </select></label>
+    <label>Металл *
+      <select name="metal_type" required>
+        {% for m in metals %}<option {% if m == product.metal_type %}selected{% endif %}>{{ m }}</option>{% endfor %}
+      </select></label>
+    <label>Проба<input name="fineness" value="{{ product.fineness or '' }}" maxlength="16" placeholder="585"></label>
+  </div>
+  <div class="grid">
+    <label>Вес, г<input name="weight" value="{{ product.weight if product.weight else '' }}" inputmode="decimal"></label>
+    <label>Размер<input name="size" value="{{ product.size or '' }}" maxlength="32"></label>
+    <label>Вставки<input name="inserts" value="{{ product.inserts or '' }}" maxlength="255" placeholder="фианит"></label>
+  </div>
+  <div class="grid">
+    <label>Цена, ₸ *<input name="price" value="{{ product.price | num }}" inputmode="numeric" required></label>
+    <label>Мин. цена, ₸ *<input name="min_price" value="{{ product.min_price | num }}" inputmode="numeric" required></label>
+    <label>Цена за грамм<input name="price_per_gram" value="{{ (product.price_per_gram | num) or '' }}" inputmode="numeric"></label>
+  </div>
+  <div class="grid">
+    <label>Остаток, шт<input name="quantity" type="number" min="0" value="{{ product.quantity or 0 }}"></label>
+    <label>Дата поступления<input name="arrival_date" type="date" value="{{ product.arrival_date.isoformat() if product.arrival_date else '' }}"></label>
+    <label>Производитель<input name="manufacturer" value="{{ product.manufacturer or '' }}" maxlength="255"></label>
+  </div>
+  <label>Комментарий<input name="commentaries" value="{{ product.commentaries or '' }}" maxlength="500"></label>
+  <label><input type="checkbox" name="track_stock" role="switch" {% if product.track_stock %}checked{% endif %}>
+    Уведомлять, когда остаток станет низким</label>
+  <div class="row-actions" style="margin-top:1rem">
+    <button type="submit">Сохранить</button>
+    <a href="/products" role="button" class="secondary outline">К списку</a>
+  </div>
+</form>
+{% endblock %}

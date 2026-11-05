@@ -5,7 +5,7 @@
 # Что делает (повторный запуск безопасен):
 #   часовой пояс, обновления и автообновления безопасности, swap, Docker,
 #   пользователь gh-runner для GitHub runner, каталоги, ежедневный бэкап БД,
-#   firewall (только SSH), fail2ban, вход по SSH только по ключу (если ключ уже добавлен).
+#   firewall (SSH, HTTP/HTTPS), fail2ban, вход по SSH только по ключу (если ключ уже добавлен).
 set -euo pipefail
 
 TZ_NAME="${TZ_NAME:-Asia/Almaty}"
@@ -82,8 +82,11 @@ BACKUP_PAR_URL=
 EOF
 fi
 
-log "Firewall: входящие только SSH"
+log "Firewall: входящие SSH, HTTP и HTTPS"
 ufw allow OpenSSH >/dev/null
+# 80/443 — для веб-админки и Mini App (Caddy с сертификатом Let's Encrypt)
+ufw allow 80/tcp >/dev/null
+ufw allow 443/tcp >/dev/null
 ufw --force enable >/dev/null
 ufw status | sed -n '1,6p'
 # Docker публикует порты в обход ufw, поэтому в docker-compose.yml наружу
