@@ -22,9 +22,16 @@ def contact_handler(message: types.Message):
     contact = message.contact
     if contact is None:
         return
-    # Принимаем только собственный контакт пользователя, а не пересланный чужой
-    if contact.user_id and message.from_user and contact.user_id != message.from_user.id:
-        bot.send_message(chat_id, "Отправьте свой номер кнопкой «Поделиться номером».", reply_markup=create_share_contact_markup())
+    # Номер принимаем, только если это контакт самого отправителя. Кнопка «Поделиться номером»
+    # присылает контакт с user_id отправителя, а Telegram проставляет user_id по номеру телефона,
+    # поэтому совпадение доказывает, что номер принадлежит этому аккаунту. Карточка из телефонной
+    # книги (без user_id) или чужой контакт — отклоняются: иначе можно войти под чужим номером.
+    if not message.from_user or contact.user_id != message.from_user.id:
+        logger.warning("Chat %s: отклонён контакт не владельца (contact.user_id=%s, from=%s)",
+                       chat_id, contact.user_id, getattr(message.from_user, 'id', None))
+        bot.send_message(chat_id, "Отправьте свой номер кнопкой «Поделиться номером» ниже — "
+                                  "карточки контактов из телефонной книги не принимаются.",
+                         reply_markup=create_share_contact_markup())
         return
 
     user, error = authorize_user(contact.phone_number)
