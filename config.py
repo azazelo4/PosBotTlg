@@ -67,8 +67,8 @@ WEB_SECRET = _optional_str("WEB_SECRET")
 WEB_SESSION_HOURS = _optional_int("WEB_SESSION_HOURS", 12)
 
 # ---------------------------------------------------------------- ценники
-LABEL_WIDTH_MM = float(_optional_str("LABEL_WIDTH_MM", "40"))
-LABEL_HEIGHT_MM = float(_optional_str("LABEL_HEIGHT_MM", "30"))
+LABEL_WIDTH_MM = float(_optional_str("LABEL_WIDTH_MM", "30"))
+LABEL_HEIGHT_MM = float(_optional_str("LABEL_HEIGHT_MM", "20"))
 # Строка вверху ценника (название магазина). Пусто — печатается магазин товара.
 LABEL_TITLE = _optional_str("LABEL_TITLE")
 

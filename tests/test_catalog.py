@@ -89,7 +89,7 @@ def test_labels_pdf_by_articles_and_stock(tg):
     pdf = PdfReader(io.BytesIO(tg.documents[-1].data))
     assert len(pdf.pages) == 4
     box = pdf.pages[0].mediabox
-    assert round(float(box.width) / 72 * 25.4) == 40 and round(float(box.height) / 72 * 25.4) == 30
+    assert round(float(box.width) / 72 * 25.4) == 30 and round(float(box.height) / 72 * 25.4) == 20
     text = pdf.pages[0].extract_text()
     assert "150 000" in text and "Кольцо" in text and "A100" in text
 
@@ -103,3 +103,13 @@ def test_labels_pdf_by_articles_and_stock(tg):
 def test_labels_not_for_cashier(tg):
     login(tg, CASHIER)
     assert "Не понял" in tg.texts(tg.send(CASHIER, "Ценники"))
+
+
+def test_labels_portrait_layout_for_tall_labels(tg):
+    from utils.labels import generate_labels_pdf
+    product = db_query("SELECT * FROM products WHERE article_number='A100'")[0]
+    pdf, count = generate_labels_pdf([product], width_mm=20, height_mm=30)
+    page = PdfReader(io.BytesIO(pdf)).pages[0]
+    assert count == 1 and round(float(page.mediabox.width) / 72 * 25.4) == 20
+    text = page.extract_text()
+    assert "Кольцо" in text and "150 000" in text and "A100" in text

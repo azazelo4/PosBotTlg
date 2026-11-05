@@ -105,8 +105,8 @@ jobs:
           LOW_STOCK_THRESHOLD: ${{ vars.LOW_STOCK_THRESHOLD || '5' }}
           WEB_DOMAIN: ${{ vars.WEB_DOMAIN }}
           WEB_SECRET: ${{ secrets.WEB_SECRET }}
-          LABEL_WIDTH_MM: ${{ vars.LABEL_WIDTH_MM || '40' }}
-          LABEL_HEIGHT_MM: ${{ vars.LABEL_HEIGHT_MM || '30' }}
+          LABEL_WIDTH_MM: ${{ vars.LABEL_WIDTH_MM || '30' }}
+          LABEL_HEIGHT_MM: ${{ vars.LABEL_HEIGHT_MM || '20' }}
           LABEL_TITLE: ${{ vars.LABEL_TITLE }}
           IMPORT_MIN_PRICE_PERCENT: ${{ vars.IMPORT_MIN_PRICE_PERCENT || '100' }}
         run: |
