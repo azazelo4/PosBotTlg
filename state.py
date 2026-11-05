@@ -3,12 +3,13 @@ import logging
 
 from telebot import TeleBot
 
-from config import TOKEN
+import config
 
 logger = logging.getLogger(__name__)
 
 # use_class_middlewares нужен для восстановления сессии до проверки фильтров хендлеров
-bot = TeleBot(TOKEN, use_class_middlewares=True)
+# Без токена (до мастера /setup) main.py сюда не доходит; заглушка нужна только для импорта в тестах/утилитах.
+bot = TeleBot(config.TOKEN or "0:not-configured", use_class_middlewares=True, validate_token=False)
 
 user_data = {}    # chat_id -> {'id', 'role', 'name', 'surename', 'store_id', 'phone_number', 'is_active', ...}
 user_state = {}   # chat_id -> "ПРЕФИКС_ШАГ" текущей многошаговой операции

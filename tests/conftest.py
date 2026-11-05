@@ -15,6 +15,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 os.environ.setdefault("TOKEN", "123456:TEST")
+os.environ.setdefault("POSBOT_MASTER_KEY", "dGVzdC1rZXktdGVzdC1rZXktdGVzdC1rZXktdGVzdC0=")
 os.environ["DB_HOST"] = os.environ.get("TEST_DB_HOST", "127.0.0.1")
 os.environ["DB_PORT"] = os.environ.get("TEST_DB_PORT", "3306")
 os.environ["DB_USER"] = os.environ.get("TEST_DB_USER", "bot")
@@ -193,7 +194,8 @@ def fake():
 @pytest.fixture
 def tg(fake):
     """Чистые данные перед каждым тестом: пользователи трёх ролей и несколько товаров."""
-    for table in ("returns", "trade_ins", "buybacks", "cash_withdrawals", "sales", "products", "users", "stores"):
+    for table in ("returns", "trade_ins", "buybacks", "cash_withdrawals", "sales", "products", "users", "stores",
+                  "settings", "settings_log"):
         db_query(f"DELETE FROM `{table}`")
     db_query("INSERT INTO stores (id, name, sort_order) VALUES (1, 'ЦУМ', 0), (2, 'Отау Сауда', 1)")
     user_data.clear()

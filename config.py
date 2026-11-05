@@ -1,17 +1,24 @@
-"""Конфигурация бота.
+"""Конфигурация.
 
-Все секреты и параметры окружения читаются из переменных окружения
-(в Docker — из файла .env, который создаётся пайплайном из секретов).
-Шаблон переменных — в .env.example. Никаких секретов в этом файле.
+Два уровня:
+
+* **Запуск** (только переменные окружения, файл .env создаёт deploy/bootstrap-env.sh):
+  подключение к БД, ключ шифрования настроек, уровень логов.
+* **Настройки приложения** (реестр SETTINGS ниже): токен Telegram, магазин, расписание,
+  ценники, фискализация… Хранятся в таблице settings и задаются мастером /setup
+  и страницей /settings веб-админки. Секреты в БД зашифрованы.
+
+Приоритет: переменная окружения > значение в БД > значение по умолчанию.
+Заданная в окружении настройка в веб-админке показывается только для чтения.
+
+Код читает настройки как атрибуты модуля в момент использования (``config.TOKEN``),
+а не через ``from config import TOKEN``: значения обновляются без перезапуска
+(settings_store.reload()).
 """
 import os
-
-
-def _require(name: str) -> str:
-    value = os.environ.get(name)
-    if not value:
-        raise RuntimeError(f"Не задана обязательная переменная окружения {name}")
-    return value
+import re
+from dataclasses import dataclass
+from zoneinfo import ZoneInfo
 
 
 def _optional_int(name: str, default=None):
@@ -28,54 +35,210 @@ def _optional_str(name: str, default=None):
     return value.strip()
 
 
-# Токен телеграм-бота
-TOKEN = _require("TOKEN")
+# ================================================================ запуск (только окружение)
 
-# Параметры подключения к базе данных MySQL
 DB_HOST = _optional_str("DB_HOST", "db")
 DB_PORT = _optional_int("DB_PORT", 3306)
-DB_USER = _require("DB_USER")
-DB_PASS = _require("DB_PASS")
-DB_NAME = _require("DB_NAME")
+DB_USER = _optional_str("DB_USER", "bot")
+DB_PASS = _optional_str("DB_PASS", "")
+DB_NAME = _optional_str("DB_NAME", "bot")
 
-# Часовой пояс магазинов: даты операций, периоды отчётов и расписание
-TIMEZONE = _optional_str("TZ", "Asia/Almaty")
-
-# Телефон первого администратора. Если в БД нет такого активного пользователя,
-# он будет создан при старте — иначе на пустой базе никто не сможет войти.
-ADMIN_PHONE = _optional_str("ADMIN_PHONE")
-ADMIN_NAME = _optional_str("ADMIN_NAME", "Администратор")
-
-# Ежедневный отчёт, формат HH:MM. Отправляется в REPORT_CHAT_ID,
-# а если он не задан — всем активным администраторам.
-DAILY_REPORT_TIME = _optional_str("DAILY_REPORT_TIME", "23:00")
-REPORT_CHAT_ID = _optional_int("REPORT_CHAT_ID")
-
-# Уведомление о низком остатке (администраторам и менеджерам), формат HH:MM.
-# Пустое значение отключает уведомление.
-LOW_STOCK_TIME = _optional_str("LOW_STOCK_TIME", "09:00")
-LOW_STOCK_THRESHOLD = _optional_int("LOW_STOCK_THRESHOLD", 5)
+# Ключ шифрования секретов в таблице settings (Fernet). Создаётся один раз bootstrap-env.sh.
+MASTER_KEY = _optional_str("POSBOT_MASTER_KEY")
 
 LOG_LEVEL = _optional_str("LOG_LEVEL", "INFO")
 
-# Магазины для пустой базы (через запятую). На существующей базе магазины берутся из
-# таблицы stores и меняются в веб-админке; переменная больше ни на что не влияет.
-DEFAULT_STORES = tuple(s.strip() for s in (_optional_str("STORES", "ЦУМ, Отау Сауда")).split(",") if s.strip())
-
-# ---------------------------------------------------------------- веб-админка и Mini App
-# Публичный HTTPS-адрес (например, https://pos.example.kz). Пусто — веб выключен,
-# бот не показывает кнопки админки и кассы-приложения.
-WEB_URL = (_optional_str("WEB_URL") or "").rstrip("/") or None
-# Ключ подписи cookie сессий веб-админки. Если не задан — выводится из TOKEN.
+# Ключ подписи cookie веб-админки. Пусто — выводится из MASTER_KEY.
 WEB_SECRET = _optional_str("WEB_SECRET")
 WEB_SESSION_HOURS = _optional_int("WEB_SESSION_HOURS", 12)
 
-# ---------------------------------------------------------------- ценники
-LABEL_WIDTH_MM = float(_optional_str("LABEL_WIDTH_MM", "30"))
-LABEL_HEIGHT_MM = float(_optional_str("LABEL_HEIGHT_MM", "20"))
-# Строка вверху ценника (название магазина). Пусто — печатается магазин товара.
-LABEL_TITLE = _optional_str("LABEL_TITLE")
+# Телефон первого администратора (совместимость со старыми установками; новые — через /setup)
+ADMIN_PHONE = _optional_str("ADMIN_PHONE")
+ADMIN_NAME = _optional_str("ADMIN_NAME", "Администратор")
 
-# ---------------------------------------------------------------- импорт каталога
-# Если в файле нет минимальной цены: какой процент от цены считать минимальной
-IMPORT_MIN_PRICE_PERCENT = float(_optional_str("IMPORT_MIN_PRICE_PERCENT", "100"))
+# Магазины для пустой базы (через запятую). Обычно не нужно: магазины задаются в /setup.
+DEFAULT_STORES = tuple(s.strip() for s in (_optional_str("STORES", "")).split(",") if s.strip())
+
+
+# ================================================================ настройки приложения
+
+@dataclass(frozen=True)
+class Setting:
+    key: str
+    title: str
+    group: str
+    kind: str = "str"          # str | int | float | time | tz | bool | url | bin
+    default: object = None
+    secret: bool = False
+    restart: bool = False      # изменение требует перезапуска бота (делается автоматически)
+    help: str = ""
+    env: str = None            # имя переменной окружения, если отличается от key
+    hidden: bool = False       # служебная, не показывается в форме
+    placeholder: str = ""
+
+    @property
+    def env_name(self):
+        return self.env or self.key
+
+
+GROUPS = {
+    "telegram": "Telegram",
+    "org": "Организация",
+    "web": "Веб-админка и касса-приложение",
+    "schedule": "Время и уведомления",
+    "labels": "Ценники и импорт",
+    "fiscal": "Фискализация (Webkassa)",
+}
+
+TIMEZONES = ("Asia/Almaty", "Asia/Qostanay", "Asia/Qyzylorda", "Asia/Aqtobe", "Asia/Aqtau", "Asia/Atyrau", "Asia/Oral",
+             "Asia/Tashkent", "Asia/Bishkek", "Europe/Moscow")
+
+SETTINGS = (
+    Setting("TOKEN", "Токен бота", "telegram", secret=True, restart=True,
+            help="Выдаёт @BotFather: /newbot → токен вида 123456:ABC…", placeholder="123456789:AA…"),
+    Setting("ORG_NAME", "Название ИП / организации", "org", placeholder="ИП Иванов"),
+    Setting("ORG_BIN", "ИИН / БИН", "org", kind="bin", help="12 цифр. Понадобится для фискализации."),
+    Setting("WEB_URL", "Адрес веб-админки", "web", kind="url",
+            help="https://ваш-домен. Домен должен указывать на IP сервера (A-запись). "
+                 "Пусто — кнопки админки и кассы-приложения в боте скрыты.",
+            placeholder="https://pos.example.kz"),
+    Setting("TIMEZONE", "Часовой пояс", "schedule", kind="tz", restart=True,
+            default=os.environ.get("TZ") or "Asia/Almaty", env="POSBOT_TIMEZONE",
+            help="Даты операций, периоды отчётов и расписание уведомлений."),
+    Setting("DAILY_REPORT_TIME", "Ежедневный отчёт, время", "schedule", kind="time", default="23:00", restart=True,
+            help="ЧЧ:ММ. Пусто — не отправлять."),
+    Setting("REPORT_CHAT_ID", "Чат для ежедневного отчёта", "schedule", kind="int",
+            help="ID чата/группы Telegram. Пусто — всем администраторам."),
+    Setting("LOW_STOCK_TIME", "Уведомление о низком остатке, время", "schedule", kind="time", default="09:00",
+            restart=True, help="ЧЧ:ММ. Пусто — не отправлять."),
+    Setting("LOW_STOCK_THRESHOLD", "Порог низкого остатка, шт.", "schedule", kind="int", default=5),
+    Setting("LABEL_WIDTH_MM", "Ширина ценника, мм", "labels", kind="float", default=30.0),
+    Setting("LABEL_HEIGHT_MM", "Высота ценника, мм", "labels", kind="float", default=20.0),
+    Setting("LABEL_TITLE", "Строка вверху ценника", "labels", help="Пусто — название магазина товара."),
+    Setting("IMPORT_MIN_PRICE_PERCENT", "Минимальная цена при импорте, % от цены", "labels", kind="float",
+            default=100.0, help="Если в файле каталога нет колонки минимальной цены."),
+    Setting("FISCAL_ENABLED", "Фискализировать операции через Webkassa", "fiscal", kind="bool", default=False,
+            help="Выключено — чеки, как и раньше, пробиваются отдельно (ReKassa и т. п.)."),
+    Setting("WEBKASSA_URL", "Адрес API Webkassa", "fiscal", kind="url", default="https://devkkm.webkassa.kz",
+            help="Тестовый стенд: https://devkkm.webkassa.kz, рабочий: https://kkm.webkassa.kz"),
+    Setting("WEBKASSA_LOGIN", "Логин кассира Webkassa", "fiscal"),
+    Setting("WEBKASSA_PASSWORD", "Пароль кассира Webkassa", "fiscal", secret=True),
+    Setting("WEBKASSA_API_KEY", "API-ключ интегратора (X-API-KEY)", "fiscal", secret=True),
+    # служебные
+    Setting("SETUP_DONE", "Первоначальная настройка завершена", "system", kind="bool", default=False, hidden=True),
+    Setting("SETUP_CODE", "Код мастера настройки", "system", secret=True, hidden=True),
+)
+BY_KEY = {s.key: s for s in SETTINGS}
+
+
+class SettingError(ValueError):
+    pass
+
+
+_HHMM = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
+
+
+def parse_value(setting: Setting, raw):
+    """Строка из формы/окружения/БД → значение нужного типа. Пустое → None. SettingError при ошибке."""
+    if isinstance(raw, str):
+        raw = raw.strip()
+    if setting.kind == "bool":
+        if isinstance(raw, bool):
+            return raw
+        return str(raw or "").lower() in ("1", "true", "yes", "on", "да")
+    if raw is None or raw == "":
+        return None
+    if not isinstance(raw, str):
+        raw = str(raw)
+    kind = setting.kind
+    try:
+        if kind == "int":
+            return int(raw)
+        if kind == "float":
+            value = float(raw.replace(",", "."))
+            if value <= 0:
+                raise ValueError
+            return value
+    except ValueError:
+        raise SettingError(f"«{setting.title}»: нужно число.")
+    if kind == "time":
+        m = _HHMM.match(raw)
+        if not m:
+            raise SettingError(f"«{setting.title}»: формат ЧЧ:ММ, например 23:00.")
+        return f"{int(m.group(1)):02d}:{m.group(2)}"
+    if kind == "tz":
+        try:
+            ZoneInfo(raw)
+        except Exception:
+            raise SettingError(f"«{setting.title}»: неизвестный часовой пояс {raw!r}.")
+        return raw
+    if kind == "url":
+        raw = raw.rstrip("/")
+        if not re.match(r"^https?://[^\s/]+", raw):
+            raise SettingError(f"«{setting.title}»: адрес вида https://pos.example.kz")
+        return raw
+    if kind == "bin":
+        digits = re.sub(r"\D", "", raw)
+        if len(digits) != 12:
+            raise SettingError(f"«{setting.title}»: 12 цифр.")
+        return digits
+    if setting.key == "TOKEN" and not re.match(r"^\d{3,}:[\w-]{3,}$", raw):
+        raise SettingError("Токен бота выглядит неправильно: ожидается вид 123456789:AA… из @BotFather.")
+    return raw
+
+
+def env_value(setting: Setting):
+    """Значение из окружения или None. WEB_URL можно задать и через WEB_DOMAIN (старые установки)."""
+    raw = os.environ.get(setting.env_name)
+    if (raw is None or not raw.strip()) and setting.key == "WEB_URL" and os.environ.get("WEB_DOMAIN", "").strip():
+        raw = "https://" + os.environ["WEB_DOMAIN"].strip()
+    if raw is None or not raw.strip():
+        return None
+    try:
+        return parse_value(setting, raw)
+    except SettingError as e:
+        if setting.key not in _warned_env:
+            _warned_env.add(setting.key)
+            import logging
+            logging.getLogger(__name__).error("Переменная окружения %s проигнорирована: %s", setting.env_name, e)
+        return None
+
+
+_warned_env = set()
+
+
+def env_overridden(key) -> bool:
+    return env_value(BY_KEY[key]) is not None
+
+
+_db_values = {}
+
+
+def apply(db_values=None):
+    """Пересчитывает атрибуты модуля: окружение > БД > по умолчанию."""
+    global _db_values
+    if db_values is not None:
+        _db_values = dict(db_values)
+    g = globals()
+    for s in SETTINGS:
+        value = env_value(s)
+        if value is None:
+            value = _db_values.get(s.key)
+        if value is None:
+            value = s.default
+        g[s.key] = value
+
+
+def source(key):
+    """Откуда взято значение: env | db | default."""
+    if env_overridden(key):
+        return "env"
+    return "db" if _db_values.get(key) is not None else "default"
+
+
+# Начальные значения (до чтения БД): окружение и значения по умолчанию.
+TOKEN = ORG_NAME = ORG_BIN = WEB_URL = TIMEZONE = DAILY_REPORT_TIME = REPORT_CHAT_ID = None
+LOW_STOCK_TIME = LOW_STOCK_THRESHOLD = LABEL_WIDTH_MM = LABEL_HEIGHT_MM = LABEL_TITLE = None
+IMPORT_MIN_PRICE_PERCENT = FISCAL_ENABLED = WEBKASSA_URL = WEBKASSA_LOGIN = WEBKASSA_PASSWORD = None
+WEBKASSA_API_KEY = SETUP_DONE = SETUP_CODE = None
+apply({})

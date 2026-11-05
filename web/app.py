@@ -16,21 +16,24 @@ from fastapi import FastAPI, Request, Form, UploadFile, File, HTTPException, Dep
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
 import config
+import settings_store
 from buttons import PAYMENT_TYPES, ROLE_TITLES
-from database import (get_stores, get_store_counts, create_store, update_store, set_user_store, init_pool, get_user_by_id, get_user_by_chat_id, search_products, get_product_by_id,
+from database import (ensure_admin, get_connection, get_stores, get_store_counts, create_store, update_store, set_user_store, init_pool, get_user_by_id, get_user_by_chat_id, search_products, get_product_by_id,
                       get_product_by_article, get_products_by_articles, get_products_for_labels, add_product_to_db,
                       update_product, get_stock_report_data, get_low_stock_products, get_period_operations,
                       record_sale, get_today_sales_by_user, get_all_users, add_user_to_db, change_user_role_function,
                       deactivate_user_in_db, update_user_phone)
-from schema import METAL_TYPES, PRODUCT_TYPES
+from schema import METAL_TYPES, PRODUCT_TYPES, ensure_schema
 from utils.catalog_import import build_plan, apply_plan, FIELD_TITLES
 from utils.common import money, today, now, parse_money, parse_float, parse_int, parse_date, normalize_phone, day_bounds
 from utils.labels import generate_labels_pdf, details_line
 from utils.report_generator import build_summary, build_excel, store_breakdown
 from utils.stock_report import build_stock_excel, stock_totals
+from web import settings_form
 from web.security import (session_secret, redeem_login_token, validate_init_data, new_csrf, ADMIN_ROLES, CASH_ROLES)
 
 logger = logging.getLogger("posbot.web")
@@ -54,20 +57,53 @@ templates.env.filters['num'] = _num
 templates.env.filters['ddmmyyyy'] = lambda d: d.strftime('%d.%m.%Y') if d else ''
 templates.env.filters['ddmmhhmm'] = lambda d: d.strftime('%d.%m %H:%M') if d else ''
 templates.env.globals['ROLE_TITLES'] = ROLE_TITLES
+templates.env.globals['TIMEZONES'] = config.TIMEZONES
 
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
+def prepare():
+    """Миграции и настройки при старте веба (бот может ещё ждать токен или не стартовать вовсе)."""
+    init_pool()
+    connection = get_connection()
+    try:
+        ensure_schema(connection, config.DEFAULT_STORES)
+    finally:
+        connection.close()
+    settings_store.reload()
+    settings_store.log_setup_hint()
+
+
 @asynccontextmanager
 async def lifespan(_app):
-    init_pool()
+    await run_in_threadpool(prepare)
     yield
 
 
+class DynamicSessionMiddleware:
+    """Cookie сессии с флагом Secure, если запрос пришёл по HTTPS (через Caddy).
+    По HTTP (SSH-туннель на 127.0.0.1:8000 во время настройки) — без него, иначе браузер её не вернёт."""
+
+    def __init__(self, app):
+        options = dict(secret_key=session_secret(), session_cookie="posbot_session",
+                       max_age=config.WEB_SESSION_HOURS * 3600, same_site="lax")
+        self.secure = SessionMiddleware(app, https_only=True, **options)
+        self.plain = SessionMiddleware(app, https_only=False, **options)
+
+    async def __call__(self, scope, receive, send):
+        handler = self.secure if scope.get("scheme") in ("https", "wss") else self.plain
+        await handler(scope, receive, send)
+
+
 app = FastAPI(title="POS-бот", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
-app.add_middleware(SessionMiddleware, secret_key=session_secret(), session_cookie="posbot_session",
-                   max_age=config.WEB_SESSION_HOURS * 3600, same_site="lax",
-                   https_only=bool(config.WEB_URL and config.WEB_URL.startswith("https://")))
+app.add_middleware(DynamicSessionMiddleware)
+
+
+@app.middleware("http")
+async def fresh_settings(request: Request, call_next):
+    # Настройки меняются из бота/другого процесса редко: перечитываем не чаще раза в 5 секунд
+    await run_in_threadpool(settings_store.reload_if_stale)
+    return await call_next(request)
 
 app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
 
@@ -135,6 +171,8 @@ def render(request: Request, template, user, **ctx):
 
 @app.get("/login")
 def login(request: Request, t: str = ""):
+    if not settings_store.is_configured():
+        return RedirectResponse("/setup", status_code=303)
     ok, result = redeem_login_token(t)
     if not ok:
         return templates.TemplateResponse(request, "login.html", {"user": None, "error": result}, status_code=401)
@@ -156,13 +194,19 @@ def logout(request: Request):
 
 @app.get("/health")
 def health():
-    return {"ok": True}
+    return {"ok": True, "configured": settings_store.is_configured()}
 
 
 # ---------------------------------------------------------------- дашборд
 
 @app.get("/", response_class=HTMLResponse)
-def dashboard(request: Request, user=Depends(current_user)):
+def dashboard(request: Request):
+    if not settings_store.is_configured():
+        return RedirectResponse("/setup", status_code=303)
+    return _dashboard(request, current_user(request))
+
+
+def _dashboard(request: Request, user):
     d = today()
     periods = {}
     breakdown = []
@@ -544,3 +588,152 @@ async def api_sale(request: Request, user=Depends(app_user)):
         raise HTTPException(400, result)
     logger.info("Mini App: продажа #%s, %s за %s (%s)", result, product['article_number'], price, user['id'])
     return {"sale_id": result, "price": int(price), "payment": payment, "model": product['model']}
+
+
+# ---------------------------------------------------------------- первоначальная настройка и настройки
+
+_setup_attempts = {}   # ip -> [время неудачных попыток]
+SETUP_MAX_FAILS = 10
+SETUP_FAIL_WINDOW = 600
+
+
+def _setup_blocked(ip):
+    recent = [t for t in _setup_attempts.get(ip, []) if time.monotonic() - t < SETUP_FAIL_WINDOW]
+    _setup_attempts[ip] = recent
+    return len(recent) >= SETUP_MAX_FAILS
+
+
+def _suggest_web_url(request: Request):
+    host = (request.headers.get("host") or "").split(":")[0]
+    if not host or host in ("localhost", "testserver") or re.match(r"^[\d.]+$", host):
+        return ""
+    return f"https://{host}"
+
+
+def _setup_page(request: Request, status=200, errors=(), form=None, **extra):
+    form = form or {}
+    overrides = {k: form.get(k, "") for k in settings_form.SETUP_KEYS if k in form}
+    if not config.WEB_URL and "WEB_URL" not in overrides:
+        overrides["WEB_URL"] = _suggest_web_url(request)
+    stores = get_stores(active_only=False) or []
+    return templates.TemplateResponse(request, "setup.html", {
+        "user": None, "messages": [["error", e] for e in errors], "csrf": csrf_token(request),
+        "groups": settings_form.build_groups(settings_form.SETUP_KEYS, overrides), "existing_stores": stores,
+        "form": form, "has_admin": _has_admin(), **extra}, status_code=status)
+
+
+def _has_admin():
+    return any(u.get('role') == 'admin' for u in (get_all_users() or []))
+
+
+@app.get("/setup", response_class=HTMLResponse)
+def setup_page(request: Request):
+    if settings_store.is_configured():
+        return RedirectResponse("/settings", status_code=303)
+    settings_store.ensure_setup_code()
+    return _setup_page(request)
+
+
+@app.post("/setup", response_class=HTMLResponse)
+async def setup_submit(request: Request):
+    if settings_store.is_configured():
+        return RedirectResponse("/settings", status_code=303)
+    form = await request.form()
+    check_csrf(request, form.get("csrf"))
+    ip = request.client.host if request.client else "?"
+    if _setup_blocked(ip):
+        raise HTTPException(429, "Слишком много неверных попыток. Подождите 10 минут.")
+    if not settings_store.check_setup_code(form.get("code")):
+        _setup_attempts.setdefault(ip, []).append(time.monotonic())
+        logger.warning("Мастер настройки: неверный код (%s)", ip)
+        return _setup_page(request, 403, ["Неверный код настройки. Узнать его на сервере: "
+                                          "docker compose exec web python -m setup_code"], dict(form))
+
+    changes, errors = settings_form.collect(form, settings_form.SETUP_KEYS)
+    errors += settings_form.fiscal_errors(changes)
+    if not changes.get("TOKEN") and not config.TOKEN:
+        errors.append("Укажите токен бота.")
+    stores = []
+    if not (get_stores(active_only=False) or []):
+        stores = list(dict.fromkeys(n.strip() for n in (form.get("stores") or "").splitlines() if n.strip()))
+        if not stores:
+            errors.append("Укажите хотя бы один магазин.")
+        elif any(len(n) < 2 or len(n) > 100 for n in stores):
+            errors.append("Название магазина — от 2 до 100 символов.")
+    admin_phone = normalize_phone(form.get("admin_phone"))
+    admin_name = (form.get("admin_name") or "").strip()[:255]
+    if form.get("admin_phone") or not _has_admin():
+        if not admin_phone:
+            errors.append("Телефон администратора: казахстанский номер, например +77011234567.")
+        if len(admin_name) < 2:
+            errors.append("Укажите имя администратора.")
+    bot_name = None
+    if not errors:
+        token_error, bot_name = await run_in_threadpool(settings_form.check_token_change, changes)
+        if token_error:
+            errors.append(token_error)
+    if errors:
+        return _setup_page(request, 400, errors, dict(form))
+
+    ok, result = settings_store.save(changes)
+    for name in stores:
+        if ok:
+            ok, result = create_store(name)
+    if ok and admin_phone:
+        ok, result = ensure_admin(admin_phone, admin_name)
+    if ok:
+        ok, result = settings_store.finish_setup()
+    if not ok:
+        return _setup_page(request, 500, [str(result)], dict(form))
+    logger.info("Первоначальная настройка завершена (%s).", ip)
+    return templates.TemplateResponse(request, "setup_done.html", {
+        "user": None, "messages": [], "bot_name": bot_name, "admin_phone": admin_phone,
+        "web_url": config.WEB_URL})
+
+
+@app.get("/settings", response_class=HTMLResponse)
+def settings_page(request: Request, user=Depends(admin_only)):
+    return render(request, "settings.html", user, groups=settings_form.build_groups(),
+                  changes=settings_store.recent_changes() or [], titles={s.key: s.title for s in config.SETTINGS})
+
+
+@app.post("/settings", response_class=HTMLResponse)
+async def settings_submit(request: Request, user=Depends(admin_only)):
+    form = await request.form()
+    check_csrf(request, form.get("csrf"))
+    keys = [s.key for s in config.SETTINGS if not s.hidden]
+    changes, errors = settings_form.collect(form, keys)
+    errors += settings_form.fiscal_errors(changes)
+    if "TOKEN" in changes and changes["TOKEN"] is None:
+        errors.append("Токен бота нельзя удалить — только заменить.")
+    if not errors:
+        token_error, _ = await run_in_threadpool(settings_form.check_token_change, changes)
+        if token_error:
+            errors.append(token_error)
+    if errors:
+        for e in errors:
+            flash(request, e, "error")
+        return RedirectResponse("/settings", status_code=303)
+    ok, result = settings_store.save(changes, user['id'])
+    if not ok:
+        flash(request, result, "error")
+    elif not result:
+        flash(request, "Изменений нет.")
+    else:
+        restart = [k for k in result if config.BY_KEY[k].restart]
+        flash(request, "Сохранено: " + ", ".join(config.BY_KEY[k].title for k in result) + "."
+              + (" Бот перезапустится в течение минуты." if restart else ""))
+    return RedirectResponse("/settings", status_code=303)
+
+
+@app.get("/caddy/ask")
+def caddy_ask(domain: str = ""):
+    """Caddy спрашивает, можно ли выпустить сертификат для домена (on-demand TLS).
+    До настройки — для любого домена (иначе /setup не открыть по HTTPS), после — только для адреса из настроек."""
+    domain = domain.strip().lower().rstrip(".")
+    if not re.match(r"^(?=.{1,253}$)([a-z0-9-]{1,63}\.)+[a-z]{2,63}$", domain):
+        return Response(status_code=404)
+    if config.WEB_URL:
+        allowed = re.sub(r"^https?://", "", config.WEB_URL).split("/")[0].split(":")[0].lower()
+        return Response(status_code=200 if domain == allowed else 404)
+    return Response(status_code=200 if not settings_store.is_configured() else 404)

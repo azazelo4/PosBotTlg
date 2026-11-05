@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% from "_fields.html" import groups_form %}
+{% block title %}Настройки{% endblock %}
+{% block content %}
+<h2>Настройки</h2>
+<p class="muted">Секреты хранятся в базе зашифрованными и здесь не показываются. Смена токена, часового пояса
+  или времени уведомлений перезапускает бота автоматически (до минуты), остальное применяется сразу.</p>
+<form method="post" autocomplete="off" style="max-width:46rem">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  {{ groups_form(groups, open_all=False, allow_clear=True) }}
+  <button type="submit">Сохранить</button>
+</form>
+{% if changes %}
+<h3>Последние изменения</h3>
+<div class="table-wrap"><table class="striped">
+  <thead><tr><th>Когда</th><th>Настройка</th><th>Кто</th></tr></thead>
+  <tbody>
+  {% for c in changes %}
+    <tr><td>{{ c.changed_at | ddmmhhmm }}</td>
+        <td>{{ titles.get(c.setting_key, c.setting_key) }}{% if c.action == 'clear' %} <span class="muted">(удалено)</span>{% endif %}</td>
+        <td>{{ c.name or '—' }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endif %}
+{% endblock %}

@@ -17,7 +17,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
-from config import LABEL_WIDTH_MM, LABEL_HEIGHT_MM, LABEL_TITLE
+import config
 from utils.common import money
 
 logger = logging.getLogger(__name__)
@@ -105,7 +105,7 @@ def _draw_label(c, product, w, h):
 
     # Текст слева
     y = h - pad
-    title = LABEL_TITLE or product.get('Store') or ''
+    title = config.LABEL_TITLE or product.get('Store') or ''
     if title:
         t, size = _fit(title, FONT, 5 * k, text_w, 3.5)
         y -= size
@@ -146,7 +146,7 @@ def _draw_label_portrait(c, product, w, h):
     pad = 1.2 * mm
     text_w = w - 2 * pad
     y = h - pad
-    title = LABEL_TITLE or product.get('Store') or ''
+    title = config.LABEL_TITLE or product.get('Store') or ''
     if title:
         t, size = _fit(title, FONT, 4.2 * k, text_w, 3.5)
         y -= size
@@ -179,8 +179,8 @@ def _draw_label_portrait(c, product, w, h):
 def generate_labels_pdf(products, copies="one", width_mm=None, height_mm=None):
     """copies: 'one' — одна этикетка на артикул, 'stock' — по количеству на складе."""
     _register_fonts()
-    w = (width_mm or LABEL_WIDTH_MM) * mm
-    h = (height_mm or LABEL_HEIGHT_MM) * mm
+    w = (width_mm or config.LABEL_WIDTH_MM) * mm
+    h = (height_mm or config.LABEL_HEIGHT_MM) * mm
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=(w, h))
     c.setTitle("Ценники")

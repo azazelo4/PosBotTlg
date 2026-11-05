@@ -14,7 +14,7 @@ from decimal import Decimal
 
 import openpyxl
 
-from config import IMPORT_MIN_PRICE_PERCENT
+import config
 from database import get_products_by_articles, import_products, get_stores
 from schema import PRODUCT_TYPES
 from utils.common import parse_money, parse_float, parse_date
@@ -269,7 +269,7 @@ def build_plan(data: bytes, filename: str, default_store=None) -> ImportPlan:
             continue
         min_price = _money_value(row.get('min_price')) if has_min else None
         if min_price is None:
-            min_price = (price * Decimal(str(IMPORT_MIN_PRICE_PERCENT)) / 100).quantize(Decimal('1'))
+            min_price = (price * Decimal(str(config.IMPORT_MIN_PRICE_PERCENT)) / 100).quantize(Decimal('1'))
         min_price = min(min_price, price)
         weight = parse_float(row.get('weight')) if row.get('weight') not in (None, '') else None
         if weight is not None and (weight < 0 or weight > 10000):
@@ -309,7 +309,7 @@ def build_plan(data: bytes, filename: str, default_store=None) -> ImportPlan:
     if not has_qty:
         plan.warnings.append("В файле нет колонки остатка: новые товары получат остаток 0, у существующих он не изменится.")
     if not has_min:
-        plan.warnings.append(f"Нет колонки минимальной цены: минимальная = {IMPORT_MIN_PRICE_PERCENT:g}% от цены.")
+        plan.warnings.append(f"Нет колонки минимальной цены: минимальная = {config.IMPORT_MIN_PRICE_PERCENT:g}% от цены.")
     if plan.rows and not any(r['_weight_given'] for r in plan.rows):
         plan.warnings.append("В файле нет веса: у новых товаров вес будет 0, на ценнике он не печатается.")
     return plan

@@ -23,10 +23,14 @@ jobs:
       - name: Синтаксис Python
         run: python -m py_compile $(git ls-files '*.py')
 
-      - name: Валидация docker-compose
+      - name: Валидация docker-compose и Caddyfile
         run: |
           cp .env.example .env
           docker compose config -q
+          docker run --rm -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2 caddy validate --config /etc/caddy/Caddyfile
+
+      - name: Скрипт подготовки .env
+        run: bash -n deploy/bootstrap-env.sh
 
       - name: Сборка образа
         run: docker build -t pos-bot:ci .
@@ -90,58 +94,28 @@ jobs:
           # Только файлы из git: без .git, локального мусора и чужих .env
           git archive HEAD | tar -x -C "$DEPLOY_DIR"
 
-      - name: Сформировать .env из секретов
+      - name: Подготовить .env (пароли БД генерируются один раз)
+        # Секреты и переменные репозитория больше не обязательны: токен, магазины и остальное
+        # задаются в мастере /setup. Если они заданы (старые установки) — переносятся в .env.
         env:
-          TOKEN: ${{ secrets.TOKEN }}
-          MYSQL_USER: ${{ secrets.MYSQL_USER }}
-          MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
-          MYSQL_DATABASE: ${{ secrets.MYSQL_DATABASE }}
-          MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
-          ADMIN_PHONE: ${{ vars.ADMIN_PHONE }}
-          REPORT_CHAT_ID: ${{ vars.REPORT_CHAT_ID }}
-          TZ: ${{ vars.TZ || 'Asia/Almaty' }}
-          DAILY_REPORT_TIME: ${{ vars.DAILY_REPORT_TIME || '23:00' }}
-          LOW_STOCK_TIME: ${{ vars.LOW_STOCK_TIME || '09:00' }}
-          LOW_STOCK_THRESHOLD: ${{ vars.LOW_STOCK_THRESHOLD || '5' }}
-          WEB_DOMAIN: ${{ vars.WEB_DOMAIN }}
-          WEB_SECRET: ${{ secrets.WEB_SECRET }}
-          LABEL_WIDTH_MM: ${{ vars.LABEL_WIDTH_MM || '30' }}
-          LABEL_HEIGHT_MM: ${{ vars.LABEL_HEIGHT_MM || '20' }}
-          LABEL_TITLE: ${{ vars.LABEL_TITLE }}
-          IMPORT_MIN_PRICE_PERCENT: ${{ vars.IMPORT_MIN_PRICE_PERCENT || '100' }}
-        run: |
-          for v in TOKEN MYSQL_USER MYSQL_PASSWORD MYSQL_DATABASE MYSQL_ROOT_PASSWORD; do
-            if [ -z "${!v}" ]; then echo "::error::Не задан секрет $v"; exit 1; fi
-          done
-          umask 077
-          {
-            echo "TOKEN=$TOKEN"
-            echo "DB_HOST=db"
-            echo "DB_USER=$MYSQL_USER"
-            echo "DB_PASS=$MYSQL_PASSWORD"
-            echo "DB_NAME=$MYSQL_DATABASE"
-            echo "MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD"
-            echo "MYSQL_DATABASE=$MYSQL_DATABASE"
-            echo "MYSQL_USER=$MYSQL_USER"
-            echo "MYSQL_PASSWORD=$MYSQL_PASSWORD"
-            echo "ADMIN_PHONE=$ADMIN_PHONE"
-            echo "REPORT_CHAT_ID=$REPORT_CHAT_ID"
-            echo "TZ=$TZ"
-            echo "DAILY_REPORT_TIME=$DAILY_REPORT_TIME"
-            echo "LOW_STOCK_TIME=$LOW_STOCK_TIME"
-            echo "LOW_STOCK_THRESHOLD=$LOW_STOCK_THRESHOLD"
-            echo "LABEL_WIDTH_MM=$LABEL_WIDTH_MM"
-            echo "LABEL_HEIGHT_MM=$LABEL_HEIGHT_MM"
-            echo "LABEL_TITLE=$LABEL_TITLE"
-            echo "IMPORT_MIN_PRICE_PERCENT=$IMPORT_MIN_PRICE_PERCENT"
-            if [ -n "$WEB_DOMAIN" ]; then
-              # Веб-админка, Mini App и HTTPS-прокси (сервисы web и caddy в docker-compose.yml)
-              echo "COMPOSE_PROFILES=web"
-              echo "WEB_DOMAIN=$WEB_DOMAIN"
-              echo "WEB_URL=https://$WEB_DOMAIN"
-              echo "WEB_SECRET=$WEB_SECRET"
-            fi
-          } > "$DEPLOY_DIR/.env"
+          OVERRIDE_TOKEN: ${{ secrets.TOKEN }}
+          OVERRIDE_MYSQL_USER: ${{ secrets.MYSQL_USER }}
+          OVERRIDE_MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
+          OVERRIDE_MYSQL_DATABASE: ${{ secrets.MYSQL_DATABASE }}
+          OVERRIDE_MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
+          OVERRIDE_WEB_SECRET: ${{ secrets.WEB_SECRET }}
+          OVERRIDE_ADMIN_PHONE: ${{ vars.ADMIN_PHONE }}
+          OVERRIDE_REPORT_CHAT_ID: ${{ vars.REPORT_CHAT_ID }}
+          OVERRIDE_TZ: ${{ vars.TZ }}
+          OVERRIDE_DAILY_REPORT_TIME: ${{ vars.DAILY_REPORT_TIME }}
+          OVERRIDE_LOW_STOCK_TIME: ${{ vars.LOW_STOCK_TIME }}
+          OVERRIDE_LOW_STOCK_THRESHOLD: ${{ vars.LOW_STOCK_THRESHOLD }}
+          OVERRIDE_WEB_DOMAIN: ${{ vars.WEB_DOMAIN }}
+          OVERRIDE_LABEL_WIDTH_MM: ${{ vars.LABEL_WIDTH_MM }}
+          OVERRIDE_LABEL_HEIGHT_MM: ${{ vars.LABEL_HEIGHT_MM }}
+          OVERRIDE_LABEL_TITLE: ${{ vars.LABEL_TITLE }}
+          OVERRIDE_IMPORT_MIN_PRICE_PERCENT: ${{ vars.IMPORT_MIN_PRICE_PERCENT }}
+        run: bash "$DEPLOY_DIR/deploy/bootstrap-env.sh" "$DEPLOY_DIR/.env"
 
       - name: Перезапустить контейнеры
         working-directory: ${{ env.DEPLOY_DIR }}
@@ -149,30 +123,45 @@ jobs:
           docker compose up -d --build --remove-orphans
           docker image prune -f
 
-      - name: Проверить, что бот запустился
+      - name: Проверить, что всё запустилось
         working-directory: ${{ env.DEPLOY_DIR }}
         run: |
           sleep 15
           docker compose ps
-          status=$(docker inspect -f '{{.State.Status}}' PosBotTest)
-          if [ "$status" != "running" ]; then
-            docker compose logs --tail=100 bot
-            echo "::error::Контейнер бота в состоянии $status"
+          for svc in PosBotTest PosBotWeb; do
+            status=$(docker inspect -f '{{.State.Status}}' "$svc")
+            if [ "$status" != "running" ]; then
+              docker logs --tail=100 "$svc"
+              echo "::error::Контейнер $svc в состоянии $status"
+              exit 1
+            fi
+          done
+          health=""
+          for i in $(seq 1 20); do
+            if health=$(docker compose exec -T web python -c "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8000/health').read().decode())"); then
+              break
+            fi
+            health=""
+            sleep 3
+          done
+          if [ -z "$health" ]; then
+            docker compose logs --tail=100 web
+            echo "::error::Веб-админка не отвечает"
             exit 1
           fi
           docker compose logs --tail=30 bot
-          if grep -q '^COMPOSE_PROFILES=web' .env; then
-            web_ok=""
-            for i in $(seq 1 10); do
-              if docker compose exec -T web python -c "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/health')"; then
-                web_ok=1; break
-              fi
-              sleep 3
-            done
-            if [ -z "$web_ok" ]; then
-              docker compose logs --tail=100 web
-              echo "::error::Веб-админка не отвечает"
-              exit 1
-            fi
-            echo "Веб-админка: https://$(grep -m1 '^WEB_DOMAIN=' .env | cut -d= -f2-)"
+          # Не настроено — это нормальное состояние после первого деплоя, а не ошибка
+          if echo "$health" | grep -q '"configured":false'; then
+            {
+              echo "### Требуется первоначальная настройка"
+              echo ""
+              echo "Откройте https://<ваш-домен>/setup (A-запись домена → IP сервера)"
+              echo "или через SSH-туннель: \`ssh -L 8000:127.0.0.1:8000 <сервер>\` → http://127.0.0.1:8000/setup"
+              echo ""
+              echo "Код настройки покажет команда на сервере:"
+              echo "\`docker compose -f $DEPLOY_DIR/docker-compose.yml exec web python -m setup_code\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice::Бот ждёт первоначальной настройки: откройте /setup (подробности — в Summary этого запуска)."
+          else
+            echo "Бот настроен и работает."
           fi
