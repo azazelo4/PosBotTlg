@@ -1,0 +1,66 @@
+# Стек для установки из готового образа (deploy/install.sh). Копируется в каталог установки
+# как docker-compose.yml. Образ и версия — из .env: POSBOT_IMAGE, POSBOT_VERSION.
+# Для разработки и сборки из исходников — docker-compose.yml в корне репозитория.
+x-app: &app
+  image: ${POSBOT_IMAGE:-ghcr.io/azazelo4/posbottlg}:${POSBOT_VERSION:-latest}
+  restart: always
+  depends_on:
+    db:
+      condition: service_healthy
+  env_file:
+    - .env
+  environment:
+    TZ: ${TZ:-Asia/Almaty}
+  logging: &logging
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+
+services:
+  bot:
+    <<: *app
+
+  # Веб-админка, мастер /setup и Mini App. 8000 — только localhost (SSH-туннель)
+  web:
+    <<: *app
+    command: ["uvicorn", "web.app:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  caddy:
+    image: caddy:2
+    restart: always
+    depends_on:
+      - web
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    logging: *logging
+
+  db:
+    image: mysql:8.4
+    restart: always
+    env_file:
+      - .env
+    environment:
+      TZ: ${TZ:-Asia/Almaty}
+    volumes:
+      - db_data:/var/lib/mysql
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_0900_ai_ci
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$$MYSQL_USER -p$$MYSQL_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    logging: *logging
+
+volumes:
+  db_data:
+  caddy_data:
+  caddy_config:

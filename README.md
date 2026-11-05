@@ -123,6 +123,7 @@ docker compose exec web python -m setup_code   # код для мастера н
 Push в ветку `POS-Bot` → GitHub Actions прогоняет проверки и тесты → self-hosted runner на сервере
 пересобирает и перезапускает контейнеры.
 
+- [`docs/INSTALL.md`](docs/INSTALL.md) — **установка для нового ИП** одной командой из готового образа, выпуск версий и ключи доступа для клиентов.
 - [`DEPLOY.md`](DEPLOY.md) — установка runner, первый деплой, мастер настройки.
 - [`docs/DEPLOY_CLOUD.md`](docs/DEPLOY_CLOUD.md) — пошагово для **VPS is\*hosting (Казахстан)**: сервер, runner, бэкапы БД, перенос данных, обслуживание.
 - [`deploy/setup-server.sh`](deploy/setup-server.sh) — подготовка чистого Ubuntu-VPS одной командой (Docker, swap, firewall, бэкапы).
@@ -197,7 +198,8 @@ utils/labels.py          генерация ценников PDF с QR
 utils/catalog_import.py  разбор Excel/CSV и план импорта
 utils/stock_report.py    Excel остатков
 tests/                   сценарные тесты на реальной БД
-deploy/                  подготовка сервера, bootstrap-env.sh (.env), Caddyfile, бэкап
+deploy/                  install.sh и posbot (установка и обслуживание у клиента), compose.prod.yml,
+                         подготовка сервера, bootstrap-env.sh (.env), Caddyfile, бэкап
 docs/                    инструкции по деплою
 ```
 

@@ -6,11 +6,16 @@
 #   часовой пояс, обновления и автообновления безопасности, swap, Docker,
 #   пользователь gh-runner для GitHub runner, каталоги, ежедневный бэкап БД,
 #   firewall (SSH, HTTP/HTTPS), fail2ban, вход по SSH только по ключу (если ключ уже добавлен).
+#
+# Переменные: TZ_NAME, SWAP_SIZE, APP_DIR (каталог бота, по умолчанию /opt/pos-bot),
+# POSBOT_RUNNER=0 — без пользователя для GitHub runner (так вызывает deploy/install.sh).
 set -euo pipefail
 
 TZ_NAME="${TZ_NAME:-Asia/Almaty}"
 SWAP_SIZE="${SWAP_SIZE:-2G}"
 RUNNER_USER=gh-runner
+APP_DIR="${APP_DIR:-/opt/pos-bot}"
+POSBOT_RUNNER="${POSBOT_RUNNER:-1}"
 
 log() { echo -e "\n==> $*"; }
 
@@ -59,17 +64,20 @@ if [ ! -f /etc/docker/daemon.json ]; then
   systemctl restart docker
 fi
 
-log "Пользователь $RUNNER_USER и каталоги"
-id "$RUNNER_USER" >/dev/null 2>&1 || useradd -m -s /bin/bash "$RUNNER_USER"
-usermod -aG docker "$RUNNER_USER"
-mkdir -p /opt/pos-bot /opt/pos-bot-backups "/home/$RUNNER_USER/actions-runner"
-chown "$RUNNER_USER:$RUNNER_USER" /opt/pos-bot "/home/$RUNNER_USER/actions-runner"
+mkdir -p "$APP_DIR" /opt/pos-bot-backups
 chmod 700 /opt/pos-bot-backups
+if [ "$POSBOT_RUNNER" = "1" ]; then
+  log "Пользователь $RUNNER_USER для GitHub runner"
+  id "$RUNNER_USER" >/dev/null 2>&1 || useradd -m -s /bin/bash "$RUNNER_USER"
+  usermod -aG docker "$RUNNER_USER"
+  mkdir -p "/home/$RUNNER_USER/actions-runner"
+  chown "$RUNNER_USER:$RUNNER_USER" "$APP_DIR" "/home/$RUNNER_USER/actions-runner"
+fi
 
 log "Ежедневный бэкап БД в 03:30"
-cat > /etc/cron.d/pos-bot-backup <<'EOF'
-# Скрипт появляется в /opt/pos-bot после первого деплоя
-30 3 * * * root [ -x /opt/pos-bot/deploy/backup.sh ] && /opt/pos-bot/deploy/backup.sh >> /var/log/pos-bot-backup.log 2>&1
+cat > /etc/cron.d/pos-bot-backup <<EOF
+# Скрипт появляется в $APP_DIR после первого деплоя/установки
+30 3 * * * root [ -x $APP_DIR/deploy/backup.sh ] && APP_DIR=$APP_DIR $APP_DIR/deploy/backup.sh >> /var/log/pos-bot-backup.log 2>&1
 EOF
 if [ ! -f /etc/pos-bot-backup.env ]; then
   install -m 600 /dev/null /etc/pos-bot-backup.env
@@ -114,6 +122,7 @@ else
 fi
 
 log "Готово"
+[ "$POSBOT_RUNNER" = "1" ] || exit 0
 cat <<EOF
 Дальше:
   1. Зарегистрировать GitHub runner от пользователя $RUNNER_USER (docs/DEPLOY_CLOUD.md, шаг 4).
