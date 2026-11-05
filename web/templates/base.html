@@ -43,7 +43,7 @@
       <li><a href="/labels">Ценники</a></li>
       <li><a href="/import">Импорт</a></li>
       <li><a href="/reports">Отчёты</a></li>
-      {% if user.role == 'admin' %}<li><a href="/staff">Персонал</a></li>{% endif %}
+      {% if user.role == 'admin' %}<li><a href="/staff">Персонал</a></li><li><a href="/stores">Магазины</a></li>{% endif %}
       <li>
         <form method="post" action="/logout" class="inline">
           <button class="secondary outline" style="padding:.3rem .7rem;margin:0">Выйти</button>

@@ -15,8 +15,8 @@ from decimal import Decimal
 import openpyxl
 
 from config import IMPORT_MIN_PRICE_PERCENT
-from database import get_products_by_articles, import_products
-from schema import STORES, PRODUCT_TYPES
+from database import get_products_by_articles, import_products, get_stores
+from schema import PRODUCT_TYPES
 from utils.common import parse_money, parse_float, parse_date
 
 MAX_ROWS = 20000
@@ -205,6 +205,7 @@ class ImportPlan:
 
 
 def build_plan(data: bytes, filename: str, default_store=None) -> ImportPlan:
+    """default_store — id магазина для строк без колонки «Магазин»."""
     headers, rows = read_table(data, filename)
     mapping = map_headers(headers)
     plan = ImportPlan(columns=list(dict.fromkeys(mapping.values())),
@@ -215,6 +216,9 @@ def build_plan(data: bytes, filename: str, default_store=None) -> ImportPlan:
     has_min = 'min_price' in plan.columns
     if 'Store' not in plan.columns and default_store is None:
         raise ValueError("В файле нет колонки «Магазин». Начните импорт заново и выберите магазин для всех товаров.")
+    stores = get_stores() or []
+    stores_by_norm = {_norm(st['name']): st['id'] for st in stores}
+    store_names = {st['id']: st['name'] for st in stores}
     # Существующие товары: недостающие в файле тип/металл/магазин берутся из базы
     file_articles = list(dict.fromkeys(_text(r[i], 64) for r in rows for i, k in mapping.items()
                                        if k == 'article_number' and i < len(r) and _text(r[i], 64)))
@@ -254,10 +258,14 @@ def build_plan(data: bytes, filename: str, default_store=None) -> ImportPlan:
         if not metal:
             plan.errors.append((line, f"{article}: металл не распознан"))
             continue
-        store = _text(row.get('Store'), 64) or (current['Store'] if current else default_store)
-        store = next((s for s in STORES if _norm(s) == _norm(store)), None)
+        store_text = _text(row.get('Store'), 100)
+        if store_text:
+            store = stores_by_norm.get(_norm(store_text))
+        else:
+            store = current['store_id'] if current else default_store
         if not store:
-            plan.errors.append((line, f"{article}: магазин «{row.get('Store')}» не найден (есть: {', '.join(STORES)})"))
+            plan.errors.append((line, f"{article}: магазин «{row.get('Store')}» не найден "
+                                      f"(есть: {', '.join(st['name'] for st in stores)})"))
             continue
         min_price = _money_value(row.get('min_price')) if has_min else None
         if min_price is None:
@@ -287,7 +295,7 @@ def build_plan(data: bytes, filename: str, default_store=None) -> ImportPlan:
             'size': _text(row.get('size'), 32), 'inserts': _text(row.get('inserts'), 255),
             'price': price, 'min_price': min_price,
             'price_per_gram': _money_value(row.get('price_per_gram')) or Decimal(0),
-            'quantity': quantity, 'Store': store,
+            'quantity': quantity, 'store_id': store, '_store_name': store_names.get(store),
             'manufacturer': _text(row.get('manufacturer'), 255), 'commentaries': _text(row.get('commentaries'), 500),
             'arrival_date': arrival,
             '_weight_given': weight is not None,
@@ -310,15 +318,19 @@ def build_plan(data: bytes, filename: str, default_store=None) -> ImportPlan:
 def apply_plan(plan: ImportPlan, update_existing=True):
     columns = set(plan.columns)
     # Для существующих товаров обновляем только то, что было в файле
-    update_keys = {'article_number'} | (columns - {'arrival_date'})
+    update_keys = {'article_number'} | (columns - {'arrival_date', 'Store'})
     if 'metal_type' in columns:
         update_keys.add('fineness')
+    if 'Store' in columns:
+        update_keys.add('store_id')
     rows = []
     for r in plan.rows:
         row = {k: v for k, v in r.items() if not k.startswith('_')}
         if r['_exists']:
             # и только заполненные ячейки: пустая ячейка не затирает значение в базе
             given = set(r['_given']) | {'article_number'}
+            if 'Store' in given:
+                given.add('store_id')
             if 'metal_type' in given:
                 given.add('fineness')
             if 'price' in given:

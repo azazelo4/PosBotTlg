@@ -134,7 +134,7 @@ def get_user_by_chat_id(cursor, chat_id):
 
 @with_connection
 def get_user_by_id(cursor, user_id):
-    cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+    cursor.execute("SELECT u.*, st.name AS store FROM users u LEFT JOIN stores st ON st.id = u.store_id WHERE u.id = %s", (user_id,))
     return cursor.fetchone()
 
 
@@ -148,7 +148,8 @@ def set_user_chat_id(cursor, user_id, chat_id):
 
 @with_connection
 def get_all_users(cursor):
-    cursor.execute("SELECT id, phone_number, name, surename, role, chat_id FROM users WHERE is_active = 1 ORDER BY role, name")
+    cursor.execute("SELECT u.id, u.phone_number, u.name, u.surename, u.role, u.chat_id, u.store_id, st.name AS store "
+                   "FROM users u LEFT JOIN stores st ON st.id = u.store_id WHERE u.is_active = 1 ORDER BY u.role, u.name")
     return cursor.fetchall()
 
 
@@ -175,7 +176,7 @@ def add_user_to_db(cursor, phone_number, role, name, store_id=None):
                        (role, name, phone, store_id, existing['id']))
         return True, f"Пользователь {name} снова активирован ({role})."
     cursor.execute("INSERT INTO users (phone_number, role, name, store_id, is_active) VALUES (%s, %s, %s, %s, 1)",
-                   (phone, role, name, store_id if store_id is not None else 1))
+                   (phone, role, name, store_id))
     return True, f"Пользователь {name} ({role}) добавлен."
 
 
@@ -190,7 +191,7 @@ def ensure_admin(cursor, phone_number, name):
     cursor.execute(f"SELECT id, role, is_active FROM users WHERE phone_number IN ({placeholders}) FOR UPDATE", variants)
     user = cursor.fetchone()
     if user is None:
-        cursor.execute("INSERT INTO users (phone_number, role, name, store_id, is_active) VALUES (%s, 'admin', %s, 1, 1)", (phone, name))
+        cursor.execute("INSERT INTO users (phone_number, role, name, is_active) VALUES (%s, 'admin', %s, 1)", (phone, name))
         return True, "created"
     if user['role'] != 'admin' or not user['is_active']:
         cursor.execute("UPDATE users SET role = 'admin', is_active = 1 WHERE id = %s", (user['id'],))
@@ -236,11 +237,71 @@ def update_user_phone(cursor, user_id, new_phone_number):
     return True, f"Телефон изменён на {phone}."
 
 
+@with_transaction
+def set_user_store(cursor, user_id, store_id):
+    if store_id is not None:
+        cursor.execute("SELECT id FROM stores WHERE id = %s AND is_active = 1", (store_id,))
+        if not cursor.fetchone():
+            raise BusinessError("Магазин не найден.")
+    cursor.execute("UPDATE users SET store_id = %s WHERE id = %s AND is_active = 1", (store_id, user_id))
+    return True, "Магазин сотрудника изменён."
+
+
+# ---------------------------------------------------------------- магазины
+
+@with_connection
+def get_stores(cursor, active_only=True):
+    cursor.execute("SELECT * FROM stores" + (" WHERE is_active = 1" if active_only else "") + " ORDER BY sort_order, name")
+    return cursor.fetchall()
+
+
+@with_connection
+def get_store_counts(cursor):
+    """store_id -> число товаров (для админки)"""
+    cursor.execute("SELECT store_id, COUNT(*) AS c FROM products GROUP BY store_id")
+    return {r['store_id']: r['c'] for r in cursor.fetchall()}
+
+
+@with_transaction
+def create_store(cursor, name, address=None):
+    name = (name or '').strip()[:100]
+    if len(name) < 2:
+        raise BusinessError("Название магазина — не короче 2 символов.")
+    cursor.execute("SELECT id FROM stores WHERE name = %s", (name,))
+    if cursor.fetchone():
+        raise BusinessError(f"Магазин «{name}» уже есть.")
+    cursor.execute("SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM stores")
+    cursor.execute("INSERT INTO stores (name, address, sort_order) VALUES (%s, %s, %s)",
+                   (name, (address or '').strip()[:255] or None, cursor.fetchone()['n']))
+    return True, f"Магазин «{name}» добавлен."
+
+
+@with_transaction
+def update_store(cursor, store_id, name, address=None, is_active=True):
+    name = (name or '').strip()[:100]
+    if len(name) < 2:
+        raise BusinessError("Название магазина — не короче 2 символов.")
+    cursor.execute("SELECT id FROM stores WHERE name = %s AND id != %s", (name, store_id))
+    if cursor.fetchone():
+        raise BusinessError(f"Магазин «{name}» уже есть.")
+    if not is_active:
+        cursor.execute("SELECT COUNT(*) AS c FROM stores WHERE is_active = 1 AND id != %s", (store_id,))
+        if cursor.fetchone()['c'] == 0:
+            raise BusinessError("Нельзя отключить последний активный магазин.")
+    cursor.execute("UPDATE stores SET name = %s, address = %s, is_active = %s WHERE id = %s",
+                   (name, (address or '').strip()[:255] or None, 1 if is_active else 0, store_id))
+    if cursor.rowcount == 0:
+        cursor.execute("SELECT id FROM stores WHERE id = %s", (store_id,))
+        if not cursor.fetchone():
+            raise BusinessError("Магазин не найден.")
+    return True, f"Магазин «{name}» сохранён."
+
+
 # ---------------------------------------------------------------- товары
 
 @with_connection
 def get_product_by_article(cursor, article_number):
-    cursor.execute("SELECT * FROM products WHERE article_number = %s ORDER BY id LIMIT 1", (article_number,))
+    cursor.execute("SELECT p.*, st.name AS Store FROM products p LEFT JOIN stores st ON st.id = p.store_id WHERE p.article_number = %s ORDER BY p.id LIMIT 1", (article_number,))
     return cursor.fetchone()
 
 
@@ -261,7 +322,7 @@ def update_product_quantity(cursor, product_article, quantity_change):
     return True, f"Остаток товара {product_article} изменён на {quantity_change:+d} шт."
 
 
-PRODUCT_FIELDS = ('article_number', 'Store', 'metal_type', 'product_type', 'model', 'size', 'fineness', 'inserts',
+PRODUCT_FIELDS = ('article_number', 'store_id', 'metal_type', 'product_type', 'model', 'size', 'fineness', 'inserts',
                   'weight', 'price_per_gram', 'price', 'min_price', 'arrival_date', 'quantity', 'manufacturer',
                   'commentaries', 'track_stock')
 
@@ -283,11 +344,11 @@ def add_product_to_db(cursor, product_data: dict):
 @with_connection
 def get_stock_report_data(cursor):
     cursor.execute("""
-        SELECT p.article_number, p.product_type, p.model, p.metal_type, p.Store AS store_name, p.size,
+        SELECT p.article_number, p.product_type, p.model, p.metal_type, st.name AS store_name, p.store_id, p.size,
                p.fineness, p.inserts,
                p.weight, p.quantity, p.price, p.min_price, p.manufacturer, p.arrival_date, p.commentaries
-        FROM products p
-        ORDER BY p.Store, p.product_type, p.model, p.article_number
+        FROM products p LEFT JOIN stores st ON st.id = p.store_id
+        ORDER BY st.sort_order, st.name, p.product_type, p.model, p.article_number
     """)
     return cursor.fetchall()
 
@@ -295,9 +356,9 @@ def get_stock_report_data(cursor):
 @with_connection
 def get_low_stock_products(cursor, threshold):
     cursor.execute("""
-        SELECT article_number, model, product_type, quantity, Store
-        FROM products WHERE quantity <= %s AND track_stock = 1
-        ORDER BY Store, quantity, model
+        SELECT p.article_number, p.model, p.product_type, p.quantity, st.name AS Store
+        FROM products p LEFT JOIN stores st ON st.id = p.store_id WHERE p.quantity <= %s AND p.track_stock = 1
+        ORDER BY st.sort_order, p.quantity, p.model
     """, (threshold,))
     return cursor.fetchall()
 
@@ -327,7 +388,7 @@ def search_products(cursor, query=None, store=None, in_stock=None, limit=50, off
         where.append("(p.article_number LIKE %s OR p.model LIKE %s)")
         params += [f"%{query}%", f"%{query}%"]
     if store:
-        where.append("p.Store = %s")
+        where.append("p.store_id = %s")
         params.append(store)
     if in_stock is True:
         where.append("p.quantity > 0")
@@ -336,14 +397,14 @@ def search_products(cursor, query=None, store=None, in_stock=None, limit=50, off
     clause = ("WHERE " + " AND ".join(where)) if where else ""
     cursor.execute(f"SELECT COUNT(*) AS c FROM products p {clause}", params)
     total = cursor.fetchone()['c']
-    cursor.execute(f"SELECT p.* FROM products p {clause} ORDER BY p.arrival_date DESC, p.id DESC LIMIT %s OFFSET %s",
+    cursor.execute(f"SELECT p.*, st.name AS Store FROM products p LEFT JOIN stores st ON st.id = p.store_id {clause} ORDER BY p.arrival_date DESC, p.id DESC LIMIT %s OFFSET %s",
                    params + [int(limit), int(offset)])
     return cursor.fetchall(), total
 
 
 @with_connection
 def get_product_by_id(cursor, product_id):
-    cursor.execute("SELECT * FROM products WHERE id = %s", (product_id,))
+    cursor.execute("SELECT p.*, st.name AS Store FROM products p LEFT JOIN stores st ON st.id = p.store_id WHERE p.id = %s", (product_id,))
     return cursor.fetchone()
 
 
@@ -352,7 +413,7 @@ def get_products_by_articles(cursor, articles):
     if not articles:
         return []
     placeholders = ",".join(["%s"] * len(articles))
-    cursor.execute(f"SELECT * FROM products WHERE article_number IN ({placeholders})", list(articles))
+    cursor.execute(f"SELECT p.*, st.name AS Store FROM products p LEFT JOIN stores st ON st.id = p.store_id WHERE p.article_number IN ({placeholders})", list(articles))
     rows = {r['article_number']: r for r in cursor.fetchall()}
     return [rows[a] for a in articles if a in rows]
 
@@ -361,15 +422,15 @@ def get_products_by_articles(cursor, articles):
 def get_products_for_labels(cursor, store=None, arrived_from=None, only_in_stock=True):
     where, params = [], []
     if store:
-        where.append("Store = %s")
+        where.append("p.store_id = %s")
         params.append(store)
     if arrived_from:
-        where.append("arrival_date >= %s")
+        where.append("p.arrival_date >= %s")
         params.append(arrived_from)
     if only_in_stock:
-        where.append("quantity > 0")
+        where.append("p.quantity > 0")
     clause = ("WHERE " + " AND ".join(where)) if where else ""
-    cursor.execute(f"SELECT * FROM products {clause} ORDER BY Store, product_type, article_number", params)
+    cursor.execute(f"SELECT p.*, st.name AS Store FROM products p LEFT JOIN stores st ON st.id = p.store_id {clause} ORDER BY st.sort_order, p.product_type, p.article_number", params)
     return cursor.fetchall()
 
 
@@ -455,8 +516,9 @@ def consume_login_token(cursor, token_hash):
 @with_transaction
 def record_sale(cursor, product_id, product_article, user_id, sale_price, payment_type):
     _change_quantity(cursor, product_article, -1)
-    cursor.execute("INSERT INTO sales (product_id, user_id, sale_date, sold_price, payment_type) VALUES (%s, %s, %s, %s, %s)",
-                   (product_id, user_id, now(), sale_price, payment_type))
+    cursor.execute("INSERT INTO sales (product_id, user_id, sale_date, sold_price, payment_type, store_id) "
+                   "SELECT %s, %s, %s, %s, %s, store_id FROM products WHERE id = %s",
+                   (product_id, user_id, now(), sale_price, payment_type, product_id))
     return True, cursor.lastrowid
 
 
@@ -493,7 +555,7 @@ def get_sale_details_by_id(cursor, sale_id):
 
 @with_transaction
 def create_return_record(cursor, sale_id, product_article, return_price, payment_type, user_id, store_id):
-    cursor.execute("SELECT s.id, s.sold_price FROM sales s WHERE s.id = %s FOR UPDATE", (sale_id,))
+    cursor.execute("SELECT s.id, s.sold_price, s.store_id FROM sales s WHERE s.id = %s FOR UPDATE", (sale_id,))
     sale = cursor.fetchone()
     if not sale:
         raise BusinessError("Продажа не найдена.")
@@ -504,7 +566,7 @@ def create_return_record(cursor, sale_id, product_article, return_price, payment
         raise BusinessError("Сумма возврата должна быть больше нуля и не больше суммы продажи.")
     cursor.execute("""INSERT INTO returns (original_sale_id, product_article, return_price, payment_type, user_id, store_id, return_date)
                       VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-                   (sale_id, product_article, return_price, payment_type, user_id, store_id, now()))
+                   (sale_id, product_article, return_price, payment_type, user_id, sale['store_id'] or store_id, now()))
     return_id = cursor.lastrowid
     _change_quantity(cursor, product_article, 1)
     return True, return_id
@@ -513,6 +575,12 @@ def create_return_record(cursor, sale_id, product_article, return_price, payment
 @with_transaction
 def create_buyback_record(cursor, product_article, price, payment_type, user_id, store_id,
                           description=None, metal_type=None, weight=None):
+    if product_article:
+        # своё изделие — магазин, к которому оно относится
+        cursor.execute("SELECT store_id FROM products WHERE article_number = %s ORDER BY id LIMIT 1", (product_article,))
+        row = cursor.fetchone()
+        if row and row['store_id']:
+            store_id = row['store_id']
     cursor.execute("""INSERT INTO buybacks (product_article, description, metal_type, weight, buyback_price,
                                             payment_type, user_id, store_id, buyback_date)
                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
@@ -528,7 +596,9 @@ def create_buyback_record(cursor, product_article, price, payment_type, user_id,
 def create_trade_in_record(cursor, new_product_article, new_sale_price, old_item_value, price_difference,
                            payment_type_difference, user_id, store_id, old_product_article=None,
                            old_item_description=None, old_metal_type=None, old_weight=None):
-    _change_quantity(cursor, new_product_article, -1)
+    new_id = _change_quantity(cursor, new_product_article, -1)
+    cursor.execute("SELECT store_id FROM products WHERE id = %s", (new_id,))
+    store_id = cursor.fetchone()['store_id'] or store_id  # магазин нового товара
     if old_product_article:
         _change_quantity(cursor, old_product_article, 1)
     cursor.execute("""INSERT INTO trade_ins (old_product_article, old_item_description, old_metal_type, old_weight,
@@ -551,56 +621,64 @@ def create_cash_withdrawal_record(cursor, amount, comment, user_id, store_id):
 # ---------------------------------------------------------------- отчёты
 
 @with_connection
-def get_period_operations(cursor, start_dt, end_dt):
-    """Все операции за полуинтервал [start_dt, end_dt) для отчёта."""
-    params = (start_dt, end_dt)
+def get_period_operations(cursor, start_dt, end_dt, store_id=None):
+    """Все операции за полуинтервал [start_dt, end_dt) для отчёта; store_id — фильтр по магазину.
+
+    Магазин операции: продажа — магазин товара на момент продажи, возврат — магазин продажи,
+    trade-in — магазин нового товара, скупка и инкассация — магазин сотрудника (или выбранный).
+    """
     result = {}
-    cursor.execute("""
-        SELECT s.id, s.sale_date, s.sold_price, s.payment_type,
+
+    def run(sql, alias):
+        flt = f" AND {alias}.store_id = %s" if store_id else ""
+        cursor.execute(sql.replace("{STORE_FILTER}", flt), (start_dt, end_dt) + ((store_id,) if store_id else ()))
+        return cursor.fetchall()
+
+    result['sales'] = run("""
+        SELECT s.id, s.sale_date, s.sold_price, s.payment_type, s.store_id, st.name AS store,
                p.article_number, p.product_type, p.model, p.size, p.metal_type, p.weight,
-               p.price AS list_price, p.Store AS store, u.name AS user_name,
-               r.id AS return_id
+               p.price AS list_price, u.name AS user_name, r.id AS return_id
         FROM sales s
         JOIN products p ON s.product_id = p.id
+        LEFT JOIN stores st ON st.id = s.store_id
         LEFT JOIN users u ON s.user_id = u.id
         LEFT JOIN returns r ON r.original_sale_id = s.id
-        WHERE s.sale_date >= %s AND s.sale_date < %s
-        ORDER BY s.sale_date, s.id""", params)
-    result['sales'] = cursor.fetchall()
-    cursor.execute("""
+        WHERE s.sale_date >= %s AND s.sale_date < %s{STORE_FILTER}
+        ORDER BY s.sale_date, s.id""", "s")
+    result['returns'] = run("""
         SELECT r.id, r.return_date, r.original_sale_id, r.product_article, p.model, r.return_price,
-               r.payment_type, s.sale_date, s.sold_price, u.name AS user_name
+               r.payment_type, r.store_id, st.name AS store, s.sale_date, s.sold_price, u.name AS user_name
         FROM returns r
         LEFT JOIN sales s ON s.id = r.original_sale_id
         LEFT JOIN products p ON p.id = s.product_id
+        LEFT JOIN stores st ON st.id = r.store_id
         LEFT JOIN users u ON r.user_id = u.id
-        WHERE r.return_date >= %s AND r.return_date < %s
-        ORDER BY r.return_date, r.id""", params)
-    result['returns'] = cursor.fetchall()
-    cursor.execute("""
+        WHERE r.return_date >= %s AND r.return_date < %s{STORE_FILTER}
+        ORDER BY r.return_date, r.id""", "r")
+    result['buybacks'] = run("""
         SELECT b.id, b.buyback_date, b.product_article, b.description, b.metal_type, b.weight,
-               b.buyback_price, b.payment_type, u.name AS user_name
+               b.buyback_price, b.payment_type, b.store_id, st.name AS store, u.name AS user_name
         FROM buybacks b
+        LEFT JOIN stores st ON st.id = b.store_id
         LEFT JOIN users u ON b.user_id = u.id
-        WHERE b.buyback_date >= %s AND b.buyback_date < %s
-        ORDER BY b.buyback_date, b.id""", params)
-    result['buybacks'] = cursor.fetchall()
-    cursor.execute("""
+        WHERE b.buyback_date >= %s AND b.buyback_date < %s{STORE_FILTER}
+        ORDER BY b.buyback_date, b.id""", "b")
+    result['trade_ins'] = run("""
         SELECT t.id, t.trade_in_date, t.old_product_article, t.old_item_description, t.old_metal_type, t.old_weight,
                t.old_item_value, t.new_product_article,
                (SELECT p.model FROM products p WHERE p.article_number = t.new_product_article ORDER BY p.id LIMIT 1) AS new_model,
-               t.new_sale_price,
-               t.price_difference, t.payment_type_difference, u.name AS user_name
+               t.new_sale_price, t.price_difference, t.payment_type_difference, t.store_id, st.name AS store,
+               u.name AS user_name
         FROM trade_ins t
+        LEFT JOIN stores st ON st.id = t.store_id
         LEFT JOIN users u ON t.user_id = u.id
-        WHERE t.trade_in_date >= %s AND t.trade_in_date < %s
-        ORDER BY t.trade_in_date, t.id""", params)
-    result['trade_ins'] = cursor.fetchall()
-    cursor.execute("""
-        SELECT w.id, w.withdrawal_date, w.amount, w.comment, u.name AS user_name
+        WHERE t.trade_in_date >= %s AND t.trade_in_date < %s{STORE_FILTER}
+        ORDER BY t.trade_in_date, t.id""", "t")
+    result['withdrawals'] = run("""
+        SELECT w.id, w.withdrawal_date, w.amount, w.comment, w.store_id, st.name AS store, u.name AS user_name
         FROM cash_withdrawals w
+        LEFT JOIN stores st ON st.id = w.store_id
         LEFT JOIN users u ON w.user_id = u.id
-        WHERE w.withdrawal_date >= %s AND w.withdrawal_date < %s
-        ORDER BY w.withdrawal_date, w.id""", params)
-    result['withdrawals'] = cursor.fetchall()
+        WHERE w.withdrawal_date >= %s AND w.withdrawal_date < %s{STORE_FILTER}
+        ORDER BY w.withdrawal_date, w.id""", "w")
     return result

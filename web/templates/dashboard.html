@@ -34,6 +34,15 @@
 <div class="flash error">Не удалось получить данные из базы.</div>
 {% endif %}
 
+{% if breakdown %}
+<h4 style="margin-top:2rem">Сегодня по магазинам</h4>
+<div class="table-wrap"><table>
+  <thead><tr><th>Магазин</th><th class="num">Продажи</th><th class="num">За вычетом возвратов</th><th class="num">Наличные после инкассации</th></tr></thead>
+  <tbody>{% for name, sub in breakdown %}<tr><td>{{ name }}</td><td class="num">{{ sub.sales_count }} шт.</td>
+    <td class="num">{{ sub.net_sales | money }}</td><td class="num">{{ sub.cash_balance | money }}</td></tr>{% endfor %}</tbody>
+</table></div>
+{% endif %}
+
 <div class="grid" style="margin-top:1.5rem">
   <article>
     <header><strong>Склад</strong> <a href="/stock.xlsx" style="float:right">Excel</a></header>

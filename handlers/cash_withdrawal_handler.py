@@ -3,20 +3,33 @@ import logging
 
 from buttons import create_cancel_markup, create_confirmation_markup, create_skip_cancel_markup, BTN_CONFIRM
 from database import create_cash_withdrawal_record
-from handlers.common import CASH_ROLES, in_state, is_button, user_ids, cash_menu, register_simple_cancel, read_money, SKIP
+from handlers.common import needs_store_choice, ask_store, read_store, CASH_ROLES, in_state, is_button, user_ids, cash_menu, register_simple_cancel, read_money, SKIP
 from state import bot, user_state, get_op, start_op, end_op, cancel_current_operation
 from utils.common import money, h
 
 logger = logging.getLogger(__name__)
 
-AMOUNT, COMMENT, CONFIRM = "WITHDRAWAL_AMOUNT", "WITHDRAWAL_COMMENT", "WITHDRAWAL_CONFIRM"
+AMOUNT, COMMENT, CONFIRM, STORE = "WITHDRAWAL_AMOUNT", "WITHDRAWAL_COMMENT", "WITHDRAWAL_CONFIRM", "WITHDRAWAL_STORE"
 
 
 def start(message):
     chat_id = message.chat.id
     cancel_current_operation(chat_id, notify=False)
     start_op(chat_id, AMOUNT)
+    if needs_store_choice(chat_id):
+        ask_store(chat_id, STORE, "Инкассация. Из кассы какого магазина?")
+        return
+    _ask_amount(chat_id)
+
+
+def _ask_amount(chat_id):
+    user_state[chat_id] = AMOUNT
     bot.send_message(chat_id, "Инкассация. Введите сумму наличных, изымаемых из кассы:", reply_markup=create_cancel_markup())
+
+
+def on_store(message):
+    if read_store(message):
+        _ask_amount(message.chat.id)
 
 
 def on_amount(message):
@@ -59,6 +72,7 @@ def on_confirm(message):
 def register_withdrawal_handlers():
     register_simple_cancel("WITHDRAWAL_", "Инкассация")
     bot.register_message_handler(start, func=is_button("Инкассация", *CASH_ROLES))
+    bot.register_message_handler(on_store, func=in_state(STORE))
     bot.register_message_handler(on_amount, func=in_state(AMOUNT))
     bot.register_message_handler(on_comment, func=in_state(COMMENT))
     bot.register_message_handler(on_confirm, func=in_state(CONFIRM))

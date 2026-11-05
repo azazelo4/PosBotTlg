@@ -20,16 +20,16 @@ from starlette.middleware.sessions import SessionMiddleware
 
 import config
 from buttons import PAYMENT_TYPES, ROLE_TITLES
-from database import (init_pool, get_user_by_id, get_user_by_chat_id, search_products, get_product_by_id,
+from database import (get_stores, get_store_counts, create_store, update_store, set_user_store, init_pool, get_user_by_id, get_user_by_chat_id, search_products, get_product_by_id,
                       get_product_by_article, get_products_by_articles, get_products_for_labels, add_product_to_db,
                       update_product, get_stock_report_data, get_low_stock_products, get_period_operations,
                       record_sale, get_today_sales_by_user, get_all_users, add_user_to_db, change_user_role_function,
                       deactivate_user_in_db, update_user_phone)
-from schema import STORES, METAL_TYPES, PRODUCT_TYPES
+from schema import METAL_TYPES, PRODUCT_TYPES
 from utils.catalog_import import build_plan, apply_plan, FIELD_TITLES
 from utils.common import money, today, now, parse_money, parse_float, parse_int, parse_date, normalize_phone, day_bounds
 from utils.labels import generate_labels_pdf, details_line
-from utils.report_generator import build_summary, build_excel
+from utils.report_generator import build_summary, build_excel, store_breakdown
 from utils.stock_report import build_stock_excel, stock_totals
 from web.security import (session_secret, redeem_login_token, validate_init_data, new_csrf, ADMIN_ROLES, CASH_ROLES)
 
@@ -165,12 +165,15 @@ def health():
 def dashboard(request: Request, user=Depends(current_user)):
     d = today()
     periods = {}
+    breakdown = []
     for key, start in (("today", d), ("month", d.replace(day=1))):
         ops = get_period_operations(*day_bounds(start, d))
         periods[key] = build_summary(ops) if ops is not None else None
+        if key == "today" and ops is not None:
+            breakdown = store_breakdown(ops)
     low = get_low_stock_products(config.LOW_STOCK_THRESHOLD) or []
     items = get_stock_report_data() or []
-    return render(request, "dashboard.html", user, periods=periods, low_stock=low[:10], low_count=len(low),
+    return render(request, "dashboard.html", user, periods=periods, low_stock=low[:10], low_count=len(low), breakdown=breakdown,
                   totals=stock_totals(items), today=d, payment_types=PAYMENT_TYPES)
 
 
@@ -183,9 +186,10 @@ PAGE_SIZE = 50
 def products(request: Request, q: str = "", store: str = "", stock: str = "", page: int = 1, user=Depends(current_user)):
     in_stock = {"yes": True, "no": False}.get(stock)
     page = max(page, 1)
-    rows, total = search_products(q.strip() or None, store or None, in_stock, PAGE_SIZE, (page - 1) * PAGE_SIZE) or ([], 0)
-    return render(request, "products.html", user, rows=rows, total=total, q=q, store=store, stock=stock, page=page,
-                  pages=max((total + PAGE_SIZE - 1) // PAGE_SIZE, 1), stores=STORES, details=details_line)
+    store_id = parse_int(store) if store else None
+    rows, total = search_products(q.strip() or None, store_id, in_stock, PAGE_SIZE, (page - 1) * PAGE_SIZE) or ([], 0)
+    return render(request, "products.html", user, rows=rows, total=total, q=q, store=store_id, stock=stock, page=page,
+                  pages=max((total + PAGE_SIZE - 1) // PAGE_SIZE, 1), stores=get_stores() or [], details=details_line)
 
 
 def _product_form_data(form):
@@ -200,7 +204,11 @@ def _product_form_data(form):
 
     data['article_number'] = text('article_number', 64, True)
     data['model'] = text('model', 255, True)
-    for key, options in (('Store', STORES), ('product_type', PRODUCT_TYPES), ('metal_type', METAL_TYPES)):
+    store_id = parse_int(form.get('store_id') or '')
+    if store_id not in {st['id'] for st in get_stores() or []}:
+        errors.append("Выберите магазин.")
+    data['store_id'] = store_id
+    for key, options in (('product_type', PRODUCT_TYPES), ('metal_type', METAL_TYPES)):
         v = form.get(key)
         if v not in options:
             errors.append(f"Выберите «{FIELD_TITLES[key]}».")
@@ -235,7 +243,7 @@ def _product_form_data(form):
 
 
 def _form_ctx(product=None):
-    return {"product": product or {}, "stores": STORES, "types": PRODUCT_TYPES, "metals": METAL_TYPES}
+    return {"product": product or {}, "stores": get_stores() or [], "types": PRODUCT_TYPES, "metals": METAL_TYPES}
 
 
 @app.get("/products/new", response_class=HTMLResponse)
@@ -301,7 +309,7 @@ def _cleanup_plans():
 
 @app.get("/import", response_class=HTMLResponse)
 def import_form(request: Request, user=Depends(current_user)):
-    return render(request, "import.html", user, stores=STORES)
+    return render(request, "import.html", user, stores=get_stores() or [])
 
 
 @app.post("/import", response_class=HTMLResponse)
@@ -310,11 +318,11 @@ async def import_upload(request: Request, file: UploadFile = File(...), store: s
     check_csrf(request, csrf)
     data = await file.read(10 * 1024 * 1024 + 1)
     if len(data) > 10 * 1024 * 1024:
-        return render(request, "import.html", user, stores=STORES, error="Файл больше 10 МБ.")
+        return render(request, "import.html", user, stores=get_stores() or [], error="Файл больше 10 МБ.")
     try:
-        plan = build_plan(data, file.filename or "", default_store=store or None)
+        plan = build_plan(data, file.filename or "", default_store=parse_int(store) if store else None)
     except ValueError as e:
-        return render(request, "import.html", user, stores=STORES, error=str(e))
+        return render(request, "import.html", user, stores=get_stores() or [], error=str(e))
     _cleanup_plans()
     plan_id = secrets.token_urlsafe(12)
     _import_plans[plan_id] = (user['id'], time.time(), plan)
@@ -343,7 +351,7 @@ async def import_apply(request: Request, plan_id: str, mode: str = Form("all"), 
 
 @app.get("/labels", response_class=HTMLResponse)
 def labels_form(request: Request, articles: str = "", user=Depends(current_user)):
-    return render(request, "labels.html", user, stores=STORES, articles=articles,
+    return render(request, "labels.html", user, stores=get_stores() or [], articles=articles,
                   width=config.LABEL_WIDTH_MM, height=config.LABEL_HEIGHT_MM, since=today() - timedelta(days=6))
 
 
@@ -357,9 +365,9 @@ async def labels_pdf(request: Request, user=Depends(current_user)):
         products = get_products_by_articles(articles[:1000]) or []
     elif mode == "arrived":
         products = get_products_for_labels(arrived_from=parse_date(form.get("since", "")) or today(),
-                                           store=form.get("store") or None)
+                                           store=parse_int(form.get("store") or ""))
     else:
-        products = get_products_for_labels(store=form.get("store") or None)
+        products = get_products_for_labels(store=parse_int(form.get("store") or ""))
     width = parse_float(form.get("width") or "") or config.LABEL_WIDTH_MM
     height = parse_float(form.get("height") or "") or config.LABEL_HEIGHT_MM
     if not (15 <= width <= 120 and 10 <= height <= 120):
@@ -375,30 +383,61 @@ async def labels_pdf(request: Request, user=Depends(current_user)):
 
 # ---------------------------------------------------------------- отчёты
 
+def _store_filter(store):
+    store_id = parse_int(store) if store else None
+    stores = get_stores(active_only=False) or []
+    name = next((st['name'] for st in stores if st['id'] == store_id), None)
+    return (store_id, name) if name else (None, None)
+
+
 @app.get("/reports", response_class=HTMLResponse)
-def reports(request: Request, start: str = "", end: str = "", user=Depends(current_user)):
+def reports(request: Request, start: str = "", end: str = "", store: str = "", user=Depends(current_user)):
     d = today()
     start_d = parse_date(start) or d.replace(day=1)
     end_d = parse_date(end) or d
     if end_d < start_d:
         start_d, end_d = end_d, start_d
-    ops = get_period_operations(*day_bounds(start_d, end_d))
+    store_id, store_name = _store_filter(store)
+    ops = get_period_operations(*day_bounds(start_d, end_d), store_id)
     if ops is None:
         raise HTTPException(500, "Ошибка базы данных.")
     return render(request, "reports.html", user, start=start_d, end=end_d, s=build_summary(ops), ops=ops,
-                  payment_types=PAYMENT_TYPES)
+                  payment_types=PAYMENT_TYPES, stores=get_stores() or [], store=store_id,
+                  breakdown=[] if store_id else store_breakdown(ops))
 
 
 @app.get("/reports.xlsx")
-def reports_xlsx(start: str = "", end: str = "", user=Depends(current_user)):
+def reports_xlsx(start: str = "", end: str = "", store: str = "", user=Depends(current_user)):
     d = today()
     start_d, end_d = parse_date(start) or d, parse_date(end) or d
-    ops = get_period_operations(*day_bounds(start_d, end_d))
+    store_id, store_name = _store_filter(store)
+    ops = get_period_operations(*day_bounds(start_d, end_d), store_id)
     if ops is None:
         raise HTTPException(500, "Ошибка базы данных.")
-    excel = build_excel(ops, build_summary(ops), start_d, end_d)
+    excel = build_excel(ops, build_summary(ops), start_d, end_d, store_name=store_name,
+                        breakdown=[] if store_id else store_breakdown(ops))
     return StreamingResponse(excel, media_type=XLSX,
                              headers={"Content-Disposition": f'attachment; filename="report_{start_d:%Y%m%d}_{end_d:%Y%m%d}.xlsx"'})
+
+
+# ---------------------------------------------------------------- магазины
+
+@app.get("/stores", response_class=HTMLResponse)
+def stores_page(request: Request, user=Depends(admin_only)):
+    return render(request, "stores.html", user, stores=get_stores(active_only=False) or [], counts=get_store_counts() or {})
+
+
+@app.post("/stores")
+async def stores_action(request: Request, user=Depends(admin_only)):
+    form = await request.form()
+    check_csrf(request, form.get("csrf"))
+    if form.get("action") == "add":
+        ok, msg = create_store(form.get("name"), form.get("address"))
+    else:
+        store_id = parse_int(form.get("store_id") or "")
+        ok, msg = update_store(store_id, form.get("name"), form.get("address"), bool(form.get("is_active")))
+    flash(request, msg, "ok" if ok else "error")
+    return RedirectResponse("/stores", status_code=303)
 
 
 # ---------------------------------------------------------------- персонал
@@ -408,7 +447,7 @@ ROLE_BY_KEY = {'cashier': 'cashier', 'manager': 'manager', 'admin': 'admin'}
 
 @app.get("/staff", response_class=HTMLResponse)
 def staff(request: Request, user=Depends(admin_only)):
-    return render(request, "staff.html", user, users=get_all_users() or [])
+    return render(request, "staff.html", user, users=get_all_users() or [], stores=get_stores() or [])
 
 
 @app.post("/staff")
@@ -424,7 +463,7 @@ async def staff_action(request: Request, user=Depends(admin_only)):
         if not phone or not role or len(name) < 2:
             flash(request, "Заполните имя, телефон (+7XXXXXXXXXX) и роль.", "error")
         else:
-            ok, msg = add_user_to_db(phone, role, name, user.get('store_id'))
+            ok, msg = add_user_to_db(phone, role, name, parse_int(form.get("store_id") or "") or None)
             flash(request, msg, "ok" if ok else "error")
     elif target == user['id'] and action in ("role", "deactivate"):
         flash(request, "Нельзя изменить собственную роль или деактивировать себя.", "error")
@@ -433,6 +472,9 @@ async def staff_action(request: Request, user=Depends(admin_only)):
         flash(request, msg, "ok" if ok else "error")
     elif action == "deactivate" and target:
         ok, msg = deactivate_user_in_db(target)
+        flash(request, msg, "ok" if ok else "error")
+    elif action == "store" and target:
+        ok, msg = set_user_store(target, parse_int(form.get("store_id") or "") or None)
         flash(request, msg, "ok" if ok else "error")
     elif action == "phone" and target:
         ok, msg = update_user_phone(target, form.get("phone") or "")

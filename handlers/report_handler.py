@@ -5,14 +5,15 @@ from datetime import timedelta
 from telebot import types
 
 from buttons import create_cancel_markup, create_choice_markup
-from handlers.common import CASH_ROLES, in_state, is_button, cash_menu, register_simple_cancel
+from handlers.common import store_names, store_id_by_name, CASH_ROLES, in_state, is_button, cash_menu, register_simple_cancel
 from state import bot, user_state, get_op, start_op, end_op, cancel_current_operation
 from utils.common import today, parse_date
 from utils.report_generator import generate_period_report
 
 logger = logging.getLogger(__name__)
 
-CHOOSE, CUSTOM_START, CUSTOM_END = "REPORT_CHOOSE", "REPORT_CUSTOM_START", "REPORT_CUSTOM_END"
+CHOOSE, CUSTOM_START, CUSTOM_END, STORE = "REPORT_CHOOSE", "REPORT_CUSTOM_START", "REPORT_CUSTOM_END", "REPORT_STORE"
+ALL_STORES = "Все магазины"
 PERIODS = ["Сегодня", "Вчера", "Эта неделя", "Этот месяц", "Прошлый месяц", "Другой период"]
 
 
@@ -50,7 +51,7 @@ def on_choose(message):
     if not dates:
         bot.send_message(chat_id, "Выберите период кнопкой.", reply_markup=create_choice_markup(PERIODS, 2))
         return
-    send_report(chat_id, *dates)
+    _ask_store_or_send(chat_id, *dates)
 
 
 def on_custom_start(message):
@@ -78,14 +79,33 @@ def on_custom_end(message):
     if end_date < start_date:
         bot.send_message(chat_id, "Дата окончания раньше даты начала. Введите снова.", reply_markup=create_choice_markup(["Сегодня"], 1))
         return
-    send_report(chat_id, start_date, end_date)
+    _ask_store_or_send(chat_id, start_date, end_date)
 
 
-def send_report(chat_id, start_date, end_date):
+def _ask_store_or_send(chat_id, start_date, end_date):
+    names = store_names()
+    if len(names) < 2:
+        send_report(chat_id, start_date, end_date)
+        return
+    get_op(chat_id)['dates'] = (start_date, end_date)
+    user_state[chat_id] = STORE
+    bot.send_message(chat_id, "По какому магазину?", reply_markup=create_choice_markup([ALL_STORES] + names, 2))
+
+
+def on_store(message):
+    chat_id, text = message.chat.id, (message.text or '').strip()
+    store_id = store_id_by_name(text)
+    if not store_id and text != ALL_STORES:
+        bot.send_message(chat_id, "Выберите магазин кнопкой.", reply_markup=create_choice_markup([ALL_STORES] + store_names(), 2))
+        return
+    send_report(chat_id, *get_op(chat_id)['dates'], store_id=store_id, store_name=text if store_id else None)
+
+
+def send_report(chat_id, start_date, end_date, store_id=None, store_name=None):
     end_op(chat_id)
     bot.send_chat_action(chat_id, 'upload_document')
     try:
-        report = generate_period_report(start_date, end_date)
+        report = generate_period_report(start_date, end_date, store_id, store_name)
     except Exception:
         logger.exception("Chat %s: ошибка формирования отчёта", chat_id)
         report = None
@@ -105,3 +125,4 @@ def register_report_handlers():
     bot.register_message_handler(on_choose, func=in_state(CHOOSE))
     bot.register_message_handler(on_custom_start, func=in_state(CUSTOM_START))
     bot.register_message_handler(on_custom_end, func=in_state(CUSTOM_END))
+    bot.register_message_handler(on_store, func=in_state(STORE))

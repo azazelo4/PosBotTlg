@@ -13,7 +13,7 @@
       <input type="date" name="since" value="{{ since.isoformat() }}" style="width:auto;display:inline-block;margin:0 0 0 .5rem"></label>
     <label><input type="radio" name="mode" value="all"> Все товары в наличии</label>
     <label>Магазин (для «поступивших» и «всех»)
-      <select name="store"><option value="">Все магазины</option>{% for s in stores %}<option>{{ s }}</option>{% endfor %}</select></label>
+      <select name="store"><option value="">Все магазины</option>{% for s in stores %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}</select></label>
   </fieldset>
   <fieldset>
     <legend>Количество</legend>

@@ -193,8 +193,9 @@ def fake():
 @pytest.fixture
 def tg(fake):
     """Чистые данные перед каждым тестом: пользователи трёх ролей и несколько товаров."""
-    for table in ("returns", "trade_ins", "buybacks", "cash_withdrawals", "sales", "products", "users"):
+    for table in ("returns", "trade_ins", "buybacks", "cash_withdrawals", "sales", "products", "users", "stores"):
         db_query(f"DELETE FROM `{table}`")
+    db_query("INSERT INTO stores (id, name, sort_order) VALUES (1, 'ЦУМ', 0), (2, 'Отау Сауда', 1)")
     user_data.clear()
     user_state.clear()
     fake.calls.clear()
@@ -202,11 +203,11 @@ def tg(fake):
     main.prepare_database()  # создаст админа из ADMIN_PHONE
     db_query("INSERT INTO users (phone_number, role, name, store_id, is_active) VALUES "
              "('+77010000002', 'cashier', 'Кассир', 1, 1), ('77010000003', 'manager', 'Менеджер', 1, 1)")
-    db_query("""INSERT INTO products (article_number, Store, metal_type, product_type, model, weight, price_per_gram,
+    db_query("""INSERT INTO products (article_number, store_id, metal_type, product_type, model, weight, price_per_gram,
                 price, min_price, arrival_date, quantity, track_stock) VALUES
-             ('A100', 'ЦУМ', 'золото', 'кольцо', 'Кольцо Классика', 2.5, 40000, 150000, 120000, '2026-10-01', 3, 1),
-             ('A200', 'Отау Сауда', 'серебро', 'цепь', 'Цепь Бисмарк', 10, 1000, 20000, 15000, '2026-10-01', 1, 1),
-             ('A300', 'ЦУМ', 'золото', 'серьги', 'Серьги Капля', 3, 40000, 90000, 80000, '2026-10-01', 0, 0)""")
+             ('A100', 1, 'золото', 'кольцо', 'Кольцо Классика', 2.5, 40000, 150000, 120000, '2026-10-01', 3, 1),
+             ('A200', 2, 'серебро', 'цепь', 'Цепь Бисмарк', 10, 1000, 20000, 15000, '2026-10-01', 1, 1),
+             ('A300', 1, 'золото', 'серьги', 'Серьги Капля', 3, 40000, 90000, 80000, '2026-10-01', 0, 0)""")
     return fake
 
 

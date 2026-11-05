@@ -69,9 +69,33 @@ def build_summary(ops):
     }
 
 
-def summary_text(summary, start, end):
+OP_KEYS = ('sales', 'returns', 'buybacks', 'trade_ins', 'withdrawals')
+
+
+def split_by_store(ops):
+    """{(store_id, название): ops только этого магазина}; операции без магазина — под (None, 'Без магазина')."""
+    keys = {}
+    for key in OP_KEYS:
+        for row in ops[key]:
+            keys.setdefault(row.get('store_id'), row.get('store') or 'Без магазина')
+    parts = {}
+    for store_id, name in sorted(keys.items(), key=lambda kv: (kv[0] is None, kv[1])):
+        parts[(store_id, name)] = {key: [r for r in ops[key] if r.get('store_id') == store_id] for key in OP_KEYS}
+    return parts
+
+
+def store_breakdown(ops):
+    """[(название, summary)] по магазинам — только если операций больше чем в одном магазине."""
+    parts = split_by_store(ops)
+    if len(parts) < 2:
+        return []
+    return [(name, build_summary(sub)) for (_, name), sub in parts.items()]
+
+
+def summary_text(summary, start, end, store_name=None, breakdown=None):
     period = start.strftime('%d.%m.%Y') if start == end else f"{start:%d.%m.%Y} — {end:%d.%m.%Y}"
-    lines = [f"<b>Отчёт за {period}</b>", ""]
+    title = f"<b>Отчёт за {period}</b>" + (f" · {h(store_name)}" if store_name else " · все магазины" if breakdown else "")
+    lines = [title, ""]
     lines.append(f"Продажи: {summary['sales_count']} шт. на <b>{money(summary['sales_total'])}</b>")
     for pt, (cnt, total) in sorted(summary['sales_by_payment'].items()):
         lines.append(f"  • {h(pt)}: {cnt} шт., {money(total)}")
@@ -90,6 +114,11 @@ def summary_text(summary, start, end):
         if pt in summary['flow'] or pt in PAYMENT_TYPES:
             lines.append(f"  • {h(pt)}: {money(summary['flow'].get(pt, D0))}")
     lines.append(f"Наличные в кассе за период (после инкассации): <b>{money(summary['cash_balance'])}</b>")
+    if breakdown:
+        lines += ["", "<b>По магазинам</b>"]
+        for name, sub in breakdown:
+            lines.append(f"  • {h(name)}: продажи {sub['sales_count']} шт. на {money(sub['net_sales'])}"
+                         f", наличные {money(sub['cash_balance'])}")
     return "\n".join(lines)
 
 
@@ -120,13 +149,14 @@ def _cell(value):
     return value
 
 
-def build_excel(ops, summary, start, end):
+def build_excel(ops, summary, start, end, store_name=None, breakdown=None):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Сводка"
     period = f"{start:%d.%m.%Y}" if start == end else f"{start:%d.%m.%Y} — {end:%d.%m.%Y}"
     rows = [
         ("Период", period),
+        ("Магазин", store_name or "Все магазины"),
         (),
         ("Продажи, шт.", summary['sales_count']),
         ("Продажи, сумма", summary['sales_total']),
@@ -147,10 +177,14 @@ def build_excel(ops, summary, start, end):
     rows += [(), ("Движение денег по способу оплаты", "Сумма")]
     rows += [(pt, summary['flow'].get(pt, D0)) for pt in sorted(set(PAYMENT_TYPES) | set(summary['flow']))]
     rows += [("Наличные в кассе после инкассации", summary['cash_balance'])]
+    if breakdown:
+        rows += [(), ("По магазинам", "Продажи, шт.", "Продажи за вычетом возвратов", "Наличные после инкассации")]
+        rows += [(name, sub['sales_count'], sub['net_sales'], sub['cash_balance']) for name, sub in breakdown]
     for row in rows:
         ws.append([_cell(v) for v in row])
     for row in ws.iter_rows():
-        if row and row[0].value in ("Продажи по способу оплаты", "Движение денег по способу оплаты", "Период"):
+        if row and row[0].value in ("Продажи по способу оплаты", "Движение денег по способу оплаты", "Период",
+                                    "По магазинам"):
             for cell in row:
                 cell.font = HEADER_FONT
     ws.column_dimensions['A'].width = 38
@@ -164,22 +198,23 @@ def build_excel(ops, summary, start, end):
              s['weight'], s['list_price'], s['sold_price'], s['payment_type'], s['store'], s['user_name'],
              f"№{s['return_id']}" if s['return_id'] else "") for s in ops['sales']])
     _sheet(wb, "Возвраты",
-           ["№", "Дата", "Продажа №", "Дата продажи", "Артикул", "Модель", "Сумма продажи", "Сумма возврата", "Выплата", "Сотрудник"],
+           ["№", "Дата", "Продажа №", "Дата продажи", "Артикул", "Модель", "Сумма продажи", "Сумма возврата", "Выплата",
+            "Магазин", "Сотрудник"],
            [(r['id'], r['return_date'], r['original_sale_id'], r['sale_date'], r['product_article'], r['model'],
-             r['sold_price'], r['return_price'], r['payment_type'], r['user_name']) for r in ops['returns']])
+             r['sold_price'], r['return_price'], r['payment_type'], r['store'], r['user_name']) for r in ops['returns']])
     _sheet(wb, "Скупка",
-           ["№", "Дата", "Артикул", "Описание", "Металл", "Вес, г", "Сумма", "Выплата", "Сотрудник"],
+           ["№", "Дата", "Артикул", "Описание", "Металл", "Вес, г", "Сумма", "Выплата", "Магазин", "Сотрудник"],
            [(b['id'], b['buyback_date'], b['product_article'] or "", b['description'], b['metal_type'], b['weight'],
-             b['buyback_price'], b['payment_type'], b['user_name']) for b in ops['buybacks']])
+             b['buyback_price'], b['payment_type'], b['store'], b['user_name']) for b in ops['buybacks']])
     _sheet(wb, "Trade-In",
            ["№", "Дата", "Сдано: артикул", "Сдано: описание", "Металл", "Вес, г", "Оценка", "Новый: артикул",
-            "Новый: модель", "Цена нового", "Доплата (+ клиент, − мы)", "Оплата доплаты", "Сотрудник"],
+            "Новый: модель", "Цена нового", "Доплата (+ клиент, − мы)", "Оплата доплаты", "Магазин", "Сотрудник"],
            [(t['id'], t['trade_in_date'], t['old_product_article'] or "", t['old_item_description'], t['old_metal_type'],
              t['old_weight'], t['old_item_value'], t['new_product_article'], t['new_model'], t['new_sale_price'],
-             t['price_difference'], t['payment_type_difference'], t['user_name']) for t in ops['trade_ins']])
+             t['price_difference'], t['payment_type_difference'], t['store'], t['user_name']) for t in ops['trade_ins']])
     _sheet(wb, "Инкассация",
-           ["№", "Дата", "Сумма", "Комментарий", "Сотрудник"],
-           [(w['id'], w['withdrawal_date'], w['amount'], w['comment'], w['user_name']) for w in ops['withdrawals']])
+           ["№", "Дата", "Сумма", "Комментарий", "Магазин", "Сотрудник"],
+           [(w['id'], w['withdrawal_date'], w['amount'], w['comment'], w['store'], w['user_name']) for w in ops['withdrawals']])
 
     for sheet in wb.worksheets[1:]:
         for row in sheet.iter_rows(min_row=2):
@@ -193,13 +228,17 @@ def build_excel(ops, summary, start, end):
     return buffer
 
 
-def generate_period_report(start, end):
-    """Возвращает (текст сводки, Excel BytesIO, имя файла) или None при ошибке БД."""
+def generate_period_report(start, end, store_id=None, store_name=None):
+    """Возвращает (текст сводки, Excel BytesIO, имя файла) или None при ошибке БД.
+
+    store_id — отчёт по одному магазину; без него — по всем с разбивкой по магазинам.
+    """
     start_dt, end_dt = day_bounds(start, end)
-    ops = get_period_operations(start_dt, end_dt)
+    ops = get_period_operations(start_dt, end_dt, store_id)
     if ops is None:
         return None
     summary = build_summary(ops)
-    excel = build_excel(ops, summary, start, end)
+    breakdown = [] if store_id else store_breakdown(ops)
+    excel = build_excel(ops, summary, start, end, store_name=store_name, breakdown=breakdown)
     name = f"report_{start:%Y%m%d}.xlsx" if start == end else f"report_{start:%Y%m%d}_{end:%Y%m%d}.xlsx"
-    return summary_text(summary, start, end), excel, name
+    return summary_text(summary, start, end, store_name, breakdown), excel, name

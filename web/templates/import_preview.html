@@ -38,7 +38,7 @@
   <tbody>{% for r in sample %}
     <tr><td>{% if r._exists %}<span class="badge">обновится</span>{% else %}<span class="badge" style="background:#1a7f37;color:#fff">новый</span>{% endif %}</td>
       <td>{{ r.article_number }}</td><td>{{ r.model }}</td><td>{{ r.product_type }}</td><td>{{ r.metal_type }}</td>
-      <td>{{ r.fineness or '' }}</td><td>{{ r.weight or '' }}</td><td>{{ r.Store }}</td>
+      <td>{{ r.fineness or '' }}</td><td>{{ r.weight or '' }}</td><td>{{ r._store_name or '' }}</td>
       <td class="num">{{ r.price | money }}</td><td class="num">{{ r.min_price | money }}</td>
       <td class="num">{{ r.quantity if r.quantity is not none else '—' }}</td></tr>
   {% endfor %}</tbody>

@@ -8,7 +8,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-STORES = ('ЦУМ', 'Отау Сауда')
+# Магазины хранятся в таблице stores. Этот список — только начальное заполнение пустой базы,
+# если магазины не заданы переменной STORES (см. config.DEFAULT_STORES).
+DEFAULT_STORES = ('ЦУМ', 'Отау Сауда')
 METAL_TYPES = ('золото', 'серебро', 'бижутерия')
 PRODUCT_TYPES = (
     'кольцо', 'цепь', 'серьги', 'браслет', 'подвеска', 'брошь', 'набор', 'часы',
@@ -24,6 +26,16 @@ def _enum(values):
 CHARSET = "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
 
 TABLES = {
+    "stores": f"""
+        CREATE TABLE IF NOT EXISTS `stores` (
+          `id` int NOT NULL AUTO_INCREMENT,
+          `name` varchar(100) NOT NULL,
+          `address` varchar(255) DEFAULT NULL,
+          `is_active` tinyint(1) NOT NULL DEFAULT 1,
+          `sort_order` int NOT NULL DEFAULT 0,
+          PRIMARY KEY (`id`),
+          UNIQUE KEY `uq_stores_name` (`name`)
+        ) {CHARSET}""",
     "users": f"""
         CREATE TABLE IF NOT EXISTS `users` (
           `id` int NOT NULL AUTO_INCREMENT,
@@ -42,7 +54,7 @@ TABLES = {
         CREATE TABLE IF NOT EXISTS `products` (
           `id` int NOT NULL AUTO_INCREMENT,
           `article_number` varchar(255) NOT NULL,
-          `Store` {_enum(STORES)} NOT NULL,
+          `store_id` int DEFAULT NULL,
           `metal_type` {_enum(METAL_TYPES)} NOT NULL,
           `product_type` {_enum(PRODUCT_TYPES)} NOT NULL,
           `model` text NOT NULL,
@@ -59,7 +71,8 @@ TABLES = {
           `commentaries` text DEFAULT NULL,
           `track_stock` tinyint(1) NOT NULL DEFAULT 1,
           PRIMARY KEY (`id`),
-          KEY `idx_products_article` (`article_number`)
+          KEY `idx_products_article` (`article_number`),
+          KEY `idx_products_store` (`store_id`)
         ) {CHARSET}""",
     "sales": f"""
         CREATE TABLE IF NOT EXISTS `sales` (
@@ -70,8 +83,10 @@ TABLES = {
           `sold_price` decimal(12,0) NOT NULL,
           `payment_type` varchar(32) NOT NULL,
           `shift_num` int DEFAULT NULL,
+          `store_id` int DEFAULT NULL,
           PRIMARY KEY (`id`),
           KEY `product_id` (`product_id`),
+          KEY `idx_sales_store` (`store_id`),
           KEY `user_id` (`user_id`),
           KEY `idx_sales_date` (`sale_date`),
           CONSTRAINT `sales_ibfk_3` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`),
@@ -154,6 +169,8 @@ TABLES = {
 
 # Колонки, которых могло не быть в старой БД: (таблица, колонка, определение)
 COLUMNS = [
+    ("products", "store_id", "int DEFAULT NULL"),
+    ("sales", "store_id", "int DEFAULT NULL"),
     ("users", "chat_id", "bigint DEFAULT NULL"),
     ("products", "size", "varchar(32) DEFAULT NULL"),
     ("products", "track_stock", "tinyint(1) NOT NULL DEFAULT 1"),
@@ -188,6 +205,8 @@ MODIFY = [
 ]
 
 INDEXES = [
+    ("products", "idx_products_store", "(`store_id`)"),
+    ("sales", "idx_sales_store", "(`store_id`)"),
     ("users", "idx_users_chat", "(`chat_id`)"),
     ("sales", "idx_sales_date", "(`sale_date`)"),
     ("products", "idx_products_article", "(`article_number`)"),
@@ -216,7 +235,51 @@ def _index_exists(cursor, table, index):
     return cursor.fetchone() is not None
 
 
-def ensure_schema(connection):
+def _enum_values(column_type):
+    if column_type.lower().startswith("enum("):
+        return [v.replace("''", "'") for v in column_type[len("enum('"):-len("')")].split("','")]
+    return []
+
+
+def _migrate_stores(cursor, default_stores):
+    """Магазины: ENUM products.Store → справочник stores (один раз, без потери данных)."""
+    cursor.execute(
+        "SELECT COLUMN_TYPE FROM information_schema.COLUMNS "
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'products' AND COLUMN_NAME = 'Store'")
+    legacy = cursor.fetchone()
+    if legacy:
+        column_type = legacy[0].decode() if isinstance(legacy[0], (bytes, bytearray)) else legacy[0]
+        cursor.execute("SELECT DISTINCT `Store` FROM products WHERE `Store` IS NOT NULL AND `Store` != ''")
+        used = [r[0] for r in cursor.fetchall()]
+        names = list(dict.fromkeys(_enum_values(column_type) + used))
+        logger.info("Миграция: переношу магазины в справочник: %s", ", ".join(names))
+        for order, name in enumerate(names):
+            cursor.execute("INSERT IGNORE INTO stores (name, sort_order) VALUES (%s, %s)", (name, order))
+        cursor.execute("UPDATE products p JOIN stores s ON s.name = p.`Store` SET p.store_id = s.id WHERE p.store_id IS NULL")
+        # Колонку не удаляем, а переименовываем: старые значения остаются для сверки
+        cursor.execute("ALTER TABLE products CHANGE COLUMN `Store` `legacy_store` varchar(100) DEFAULT NULL")
+        # Сотрудники со store_id, которого нет в справочнике, остаются без магазина
+        cursor.execute("UPDATE users u LEFT JOIN stores s ON s.id = u.store_id SET u.store_id = NULL "
+                       "WHERE u.store_id IS NOT NULL AND s.id IS NULL")
+    cursor.execute("SELECT COUNT(*) FROM stores")
+    if cursor.fetchone()[0] == 0:
+        for order, name in enumerate(default_stores or DEFAULT_STORES):
+            cursor.execute("INSERT IGNORE INTO stores (name, sort_order) VALUES (%s, %s)", (name, order))
+        logger.info("Созданы магазины: %s", ", ".join(default_stores or DEFAULT_STORES))
+    # Магазин продажи — магазин товара на момент продажи; возврат — магазин продажи
+    cursor.execute("UPDATE sales s JOIN products p ON p.id = s.product_id SET s.store_id = p.store_id "
+                   "WHERE s.store_id IS NULL AND p.store_id IS NOT NULL")
+    if legacy:
+        cursor.execute("UPDATE returns r JOIN sales s ON s.id = r.original_sale_id SET r.store_id = s.store_id "
+                       "WHERE s.store_id IS NOT NULL")
+        cursor.execute("UPDATE trade_ins t JOIN products p ON p.article_number = t.new_product_article "
+                       "SET t.store_id = p.store_id WHERE p.store_id IS NOT NULL")
+        for table in ("buybacks", "cash_withdrawals"):
+            cursor.execute(f"UPDATE {table} x LEFT JOIN stores s ON s.id = x.store_id SET x.store_id = NULL "
+                           "WHERE x.store_id IS NOT NULL AND s.id IS NULL")
+
+
+def ensure_schema(connection, default_stores=None):
     """Создаёт недостающие таблицы/колонки. Принимает открытое соединение."""
     cursor = connection.cursor()
     try:
@@ -237,6 +300,7 @@ def ensure_schema(connection):
             if (wants_null and not nullable) or (column == 'payment_type' and data_type != 'varchar'):
                 logger.info("Миграция: изменяю колонку %s.%s", table, column)
                 cursor.execute(f"ALTER TABLE `{table}` MODIFY COLUMN `{column}` {definition}")
+        _migrate_stores(cursor, default_stores)
         for table, index, cols in INDEXES:
             if not _index_exists(cursor, table, index):
                 logger.info("Миграция: добавляю индекс %s.%s", table, index)

@@ -5,8 +5,10 @@
 <form method="get" class="grid">
   <label>С<input type="date" name="start" value="{{ start.isoformat() }}"></label>
   <label>По<input type="date" name="end" value="{{ end.isoformat() }}"></label>
+  <label>Магазин<select name="store"><option value="">Все магазины</option>
+    {% for st in stores %}<option value="{{ st.id }}" {% if st.id == store %}selected{% endif %}>{{ st.name }}</option>{% endfor %}</select></label>
   <label>&nbsp;<button type="submit">Показать</button></label>
-  <label>&nbsp;<a role="button" class="secondary outline" href="/reports.xlsx?start={{ start.isoformat() }}&end={{ end.isoformat() }}">Скачать Excel</a></label>
+  <label>&nbsp;<a role="button" class="secondary outline" href="/reports.xlsx?start={{ start.isoformat() }}&end={{ end.isoformat() }}&store={{ store or '' }}">Скачать Excel</a></label>
 </form>
 
 <div class="grid-cards">
@@ -35,13 +37,20 @@
   </div>
 </div>
 
+{% if breakdown %}
+<h4>По магазинам</h4>
+<table><thead><tr><th>Магазин</th><th class="num">Продажи</th><th class="num">За вычетом возвратов</th><th class="num">Наличные после инкассации</th></tr></thead>
+<tbody>{% for name, sub in breakdown %}<tr><td>{{ name }}</td><td class="num">{{ sub.sales_count }} шт.</td>
+  <td class="num">{{ sub.net_sales | money }}</td><td class="num">{{ sub.cash_balance | money }}</td></tr>{% endfor %}</tbody></table>
+{% endif %}
+
 <h4>Продажи</h4>
 <div class="table-wrap"><table class="striped">
-  <thead><tr><th>№</th><th>Дата</th><th>Артикул</th><th>Название</th><th>Продавец</th><th>Оплата</th><th class="num">Сумма</th></tr></thead>
+  <thead><tr><th>№</th><th>Дата</th><th>Артикул</th><th>Название</th><th>Магазин</th><th>Продавец</th><th>Оплата</th><th class="num">Сумма</th></tr></thead>
   <tbody>{% for r in ops.sales | reverse %}
-    <tr><td>{{ r.id }}</td><td>{{ r.sale_date | ddmmhhmm }}</td><td>{{ r.article_number }}</td><td>{{ r.model }}</td>
+    <tr><td>{{ r.id }}</td><td>{{ r.sale_date | ddmmhhmm }}</td><td>{{ r.article_number }}</td><td>{{ r.model }}</td><td>{{ r.store or '' }}</td>
       <td>{{ r.user_name or '' }}</td><td>{{ r.payment_type }}</td>
       <td class="num">{{ r.sold_price | money }}{% if r.return_id %} <span class="badge zero">возврат</span>{% endif %}</td></tr>
-  {% else %}<tr><td colspan="7" class="muted">Продаж за период нет.</td></tr>{% endfor %}</tbody>
+  {% else %}<tr><td colspan="8" class="muted">Продаж за период нет.</td></tr>{% endfor %}</tbody>
 </table></div>
 {% endblock %}

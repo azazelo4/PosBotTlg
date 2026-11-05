@@ -58,6 +58,10 @@ LOW_STOCK_THRESHOLD = _optional_int("LOW_STOCK_THRESHOLD", 5)
 
 LOG_LEVEL = _optional_str("LOG_LEVEL", "INFO")
 
+# Магазины для пустой базы (через запятую). На существующей базе магазины берутся из
+# таблицы stores и меняются в веб-админке; переменная больше ни на что не влияет.
+DEFAULT_STORES = tuple(s.strip() for s in (_optional_str("STORES", "ЦУМ, Отау Сауда")).split(",") if s.strip())
+
 # ---------------------------------------------------------------- веб-админка и Mini App
 # Публичный HTTPS-адрес (например, https://pos.example.kz). Пусто — веб выключен,
 # бот не показывает кнопки админки и кассы-приложения.

@@ -47,7 +47,7 @@ def test_import_from_paloma_like_excel(tg):
     n1, n2, n3, a100 = rows['N1'], rows['N2'], rows['N3'], rows['A100']
     assert (n1['product_type'], n1['metal_type'], n1['fineness'], n1['size'], n1['inserts']) == ('кольцо', 'золото', '585', '16.5', 'фианит')
     assert n1['min_price'] == n1['price'] == 98000 and n1['quantity'] == 2
-    assert (n2['product_type'], n2['metal_type'], n2['fineness'], n2['Store'], n2['price']) == ('цепь', 'серебро', '925', 'Отау Сауда', 15000)
+    assert (n2['product_type'], n2['metal_type'], n2['fineness'], n2['store_id'], n2['price']) == ('цепь', 'серебро', '925', 2, 15000)
     assert abs(n2['weight'] - 4.2) < 1e-6
     assert (n3['product_type'], n3['metal_type']) == ('подвеска', 'золото')
     # существующий товар: цена и остаток обновлены, минимальная цена не выше цены
@@ -66,7 +66,7 @@ def test_import_only_new_and_default_store(tg):
     tg.send(ADMIN, "Загрузить только новые")
     rows = {r['article_number']: r for r in db_query("SELECT * FROM products")}
     assert rows['A100']['model'] == 'Кольцо Классика' and rows['A100']['price'] == 150000  # не тронут
-    assert rows['C9']['Store'] == 'Отау Сауда' and rows['C9']['quantity'] == 0 and rows['C9']['product_type'] == 'серьги'
+    assert rows['C9']['store_id'] == 2 and rows['C9']['quantity'] == 0 and rows['C9']['product_type'] == 'серьги'
 
 
 def test_import_rejects_bad_files(tg):

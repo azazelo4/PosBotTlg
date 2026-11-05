@@ -7,8 +7,8 @@ from telebot import types
 from buttons import (create_cancel_markup, create_confirmation_markup, create_choice_markup, create_skip_cancel_markup,
                      create_stock_management_buttons, BTN_CONFIRM)
 from database import add_product_to_db, get_stock_report_data, update_product_quantity, get_product_by_article, get_enum_or_distinct_values
-from handlers.common import STOCK_ROLES, in_state, is_button, register_simple_cancel, product_line, SKIP
-from schema import STORES, METAL_TYPES, PRODUCT_TYPES
+from handlers.common import store_names, store_id_by_name, store_name_by_id, STOCK_ROLES, in_state, is_button, register_simple_cancel, product_line, SKIP
+from schema import METAL_TYPES, PRODUCT_TYPES
 from state import bot, user_state, get_op, start_op, end_op, cancel_current_operation
 from utils.stock_report import build_stock_excel, stock_totals
 from utils.common import parse_float, parse_int, parse_money, money, h, now
@@ -29,7 +29,7 @@ def _choices(column, fallback):
 # Шаги: (состояние, ключ, вопрос)
 ADD_STEPS = [
     ("STOCK_ADD_ARTICLE", 'article_number', "Артикул нового товара:"),
-    ("STOCK_ADD_STORE", 'Store', "Магазин:"),
+    ("STOCK_ADD_STORE", 'store_id', "Магазин:"),
     ("STOCK_ADD_TYPE", 'product_type', "Тип изделия:"),
     ("STOCK_ADD_MODEL", 'model', "Модель / название:"),
     ("STOCK_ADD_METAL", 'metal_type', "Металл:"),
@@ -48,7 +48,7 @@ ADD_STEPS = [
 ADD_CONFIRM = "STOCK_ADD_CONFIRM"
 STEP_INDEX = {state: i for i, (state, _, _) in enumerate(ADD_STEPS)}
 FIELD_TITLES = {
-    'article_number': 'Артикул', 'Store': 'Магазин', 'product_type': 'Тип', 'model': 'Модель', 'metal_type': 'Металл',
+    'article_number': 'Артикул', 'store_id': 'Магазин', 'product_type': 'Тип', 'model': 'Модель', 'metal_type': 'Металл',
     'size': 'Размер', 'fineness': 'Проба', 'inserts': 'Вставки', 'weight': 'Вес, г', 'price_per_gram': 'Цена за грамм', 'price': 'Цена', 'min_price': 'Мин. цена',
     'quantity': 'Количество', 'manufacturer': 'Производитель', 'commentaries': 'Комментарий', 'track_stock': 'Уведомлять об остатке',
 }
@@ -59,8 +59,8 @@ def _ask_step(chat_id, index):
     user_state[chat_id] = state
     op = get_op(chat_id)
     text = f"Шаг {index + 1}/{len(ADD_STEPS)}. {question}"
-    if key == 'Store':
-        markup = create_choice_markup(_choices('Store', STORES), 2)
+    if key == 'store_id':
+        markup = create_choice_markup(store_names(), 2)
     elif key == 'product_type':
         markup = create_choice_markup(_choices('product_type', PRODUCT_TYPES), 3)
     elif key == 'metal_type':
@@ -99,8 +99,11 @@ def _validate(chat_id, key, text):
         if existing:
             return False, f"Товар с артикулом {text} уже есть ({existing.get('model')}). Введите другой артикул."
         return True, text
-    if key in ('Store', 'product_type', 'metal_type'):
-        fallback = {'Store': STORES, 'product_type': PRODUCT_TYPES, 'metal_type': METAL_TYPES}[key]
+    if key == 'store_id':
+        store_id = store_id_by_name(text)
+        return (True, store_id) if store_id else (False, "Выберите магазин кнопкой.")
+    if key in ('product_type', 'metal_type'):
+        fallback = {'product_type': PRODUCT_TYPES, 'metal_type': METAL_TYPES}[key]
         options = _choices(key, fallback)
         return (True, text) if text in options else (False, "Выберите вариант кнопкой.")
     if key == 'model':
@@ -170,6 +173,8 @@ def on_add_step(message):
             v = money(v)
         elif k == 'track_stock':
             v = "да" if v else "нет"
+        elif k == 'store_id':
+            v = store_name_by_id(v)
         lines.append(f"{FIELD_TITLES[k]}: {h(v if v not in (None, '') else '—')}")
     bot.send_message(chat_id, "\n".join(lines), parse_mode='HTML', reply_markup=create_confirmation_markup())
 
