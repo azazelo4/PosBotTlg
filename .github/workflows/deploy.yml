@@ -37,7 +37,10 @@ jobs:
           shellcheck -S warning deploy/*.sh
 
       - name: Валидация compose для установки из образа
-        run: docker compose -f deploy/compose.prod.yml --env-file .env.example config -q
+        # Как у клиента: файл лежит в каталоге установки рядом с .env
+        run: |
+          mkdir -p /tmp/posbot && cp deploy/compose.prod.yml /tmp/posbot/docker-compose.yml && cp .env.example /tmp/posbot/.env
+          docker compose --project-directory /tmp/posbot config -q
 
       - name: Сборка образа
         run: docker build -t pos-bot:ci .
