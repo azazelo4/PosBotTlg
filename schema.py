@@ -8,9 +8,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Магазины хранятся в таблице stores. Этот список — только начальное заполнение пустой базы,
-# если магазины не заданы переменной STORES (см. config.DEFAULT_STORES).
-DEFAULT_STORES = ('ЦУМ', 'Отау Сауда')
+# Магазины хранятся в таблице stores и задаются мастером /setup (или переменной STORES для пустой базы).
 METAL_TYPES = ('золото', 'серебро', 'бижутерия')
 PRODUCT_TYPES = (
     'кольцо', 'цепь', 'серьги', 'браслет', 'подвеска', 'брошь', 'набор', 'часы',
@@ -26,6 +24,24 @@ def _enum(values):
 CHARSET = "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
 
 TABLES = {
+    "settings": f"""
+        CREATE TABLE IF NOT EXISTS `settings` (
+          `setting_key` varchar(64) NOT NULL,
+          `value` text DEFAULT NULL,
+          `is_secret` tinyint(1) NOT NULL DEFAULT 0,
+          `updated_at` datetime NOT NULL,
+          `updated_by` int DEFAULT NULL,
+          PRIMARY KEY (`setting_key`)
+        ) {CHARSET}""",
+    "settings_log": f"""
+        CREATE TABLE IF NOT EXISTS `settings_log` (
+          `id` int NOT NULL AUTO_INCREMENT,
+          `setting_key` varchar(64) NOT NULL,
+          `action` varchar(16) NOT NULL,
+          `user_id` int DEFAULT NULL,
+          `changed_at` datetime NOT NULL,
+          PRIMARY KEY (`id`)
+        ) {CHARSET}""",
     "stores": f"""
         CREATE TABLE IF NOT EXISTS `stores` (
           `id` int NOT NULL AUTO_INCREMENT,
@@ -262,10 +278,10 @@ def _migrate_stores(cursor, default_stores):
         cursor.execute("UPDATE users u LEFT JOIN stores s ON s.id = u.store_id SET u.store_id = NULL "
                        "WHERE u.store_id IS NOT NULL AND s.id IS NULL")
     cursor.execute("SELECT COUNT(*) FROM stores")
-    if cursor.fetchone()[0] == 0:
-        for order, name in enumerate(default_stores or DEFAULT_STORES):
+    if cursor.fetchone()[0] == 0 and default_stores:
+        for order, name in enumerate(default_stores):
             cursor.execute("INSERT IGNORE INTO stores (name, sort_order) VALUES (%s, %s)", (name, order))
-        logger.info("Созданы магазины: %s", ", ".join(default_stores or DEFAULT_STORES))
+        logger.info("Созданы магазины: %s", ", ".join(default_stores))
     # Магазин продажи — магазин товара на момент продажи; возврат — магазин продажи
     cursor.execute("UPDATE sales s JOIN products p ON p.id = s.product_id SET s.store_id = p.store_id "
                    "WHERE s.store_id IS NULL AND p.store_id IS NOT NULL")
@@ -280,8 +296,13 @@ def _migrate_stores(cursor, default_stores):
 
 
 def ensure_schema(connection, default_stores=None):
-    """Создаёт недостающие таблицы/колонки. Принимает открытое соединение."""
+    """Создаёт недостающие таблицы/колонки. Принимает открытое соединение.
+
+    Бот и веб стартуют одновременно: миграции выполняются под именованной блокировкой MySQL.
+    """
     cursor = connection.cursor()
+    cursor.execute("SELECT GET_LOCK('posbot_schema', 120)")
+    cursor.fetchall()
     try:
         cursor.execute("SET FOREIGN_KEY_CHECKS = 0")
         for name, ddl in TABLES.items():
@@ -309,4 +330,8 @@ def ensure_schema(connection, default_stores=None):
         connection.commit()
         logger.info("Схема БД проверена и актуальна.")
     finally:
-        cursor.close()
+        try:
+            cursor.execute("SELECT RELEASE_LOCK('posbot_schema')")
+            cursor.fetchall()
+        finally:
+            cursor.close()

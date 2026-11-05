@@ -1,6 +1,6 @@
 from telebot import types
 
-from config import WEB_URL
+import config
 from state import user_data
 
 PAYMENT_TYPES = ["Наличные", "Безналичные", "Kaspi"]
@@ -25,11 +25,11 @@ def create_cashier_buttons():
 
 
 def create_manager_buttons():
-    return _kb([BTN_CASH, BTN_STOCK], *([[BTN_WEB]] if WEB_URL else []))
+    return _kb([BTN_CASH, BTN_STOCK], *([[BTN_WEB]] if config.WEB_URL else []))
 
 
 def create_admin_buttons():
-    return _kb([BTN_CASH, BTN_STOCK], [BTN_STAFF] + ([BTN_WEB] if WEB_URL else []))
+    return _kb([BTN_CASH, BTN_STOCK], [BTN_STAFF] + ([BTN_WEB] if config.WEB_URL else []))
 
 
 def create_share_contact_markup():

@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Готово{% endblock %}
+{% block content %}
+<article style="max-width:40rem;margin:2rem auto">
+  <h2>✅ Настройка сохранена</h2>
+  <ol>
+    <li>Бот запустится в течение 10–20 секунд.</li>
+    <li>Откройте {% if bot_name %}<a href="https://t.me/{{ bot_name[1:] }}">{{ bot_name }}</a>{% else %}бота{% endif %} в Telegram,
+      нажмите <strong>/start</strong> и поделитесь номером{% if admin_phone %} <strong>{{ admin_phone }}</strong>{% endif %}.</li>
+    <li>Сотрудников добавляйте в боте («Персонал») или в веб-админке.</li>
+    {% if web_url %}<li>Вход в веб-админку — кнопка «Веб-админка» в боте.</li>{% endif %}
+  </ol>
+  <p class="muted">Эта страница больше недоступна: настройки меняются в разделе «Настройки» веб-админки.</p>
+</article>
+{% endblock %}

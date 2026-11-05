@@ -1,0 +1,47 @@
+{# Поля настроек: groups = [(key, title, [field])], field = {s, locked, is_set, value, checked} #}
+{% macro field(f, allow_clear=False) %}
+  {% set s = f.s %}
+  {% if s.kind == 'bool' %}
+    <label>
+      <input type="checkbox" role="switch" name="{{ s.key }}" {% if f.checked %}checked{% endif %} {% if f.locked %}disabled{% endif %}>
+      {{ s.title }}
+    </label>
+  {% else %}
+    <label>{{ s.title }}
+      {% if f.locked %}
+        <input value="{{ '••••••••' if s.secret else f.value }}" disabled>
+      {% elif s.secret %}
+        <input type="password" name="{{ s.key }}" autocomplete="new-password"
+               placeholder="{{ 'задан — оставьте пустым, чтобы не менять' if f.is_set else s.placeholder }}">
+      {% elif s.kind == 'tz' %}
+        <input name="{{ s.key }}" value="{{ f.value }}" list="timezones" required>
+      {% else %}
+        <input name="{{ s.key }}" value="{{ f.value }}" placeholder="{{ s.placeholder }}"
+               {% if s.kind in ('int', 'float') %}inputmode="decimal"{% elif s.kind == 'time' %}inputmode="numeric" pattern="\d{1,2}:\d{2}"{% elif s.kind == 'url' %}type="url"{% endif %}>
+      {% endif %}
+    </label>
+  {% endif %}
+  <small class="muted" style="display:block;margin-top:-.5rem;margin-bottom:1rem">
+    {% if f.locked %}Задано в .env на сервере — уберите строку {{ s.env_name }} из .env, чтобы менять здесь.{% else %}{{ s.help }}{% endif %}
+    {% if s.secret and f.is_set and not f.locked and allow_clear %}
+      <label style="display:inline"><input type="checkbox" name="clear_{{ s.key }}"> удалить</label>
+    {% endif %}
+  </small>
+{% endmacro %}
+
+{% macro groups_form(groups, open_all=True, allow_clear=False) %}
+  {% for key, title, fields in groups %}
+    {% if key == 'fiscal' %}
+      <details style="margin-bottom:1.5rem" {% if open_all or fields[0].checked %}open{% endif %}>
+        <summary><strong>{{ title }}</strong> <span class="muted">— необязательно</span></summary>
+        {% for f in fields %}{{ field(f, allow_clear) }}{% endfor %}
+      </details>
+    {% else %}
+      <fieldset>
+        <legend><strong>{{ title }}</strong></legend>
+        {% for f in fields %}{{ field(f, allow_clear) }}{% endfor %}
+      </fieldset>
+    {% endif %}
+  {% endfor %}
+  <datalist id="timezones">{% for z in TIMEZONES %}<option value="{{ z }}">{% endfor %}</datalist>
+{% endmacro %}

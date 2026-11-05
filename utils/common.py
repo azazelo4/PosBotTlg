@@ -3,16 +3,25 @@ import re
 from datetime import datetime, date, timedelta
 from decimal import Decimal, InvalidOperation
 from html import escape
+from functools import lru_cache
 from zoneinfo import ZoneInfo
 
-from config import TIMEZONE
+import config
 
-TZ = ZoneInfo(TIMEZONE)
+
+@lru_cache(maxsize=8)
+def _zone(name):
+    return ZoneInfo(name)
+
+
+def tz() -> ZoneInfo:
+    """Часовой пояс магазина (настройка TIMEZONE)."""
+    return _zone(config.TIMEZONE or "Asia/Almaty")
 
 
 def now() -> datetime:
     """Текущее время магазина без tzinfo (так хранится в DATETIME)."""
-    return datetime.now(TZ).replace(tzinfo=None, microsecond=0)
+    return datetime.now(tz()).replace(tzinfo=None, microsecond=0)
 
 
 def today() -> date:

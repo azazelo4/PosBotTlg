@@ -17,13 +17,15 @@ services:
         max-size: "10m"
         max-file: "5"
 
-  # Веб-админка и Telegram Mini App. Включаются профилем web (COMPOSE_PROFILES=web в .env)
+  # Веб-админка, мастер первоначальной настройки (/setup) и Telegram Mini App.
+  # Порт 8000 открыт только на localhost сервера: настройка без домена — через SSH-туннель.
   web:
     build: .
     image: posbot-app
     container_name: PosBotWeb
     restart: always
-    profiles: ["web"]
+    ports:
+      - "127.0.0.1:8000:8000"
     command: ["uvicorn", "web.app:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
     depends_on:
       db:
@@ -34,18 +36,16 @@ services:
       TZ: ${TZ:-Asia/Almaty}
     logging: *logging
 
+  # HTTPS для веб-админки. Домен и сертификат — автоматически после /setup (см. deploy/Caddyfile)
   caddy:
     image: caddy:2
     container_name: PosBotCaddy
     restart: always
-    profiles: ["web"]
     depends_on:
       - web
     ports:
       - "80:80"
       - "443:443"
-    environment:
-      WEB_DOMAIN: ${WEB_DOMAIN:-localhost}
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

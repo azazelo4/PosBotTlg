@@ -4,7 +4,7 @@ import logging
 
 from telebot import types
 
-from config import LOW_STOCK_THRESHOLD, REPORT_CHAT_ID
+import config
 from database import get_low_stock_products, get_chat_ids_by_roles
 from state import bot
 from utils.common import today, h
@@ -27,7 +27,7 @@ def _send_safe(chat_id, text, **kwargs):
 def send_daily_report():
     """Отчёт за сегодня — в REPORT_CHAT_ID или всем активным администраторам."""
     day = today()
-    recipients = [REPORT_CHAT_ID] if REPORT_CHAT_ID else (get_chat_ids_by_roles(['admin']) or [])
+    recipients = [config.REPORT_CHAT_ID] if config.REPORT_CHAT_ID else (get_chat_ids_by_roles(['admin']) or [])
     if not recipients:
         logger.warning("Ежедневный отчёт: нет получателей (REPORT_CHAT_ID не задан, администраторы ещё не входили в бота).")
         return
@@ -47,7 +47,7 @@ def send_daily_report():
 
 
 def send_low_stock_notification():
-    products = get_low_stock_products(LOW_STOCK_THRESHOLD)
+    products = get_low_stock_products(config.LOW_STOCK_THRESHOLD)
     if not products:
         logger.info("Низких остатков нет.")
         return
@@ -55,7 +55,7 @@ def send_low_stock_notification():
     if not recipients:
         logger.warning("Уведомление о низком остатке: нет получателей.")
         return
-    lines = [f"⚠️ <b>Низкий остаток</b> (порог {LOW_STOCK_THRESHOLD} шт.)", ""]
+    lines = [f"⚠️ <b>Низкий остаток</b> (порог {config.LOW_STOCK_THRESHOLD} шт.)", ""]
     for p in products:
         lines.append(f"• {h(p['model'])} ({h(p['product_type'])}), арт. <code>{h(p['article_number'])}</code> — "
                      f"<b>{p['quantity']}</b> шт., {h(p['Store'])}")

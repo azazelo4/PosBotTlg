@@ -11,7 +11,7 @@ import time
 from datetime import timedelta
 from urllib.parse import parse_qsl
 
-from config import TOKEN, WEB_SECRET, WEB_URL
+import config
 from database import create_login_token, consume_login_token
 from utils.common import now
 
@@ -22,7 +22,11 @@ CASH_ROLES = ('admin', 'manager', 'cashier')
 
 
 def session_secret():
-    return WEB_SECRET or hashlib.sha256(("posbot-web:" + TOKEN).encode()).hexdigest()
+    """Ключ подписи cookie. Не зависит от токена бота: веб работает и до настройки."""
+    if config.WEB_SECRET:
+        return config.WEB_SECRET
+    base = config.MASTER_KEY or ("db:" + (config.DB_PASS or ""))
+    return hashlib.sha256(("posbot-web:" + base).encode()).hexdigest()
 
 
 def _hash(token):
@@ -31,11 +35,11 @@ def _hash(token):
 
 def issue_login_link(user_id):
     """Создаёт одноразовую ссылку входа (10 минут). None, если веб не настроен."""
-    if not WEB_URL:
+    if not config.WEB_URL:
         return None
     token = secrets.token_urlsafe(24)
     ok, _ = create_login_token(user_id, _hash(token), now() + LOGIN_TTL)
-    return f"{WEB_URL}/login?t={token}" if ok else None
+    return f"{config.WEB_URL}/login?t={token}" if ok else None
 
 
 def redeem_login_token(token):
@@ -47,7 +51,8 @@ def redeem_login_token(token):
 
 def validate_init_data(init_data, bot_token=None, max_age=INIT_DATA_MAX_AGE):
     """Проверяет подпись Telegram WebApp initData. Возвращает dict пользователя Telegram или None."""
-    if not init_data:
+    token = bot_token or config.TOKEN
+    if not init_data or not token:
         return None
     try:
         pairs = dict(parse_qsl(init_data, keep_blank_values=True, strict_parsing=True))
@@ -57,7 +62,7 @@ def validate_init_data(init_data, bot_token=None, max_age=INIT_DATA_MAX_AGE):
     if not received:
         return None
     check_string = "\n".join(f"{k}={v}" for k, v in sorted(pairs.items()))
-    secret = hmac.new(b"WebAppData", (bot_token or TOKEN).encode(), hashlib.sha256).digest()
+    secret = hmac.new(b"WebAppData", token.encode(), hashlib.sha256).digest()
     expected = hmac.new(secret, check_string.encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, received):
         return None

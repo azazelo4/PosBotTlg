@@ -7,7 +7,7 @@ from datetime import timedelta
 from telebot import types
 
 from buttons import create_cancel_markup, create_choice_markup, create_stock_management_buttons
-from config import LABEL_WIDTH_MM, LABEL_HEIGHT_MM
+import config
 from database import get_products_by_articles, get_products_for_labels
 from handlers.common import store_names, store_id_by_name, STOCK_ROLES, in_state, is_button, register_simple_cancel
 from state import bot, user_state, get_op, start_op, end_op, cancel_current_operation
@@ -30,7 +30,7 @@ def start(message):
     chat_id = message.chat.id
     cancel_current_operation(chat_id, notify=False)
     start_op(chat_id, MODE)
-    bot.send_message(chat_id, f"Ценники {LABEL_WIDTH_MM:g}×{LABEL_HEIGHT_MM:g} мм. Для каких товаров?",
+    bot.send_message(chat_id, f"Ценники {config.LABEL_WIDTH_MM:g}×{config.LABEL_HEIGHT_MM:g} мм. Для каких товаров?",
                      reply_markup=create_choice_markup([BY_ARTICLES, TODAY, WEEK, ALL_IN_STOCK], 2))
 
 
@@ -108,7 +108,7 @@ def on_copies(message):
         stock_menu(chat_id, "❌ Не удалось сформировать ценники.")
         return
     bot.send_document(chat_id, types.InputFile(io.BytesIO(pdf), file_name=f"labels_{now():%Y%m%d_%H%M}.pdf"),
-                      caption=f"Ценников: {count}. Печать: масштаб 100 %, размер бумаги {LABEL_WIDTH_MM:g}×{LABEL_HEIGHT_MM:g} мм.")
+                      caption=f"Ценников: {count}. Печать: масштаб 100 %, размер бумаги {config.LABEL_WIDTH_MM:g}×{config.LABEL_HEIGHT_MM:g} мм.")
     stock_menu(chat_id, "Выберите следующее действие:")
 
 

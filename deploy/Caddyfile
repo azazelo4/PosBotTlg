@@ -1,7 +1,17 @@
-# HTTPS-прокси для веб-админки и Mini App. Сертификат Let's Encrypt выпускается автоматически.
-# Домен берётся из переменной WEB_DOMAIN (.env), DNS-запись A должна указывать на IP сервера.
-{$WEB_DOMAIN} {
+# HTTPS-прокси для веб-админки и Mini App. Сертификат Let's Encrypt выпускается автоматически
+# при первом заходе на домен (on-demand TLS). Домен задаётся в мастере /setup (адрес веб-админки),
+# переменные окружения не нужны. Разрешение на выпуск сертификата даёт сам веб (/caddy/ask):
+# до настройки — для любого домена, направленного на сервер, после — только для домена из настроек.
+{
+	on_demand_tls {
+		ask http://web:8000/caddy/ask
+	}
+}
+
+(proxy) {
 	encode gzip
+	# Служебный адрес для Caddy снаружи не нужен
+	respond /caddy/* 404
 	reverse_proxy web:8000
 	header {
 		Strict-Transport-Security "max-age=31536000"
@@ -9,4 +19,15 @@
 		Referrer-Policy "same-origin"
 		-Server
 	}
+}
+
+https:// {
+	tls {
+		on_demand
+	}
+	import proxy
+}
+
+http:// {
+	redir https://{host}{uri} 308
 }

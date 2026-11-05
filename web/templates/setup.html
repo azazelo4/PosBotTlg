@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% from "_fields.html" import groups_form %}
+{% block title %}Первоначальная настройка{% endblock %}
+{% block content %}
+<article style="max-width:46rem;margin:1rem auto">
+  <header>
+    <h2 style="margin:0">Первоначальная настройка</h2>
+    <p class="muted" style="margin:0">Заполняется один раз. Потом всё можно поменять в разделе «Настройки» веб-админки.</p>
+  </header>
+  <form method="post" autocomplete="off">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <fieldset>
+      <legend><strong>Код настройки</strong></legend>
+      <label>Код из логов сервера
+        <input name="code" required placeholder="XXXX-XXXX-XXXX" value="{{ form.get('code', '') }}" autocapitalize="characters">
+      </label>
+      <small class="muted" style="display:block;margin-top:-.5rem;margin-bottom:1rem">
+        На сервере, в каталоге бота: <code>docker compose exec web python -m setup_code</code>
+      </small>
+    </fieldset>
+
+    {{ groups_form(groups, open_all=False) }}
+
+    <fieldset>
+      <legend><strong>Магазины</strong></legend>
+      {% if existing_stores %}
+        <p>{% for st in existing_stores %}{{ st.name }}{% if not loop.last %}, {% endif %}{% endfor %}
+          <br><small class="muted">Магазины уже есть в базе. Изменить — раздел «Магазины» веб-админки.</small></p>
+      {% else %}
+        <label>Названия, по одному в строке
+          <textarea name="stores" rows="3" required placeholder="ЦУМ&#10;Отау Сауда">{{ form.get('stores', '') }}</textarea>
+        </label>
+        <small class="muted" style="display:block;margin-top:-.5rem;margin-bottom:1rem">Печатаются на ценниках и в отчётах.</small>
+      {% endif %}
+    </fieldset>
+
+    <fieldset>
+      <legend><strong>Администратор</strong></legend>
+      <div class="grid">
+        <label>Имя<input name="admin_name" value="{{ form.get('admin_name', '') }}" {% if not has_admin %}required{% endif %} placeholder="Айгерим"></label>
+        <label>Телефон в Telegram<input name="admin_phone" value="{{ form.get('admin_phone', '') }}" inputmode="tel"
+               {% if not has_admin %}required{% endif %} placeholder="+77011234567"></label>
+      </div>
+      <small class="muted" style="display:block;margin-top:-.5rem;margin-bottom:1rem">
+        {% if has_admin %}Администратор уже есть — заполните, только чтобы добавить ещё одного.{% else %}
+        По этому номеру администратор войдёт в бота: /start → «Поделиться номером».{% endif %}
+      </small>
+    </fieldset>
+
+    <button type="submit">Сохранить и запустить бота</button>
+  </form>
+</article>
+{% endblock %}
