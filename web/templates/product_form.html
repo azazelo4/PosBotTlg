@@ -12,8 +12,8 @@
   <div class="grid">
     <label>Артикул *<input name="article_number" value="{{ product.article_number or '' }}" required maxlength="64"></label>
     <label>Магазин *
-      <select name="Store" required>
-        {% for s in stores %}<option {% if s == product.Store %}selected{% endif %}>{{ s }}</option>{% endfor %}
+      <select name="store_id" required>
+        {% for s in stores %}<option value="{{ s.id }}" {% if s.id == product.store_id %}selected{% endif %}>{{ s.name }}</option>{% endfor %}
       </select></label>
   </div>
   <label>Название *<input name="model" value="{{ product.model or '' }}" required maxlength="255"></label>

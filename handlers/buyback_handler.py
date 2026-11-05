@@ -3,17 +3,31 @@ import logging
 
 from buttons import create_cancel_markup, create_confirmation_markup, create_payment_type_markup, PAYMENT_TYPES, BTN_CONFIRM
 from database import create_buyback_record
-from handlers.common import (CASH_ROLES, CustomerItemIntake, in_state, is_button, user_ids, cash_menu,
+from handlers.common import (needs_store_choice, ask_store, read_store, CASH_ROLES, CustomerItemIntake, in_state, is_button, user_ids, cash_menu,
                              register_simple_cancel, ask_money, read_money)
 from state import bot, user_state, get_op, start_op, end_op, cancel_current_operation
 from utils.common import money, h
 
 logger = logging.getLogger(__name__)
 
-PRICE, PAYMENT, CONFIRM = "BUYBACK_PRICE", "BUYBACK_PAYMENT", "BUYBACK_CONFIRM"
+PRICE, PAYMENT, CONFIRM, STORE = "BUYBACK_PRICE", "BUYBACK_PAYMENT", "BUYBACK_CONFIRM", "BUYBACK_STORE"
 
 
 def _after_item(chat_id):
+    item = get_op(chat_id)['item']
+    # своё изделие относится к магазину товара; для чужого нужен магазин сотрудника
+    if not item.get('article') and needs_store_choice(chat_id):
+        ask_store(chat_id, STORE, "В каком магазине скупка?")
+        return
+    _ask_price(chat_id)
+
+
+def on_store(message):
+    if read_store(message):
+        _ask_price(message.chat.id)
+
+
+def _ask_price(chat_id):
     item = get_op(chat_id)['item']
     user_state[chat_id] = PRICE
     note = "\nИзделие вернётся на склад." if item.get('article') else ""
@@ -78,6 +92,7 @@ def register_buyback_handlers():
     register_simple_cancel("BUYBACK_", "Скупка")
     bot.register_message_handler(start, func=is_button("Скупка", *CASH_ROLES))
     intake.register()
+    bot.register_message_handler(on_store, func=in_state(STORE))
     bot.register_message_handler(on_price, func=in_state(PRICE))
     bot.register_message_handler(on_payment, func=in_state(PAYMENT))
     bot.register_message_handler(on_confirm, func=in_state(CONFIRM))

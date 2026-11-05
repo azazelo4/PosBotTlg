@@ -46,6 +46,19 @@ def test_legacy_database_is_upgraded_in_place(fake):
     assert _columns(cur, 'returns')['store_id'] == 'YES'
     assert {'old_item_value', 'new_sale_price'} <= set(_columns(cur, 'trade_ins'))
 
+    # магазины перенесены из ENUM в справочник, в исходном порядке
+    cur.execute("SELECT id, name FROM stores ORDER BY sort_order")
+    stores = cur.fetchall()
+    assert [n for _, n in stores] == ['ЦУМ', 'Отау Сауда']
+    ids = {n: i for i, n in stores}
+    cur.execute("SELECT store_id, legacy_store FROM products WHERE article_number='OLD1'")
+    assert cur.fetchone() == (ids['ЦУМ'], 'ЦУМ')
+    assert 'Store' not in _columns(cur, 'products')
+    cur.execute("SELECT store_id FROM sales")
+    assert cur.fetchone()[0] == ids['ЦУМ']          # магазин продажи = магазин товара
+    cur.execute("SELECT store_id FROM users WHERE name='Старый кассир'")
+    assert cur.fetchone()[0] == ids['Отау Сауда']   # store_id=2 существует — сохранён
+
     # старые данные на месте
     cur.execute("SELECT model, quantity, manufacturer FROM products WHERE article_number='OLD1'")
     assert cur.fetchone() == ('Старое кольцо', 2, 'Завод')
@@ -57,8 +70,8 @@ def test_legacy_database_is_upgraded_in_place(fake):
                 " VALUES (NULL, 'лом', 'золото', 1.5, 30000, 'Kaspi', 1, NULL, NOW())")
     cur.execute("INSERT INTO returns (original_sale_id, product_article, return_price, payment_type, user_id, store_id, return_date)"
                 " VALUES (1, 'OLD1', 95000, 'Наличные', 1, NULL, NOW())")
-    cur.execute("INSERT INTO products (article_number, Store, metal_type, product_type, model, weight, price, min_price, arrival_date, quantity)"
-                " VALUES ('NEW1', 'ЦУМ', 'золото', 'цепь', 'Новая', 3, 1, 1, CURDATE(), 1)")
+    cur.execute("INSERT INTO products (article_number, store_id, metal_type, product_type, model, weight, price, min_price, arrival_date, quantity)"
+                " VALUES ('NEW1', 1, 'золото', 'цепь', 'Новая', 3, 1, 1, CURDATE(), 1)")
     conn.commit()
     conn.close()
 

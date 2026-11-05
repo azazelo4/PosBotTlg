@@ -11,7 +11,7 @@
     <label>Магазин для товаров, если в файле нет колонки «Магазин»
       <select name="store">
         <option value="">— указан в файле —</option>
-        {% for s in stores %}<option>{{ s }}</option>{% endfor %}
+        {% for s in stores %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}
       </select></label>
     <button type="submit">Проверить файл</button>
   </form>

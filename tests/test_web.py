@@ -90,7 +90,7 @@ def test_products_list_create_edit(tg, client):
     page = client.get("/products?q=A1")
     assert "A100" in page.text and "A200" not in page.text
     token = csrf(client, "/products/new")
-    form = {"csrf": token, "article_number": "W1", "Store": "ЦУМ", "model": "Кольцо Веб", "product_type": "кольцо",
+    form = {"csrf": token, "article_number": "W1", "store_id": "1", "model": "Кольцо Веб", "product_type": "кольцо",
             "metal_type": "золото", "fineness": "585", "weight": "1,5", "price": "100 000", "min_price": "120000",
             "quantity": "1", "track_stock": "on"}
     r = client.post("/products/new", data=form)
@@ -120,7 +120,7 @@ def test_import_via_web(tg, client):
         wb.active.append(row)
     buf = io.BytesIO()
     wb.save(buf)
-    r = client.post("/import", data={"csrf": csrf(client, "/import"), "store": "ЦУМ"},
+    r = client.post("/import", data={"csrf": csrf(client, "/import"), "store": "1"},
                     files={"file": ("catalog.xlsx", buf.getvalue(), "application/octet-stream")})
     assert r.status_code == 200 and "Предпросмотр" in r.text and "новый" in r.text and "обновится" in r.text
     action = re.search(r'action="(/import/[^"]+)"', r.text).group(1)

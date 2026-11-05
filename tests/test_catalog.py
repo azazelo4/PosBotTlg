@@ -47,7 +47,7 @@ def test_import_from_paloma_like_excel(tg):
     n1, n2, n3, a100 = rows['N1'], rows['N2'], rows['N3'], rows['A100']
     assert (n1['product_type'], n1['metal_type'], n1['fineness'], n1['size'], n1['inserts']) == ('кольцо', 'золото', '585', '16.5', 'фианит')
     assert n1['min_price'] == n1['price'] == 98000 and n1['quantity'] == 2
-    assert (n2['product_type'], n2['metal_type'], n2['fineness'], n2['Store'], n2['price']) == ('цепь', 'серебро', '925', 'Отау Сауда', 15000)
+    assert (n2['product_type'], n2['metal_type'], n2['fineness'], n2['store_id'], n2['price']) == ('цепь', 'серебро', '925', 2, 15000)
     assert abs(n2['weight'] - 4.2) < 1e-6
     assert (n3['product_type'], n3['metal_type']) == ('подвеска', 'золото')
     # существующий товар: цена и остаток обновлены, минимальная цена не выше цены
@@ -66,7 +66,7 @@ def test_import_only_new_and_default_store(tg):
     tg.send(ADMIN, "Загрузить только новые")
     rows = {r['article_number']: r for r in db_query("SELECT * FROM products")}
     assert rows['A100']['model'] == 'Кольцо Классика' and rows['A100']['price'] == 150000  # не тронут
-    assert rows['C9']['Store'] == 'Отау Сауда' and rows['C9']['quantity'] == 0 and rows['C9']['product_type'] == 'серьги'
+    assert rows['C9']['store_id'] == 2 and rows['C9']['quantity'] == 0 and rows['C9']['product_type'] == 'серьги'
 
 
 def test_import_rejects_bad_files(tg):
@@ -89,7 +89,7 @@ def test_labels_pdf_by_articles_and_stock(tg):
     pdf = PdfReader(io.BytesIO(tg.documents[-1].data))
     assert len(pdf.pages) == 4
     box = pdf.pages[0].mediabox
-    assert round(float(box.width) / 72 * 25.4) == 40 and round(float(box.height) / 72 * 25.4) == 30
+    assert round(float(box.width) / 72 * 25.4) == 30 and round(float(box.height) / 72 * 25.4) == 20
     text = pdf.pages[0].extract_text()
     assert "150 000" in text and "Кольцо" in text and "A100" in text
 
@@ -103,3 +103,13 @@ def test_labels_pdf_by_articles_and_stock(tg):
 def test_labels_not_for_cashier(tg):
     login(tg, CASHIER)
     assert "Не понял" in tg.texts(tg.send(CASHIER, "Ценники"))
+
+
+def test_labels_portrait_layout_for_tall_labels(tg):
+    from utils.labels import generate_labels_pdf
+    product = db_query("SELECT * FROM products WHERE article_number='A100'")[0]
+    pdf, count = generate_labels_pdf([product], width_mm=20, height_mm=30)
+    page = PdfReader(io.BytesIO(pdf)).pages[0]
+    assert count == 1 and round(float(page.mediabox.width) / 72 * 25.4) == 20
+    text = page.extract_text()
+    assert "Кольцо" in text and "150 000" in text and "A100" in text

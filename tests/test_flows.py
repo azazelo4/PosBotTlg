@@ -239,8 +239,12 @@ def test_report_today_includes_all_operations(tg):
     tg.send(CASHIER, "Инкассация"); tg.send(CASHIER, "100000"); tg.send(CASHIER, "Пропустить"); tg.send(CASHIER, "Подтвердить")
 
     tg.send(CASHIER, "Отчеты")
-    calls = tg.send(CASHIER, "Сегодня")
+    assert "По какому магазину" in tg.texts(tg.send(CASHIER, "Сегодня"))
+    calls = tg.send(CASHIER, "Все магазины")
     text = tg.texts(calls)
+    # разбивка: A100 продан в ЦУМ, A200 — в Отау Сауда (и возвращён там же)
+    assert "<b>По магазинам</b>" in text
+    assert "ЦУМ: продажи 1 шт. на 150 000 ₸" in text and "Отау Сауда: продажи 1 шт. на 0 ₸" in text
     assert "Продажи: 2 шт. на <b>170 000 ₸</b>" in text
     assert "Возвраты: 1 шт. на 20 000 ₸" in text
     assert "Скупка: 1 шт. на 3 000 ₸" in text
@@ -263,7 +267,8 @@ def test_report_custom_period_validation(tg):
     assert "Не понял" in tg.texts(tg.send(ADMIN, "32.13.2026"))
     tg.send(ADMIN, "01.10.2026")
     assert "раньше" in tg.texts(tg.send(ADMIN, "01.09.2026"))
-    calls = tg.send(ADMIN, "Сегодня")
+    tg.send(ADMIN, "Сегодня")
+    calls = tg.send(ADMIN, "ЦУМ")
     assert "Отчёт за 01.10.2026" in tg.texts(calls)
     assert tg.documents
 
@@ -330,9 +335,10 @@ def test_user_management(tg):
     tg.send(ADMIN, "Айгерим Сапарова")
     assert "Некорректный" in tg.texts(tg.send(ADMIN, "12345"))
     tg.send(ADMIN, "8 701 555 44 33")
-    assert "✅" in tg.texts(tg.send(ADMIN, "Кассир"))
+    assert "В каком магазине" in tg.texts(tg.send(ADMIN, "Кассир"))
+    assert "✅" in tg.texts(tg.send(ADMIN, "Отау Сауда"))
     new = db_query("SELECT * FROM users WHERE name='Айгерим Сапарова'")[0]
-    assert new['phone_number'] == '+77015554433' and new['role'] == 'cashier'
+    assert new['phone_number'] == '+77015554433' and new['role'] == 'cashier' and new['store_id'] == 2
 
     # новый кассир входит, админ повышает его до менеджера
     tg.contact(2001, "77015554433")

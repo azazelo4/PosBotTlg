@@ -9,8 +9,7 @@ from telebot import types
 from buttons import create_cancel_markup, create_choice_markup, create_stock_management_buttons
 from config import LABEL_WIDTH_MM, LABEL_HEIGHT_MM
 from database import get_products_by_articles, get_products_for_labels
-from handlers.common import STOCK_ROLES, in_state, is_button, register_simple_cancel
-from schema import STORES
+from handlers.common import store_names, store_id_by_name, STOCK_ROLES, in_state, is_button, register_simple_cancel
 from state import bot, user_state, get_op, start_op, end_op, cancel_current_operation
 from utils.common import today, now, h
 from utils.labels import generate_labels_pdf
@@ -46,7 +45,7 @@ def on_mode(message):
         _ask_copies(chat_id)
     elif text == ALL_IN_STOCK:
         user_state[chat_id] = STORE
-        bot.send_message(chat_id, "Какой магазин?", reply_markup=create_choice_markup(list(STORES) + [ALL_STORES], 2))
+        bot.send_message(chat_id, "Какой магазин?", reply_markup=create_choice_markup(store_names() + [ALL_STORES], 2))
     else:
         bot.send_message(chat_id, "Выберите вариант кнопкой.", reply_markup=create_choice_markup([BY_ARTICLES, TODAY, WEEK, ALL_IN_STOCK], 2))
 
@@ -72,10 +71,11 @@ def on_articles(message):
 
 def on_store(message):
     chat_id, text = message.chat.id, (message.text or '').strip()
-    if text not in STORES and text != ALL_STORES:
-        bot.send_message(chat_id, "Выберите магазин кнопкой.", reply_markup=create_choice_markup(list(STORES) + [ALL_STORES], 2))
+    store_id = store_id_by_name(text)
+    if not store_id and text != ALL_STORES:
+        bot.send_message(chat_id, "Выберите магазин кнопкой.", reply_markup=create_choice_markup(store_names() + [ALL_STORES], 2))
         return
-    get_op(chat_id)['filter'] = {'store': None if text == ALL_STORES else text}
+    get_op(chat_id)['filter'] = {'store': store_id}
     _ask_copies(chat_id)
 
 

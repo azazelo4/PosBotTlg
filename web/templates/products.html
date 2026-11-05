@@ -13,7 +13,7 @@
   <input type="search" name="q" value="{{ q }}" placeholder="Артикул или название" aria-label="Поиск">
   <select name="store" aria-label="Магазин">
     <option value="">Все магазины</option>
-    {% for s in stores %}<option {% if s == store %}selected{% endif %}>{{ s }}</option>{% endfor %}
+    {% for s in stores %}<option value="{{ s.id }}" {% if s.id == store %}selected{% endif %}>{{ s.name }}</option>{% endfor %}
   </select>
   <select name="stock" aria-label="Наличие">
     <option value="">Любой остаток</option>
@@ -52,9 +52,9 @@
 
 {% if pages > 1 %}
 <nav class="row-actions" style="justify-content:center">
-  {% if page > 1 %}<a href="?q={{ q | urlencode }}&store={{ store | urlencode }}&stock={{ stock }}&page={{ page - 1 }}">← Назад</a>{% endif %}
+  {% if page > 1 %}<a href="?q={{ q | urlencode }}&store={{ store or '' }}&stock={{ stock }}&page={{ page - 1 }}">← Назад</a>{% endif %}
   <span class="muted">Стр. {{ page }} из {{ pages }}</span>
-  {% if page < pages %}<a href="?q={{ q | urlencode }}&store={{ store | urlencode }}&stock={{ stock }}&page={{ page + 1 }}">Вперёд →</a>{% endif %}
+  {% if page < pages %}<a href="?q={{ q | urlencode }}&store={{ store or '' }}&stock={{ stock }}&page={{ page + 1 }}">Вперёд →</a>{% endif %}
 </nav>
 {% endif %}
 <script>

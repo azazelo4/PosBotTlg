@@ -146,7 +146,7 @@ def prepare_database():
     init_pool()
     connection = get_connection()
     try:
-        ensure_schema(connection)
+        ensure_schema(connection, config.DEFAULT_STORES)
     finally:
         connection.close()
     if config.ADMIN_PHONE:

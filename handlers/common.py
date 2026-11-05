@@ -4,7 +4,7 @@ import logging
 from auth import has_role
 from buttons import (create_cash_operations_buttons, create_choice_markup, create_skip_cancel_markup,
                      create_cancel_markup, BTN_CANCEL)
-from database import get_product_by_article
+from database import get_product_by_article, get_stores
 from schema import METAL_TYPES
 from state import bot, user_data, user_state, end_op, get_op, register_cancel
 from utils.common import parse_float, parse_money, money, h
@@ -17,6 +17,24 @@ NO_ARTICLE = "Без артикула"
 SKIP = "Пропустить"
 
 
+def store_names():
+    return [st['name'] for st in (get_stores() or [])]
+
+
+def store_id_by_name(name):
+    for st in get_stores() or []:
+        if st['name'] == name:
+            return st['id']
+    return None
+
+
+def store_name_by_id(store_id):
+    for st in get_stores(active_only=False) or []:
+        if st['id'] == store_id:
+            return st['name']
+    return None
+
+
 def in_state(state):
     return lambda m: user_state.get(m.chat.id) == state
 
@@ -26,8 +44,36 @@ def is_button(text, *roles):
 
 
 def user_ids(chat_id):
+    """(id сотрудника, магазин операции): выбранный в операции или магазин сотрудника."""
     session = user_data.get(chat_id) or {}
-    return session.get('id'), session.get('store_id')
+    return session.get('id'), session.get('op', {}).get('store_id') or session.get('store_id')
+
+
+def needs_store_choice(chat_id):
+    """Сотрудник не привязан к магазину, а магазинов несколько — магазин операции нужно спросить."""
+    session = user_data.get(chat_id) or {}
+    if session.get('store_id'):
+        return False
+    stores = get_stores() or []
+    if len(stores) == 1:
+        session.setdefault('op', {})['store_id'] = stores[0]['id']
+        return False
+    return len(stores) > 1
+
+
+def ask_store(chat_id, state, text="В каком магазине операция?"):
+    user_state[chat_id] = state
+    bot.send_message(chat_id, text, reply_markup=create_choice_markup(store_names(), 2))
+
+
+def read_store(message):
+    """id магазина из ответа или None (и повторный вопрос)."""
+    store_id = store_id_by_name((message.text or '').strip())
+    if store_id:
+        get_op(message.chat.id)['store_id'] = store_id
+    else:
+        bot.send_message(message.chat.id, "Выберите магазин кнопкой.", reply_markup=create_choice_markup(store_names(), 2))
+    return store_id
 
 
 def cash_menu(chat_id, text):

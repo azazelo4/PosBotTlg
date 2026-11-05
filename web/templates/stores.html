@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Магазины{% endblock %}
+{% block content %}
+<h2>Магазины</h2>
+<p class="muted">Названия используются в ценниках, отчётах и при выборе магазина в боте. Переименование безопасно:
+  товары и операции привязаны к магазину, а не к названию. Магазины не удаляются — ненужный можно отключить, история сохранится.</p>
+<div class="table-wrap"><table>
+  <thead><tr><th>Название</th><th>Адрес</th><th class="num">Товаров</th><th>Активен</th><th></th></tr></thead>
+  <tbody>
+  {% for st in stores %}
+    {% set f = "store-" ~ st.id %}
+    <tr>
+      <td>
+        <form id="{{ f }}" method="post">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="store_id" value="{{ st.id }}">
+        </form>
+        <input form="{{ f }}" name="name" value="{{ st.name }}" required minlength="2" maxlength="100" aria-label="Название" style="margin:0">
+      </td>
+      <td><input form="{{ f }}" name="address" value="{{ st.address or '' }}" maxlength="255" aria-label="Адрес" placeholder="адрес" style="margin:0"></td>
+      <td class="num">{{ counts.get(st.id, 0) }}</td>
+      <td><input form="{{ f }}" type="checkbox" name="is_active" role="switch" {% if st.is_active %}checked{% endif %} aria-label="Активен"></td>
+      <td><button form="{{ f }}" class="secondary outline" style="padding:.3rem .7rem;margin:0">Сохранить</button></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+<article>
+  <header><strong>Добавить магазин</strong></header>
+  <form method="post" class="grid">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="add">
+    <input name="name" required minlength="2" maxlength="100" placeholder="Название" aria-label="Название">
+    <input name="address" maxlength="255" placeholder="Адрес (необязательно)" aria-label="Адрес">
+    <button type="submit">Добавить</button>
+  </form>
+</article>
+{% endblock %}

@@ -2,8 +2,7 @@
 import logging
 
 from buttons import create_cancel_markup, create_choice_markup, create_stock_management_buttons
-from handlers.common import STOCK_ROLES, in_state, is_button, register_simple_cancel
-from schema import STORES
+from handlers.common import store_names, store_id_by_name, STOCK_ROLES, in_state, is_button, register_simple_cancel
 from state import bot, user_state, get_op, start_op, end_op, cancel_current_operation
 from utils.catalog_import import build_plan, apply_plan
 from utils.common import h
@@ -26,15 +25,16 @@ def start(message):
     start_op(chat_id, STORE)
     bot.send_message(chat_id, "Импорт каталога из Excel (.xlsx) или CSV.\n"
                               "В какой магазин загружать товары, если в файле нет колонки «Магазин»?",
-                     reply_markup=create_choice_markup(list(STORES) + [FROM_FILE], 2))
+                     reply_markup=create_choice_markup(store_names() + [FROM_FILE], 2))
 
 
 def on_store(message):
     chat_id, text = message.chat.id, (message.text or '').strip()
-    if text not in STORES and text != FROM_FILE:
-        bot.send_message(chat_id, "Выберите вариант кнопкой.", reply_markup=create_choice_markup(list(STORES) + [FROM_FILE], 2))
+    store_id = store_id_by_name(text)
+    if not store_id and text != FROM_FILE:
+        bot.send_message(chat_id, "Выберите вариант кнопкой.", reply_markup=create_choice_markup(store_names() + [FROM_FILE], 2))
         return
-    get_op(chat_id)['store'] = None if text == FROM_FILE else text
+    get_op(chat_id)['store'] = store_id
     user_state[chat_id] = FILE
     bot.send_message(chat_id, "Пришлите файл документом. Нужны колонки как минимум «Артикул» и «Цена»; "
                               "также распознаются «Наименование», «Тип», «Металл», «Проба», «Вес», «Размер», "
