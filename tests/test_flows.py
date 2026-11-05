@@ -10,9 +10,10 @@ from state import user_data, user_state
 # ---------------------------------------------------------------- вход и сессии
 
 def test_login_menus_for_all_roles(tg):
-    assert reply_buttons(login(tg, ADMIN)[-1]) == ["Касса", "Склад", "Персонал"]
+    assert reply_buttons(login(tg, ADMIN)[-1]) == ["Касса", "Склад", "Персонал", "Веб-админка"]
     assert reply_buttons(login(tg, CASHIER)[-1]) == ["Касса"]
-    assert reply_buttons(login(tg, MANAGER)[-1]) == ["Касса", "Склад"]
+    assert reply_buttons(login(tg, MANAGER)[-1]) == ["Касса", "Склад", "Веб-админка"]
+    assert tg.menu_buttons[CASHIER].web_app.url == "https://pos.test/app"
 
 
 def test_login_rejects_unknown_and_foreign_contact(tg):
@@ -279,7 +280,7 @@ def test_add_product_full_flow(tg):
     tg.send(MANAGER, "Склад")
     tg.send(MANAGER, "Добавить товар")
     assert "уже есть" in tg.texts(tg.send(MANAGER, "A100"))
-    answers = ["B500", "ЦУМ", "браслет", "Браслет Панцирь", "золото", "Пропустить", "7.8", "Пропустить",
+    answers = ["B500", "ЦУМ", "браслет", "Браслет Панцирь", "золото", "Пропустить", "585", "Пропустить", "7.8", "Пропустить",
                "350000", "300000", "2", "Пропустить", "Пропустить", "Да"]
     for a in answers:
         calls = tg.send(MANAGER, a)
@@ -287,13 +288,14 @@ def test_add_product_full_flow(tg):
     assert "✅" in tg.texts(tg.send(MANAGER, "Подтвердить"))
     p = db_query("SELECT * FROM products WHERE article_number='B500'")[0]
     assert p['quantity'] == 2 and p['price'] == 350000 and p['manufacturer'] is None and p['track_stock'] == 1
+    assert p['fineness'] == '585' and p['inserts'] is None
     assert p['arrival_date'] is not None
 
 
 def test_add_product_validates_min_price(tg):
     login(tg, ADMIN)
     tg.send(ADMIN, "Добавить товар")
-    for a in ["C1", "ЦУМ", "кольцо", "Тест", "золото", "17", "2", "0", "100000"]:
+    for a in ["C1", "ЦУМ", "кольцо", "Тест", "золото", "17", "750", "фианит", "2", "0", "100000"]:
         tg.send(ADMIN, a)
     assert "не может быть выше" in tg.texts(tg.send(ADMIN, "200000"))
 

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Импорт{% endblock %}
+{% block content %}
+<h2>Импорт каталога</h2>
+{% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+<article>
+  <form method="post" enctype="multipart/form-data">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Файл Excel (.xlsx) или CSV
+      <input type="file" name="file" accept=".xlsx,.csv" required></label>
+    <label>Магазин для товаров, если в файле нет колонки «Магазин»
+      <select name="store">
+        <option value="">— указан в файле —</option>
+        {% for s in stores %}<option>{{ s }}</option>{% endfor %}
+      </select></label>
+    <button type="submit">Проверить файл</button>
+  </form>
+  <small class="muted">Сначала покажу предпросмотр: что добавится, что обновится и какие строки с ошибками.
+    В базу ничего не попадёт, пока вы не подтвердите.</small>
+</article>
+<details>
+  <summary>Какие колонки распознаются</summary>
+  <p>Обязательные: <strong>Артикул</strong>, <strong>Цена</strong>. Также: Наименование, Тип/Категория, Металл/Материал,
+    Проба, Вес, Размер, Вставки/Камни, Мин. цена, Цена за грамм, Остаток/Количество, Магазин, Производитель,
+    Комментарий, Дата поступления.</p>
+  <p>Тип изделия можно не указывать, если название начинается с него («Кольцо Классика»). Металл определяется
+    по колонке «Металл» («Золото 585») или по пробе. Для товаров, которые уже есть в базе, обновляются только
+    колонки, присутствующие в файле.</p>
+</details>
+{% endblock %}

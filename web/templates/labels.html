@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Ценники{% endblock %}
+{% block content %}
+<h2>Ценники</h2>
+<article>
+<form method="post" target="_blank">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <fieldset>
+    <legend>Для каких товаров</legend>
+    <label><input type="radio" name="mode" value="articles" checked> По артикулам</label>
+    <textarea name="articles" rows="3" placeholder="A100 A200, A300 — через пробел, запятую или с новой строки">{{ articles }}</textarea>
+    <label><input type="radio" name="mode" value="arrived"> Поступившие начиная с
+      <input type="date" name="since" value="{{ since.isoformat() }}" style="width:auto;display:inline-block;margin:0 0 0 .5rem"></label>
+    <label><input type="radio" name="mode" value="all"> Все товары в наличии</label>
+    <label>Магазин (для «поступивших» и «всех»)
+      <select name="store"><option value="">Все магазины</option>{% for s in stores %}<option>{{ s }}</option>{% endfor %}</select></label>
+  </fieldset>
+  <fieldset>
+    <legend>Количество</legend>
+    <label><input type="radio" name="copies" value="one" checked> По одной этикетке на артикул</label>
+    <label><input type="radio" name="copies" value="stock"> По количеству на складе</label>
+  </fieldset>
+  <div class="grid">
+    <label>Ширина этикетки, мм<input name="width" value="{{ width | round(1) }}" inputmode="decimal"></label>
+    <label>Высота этикетки, мм<input name="height" value="{{ height | round(1) }}" inputmode="decimal"></label>
+  </div>
+  <button type="submit">Сформировать PDF</button>
+</form>
+</article>
+<p class="muted">Печать на термопринтере: в диалоге печати выберите принтер этикеток, размер бумаги — как у этикетки,
+  масштаб <strong>100 %</strong> (не «по размеру страницы»). QR-код на ценнике содержит артикул — его сканирует касса в Telegram.</p>
+{% endblock %}

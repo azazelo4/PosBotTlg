@@ -44,7 +44,10 @@ def register_simple_cancel(prefix, title, menu=cash_menu):
 
 def product_line(product):
     parts = [h(product.get('model') or product.get('product_type') or '')]
-    details = [product.get('product_type'), product.get('metal_type')]
+    metal = product.get('metal_type')
+    if metal and product.get('fineness'):
+        metal = f"{metal} {product['fineness']}"
+    details = [product.get('product_type'), metal]
     if product.get('weight'):
         details.append(f"{product['weight']} г")
     if product.get('size'):

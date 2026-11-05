@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Товары{% endblock %}
+{% block content %}
+<div class="row-actions" style="justify-content:space-between;margin-bottom:1rem">
+  <h2 style="margin:0">Товары <span class="muted">({{ total }})</span></h2>
+  <div class="row-actions">
+    <a href="/stock.xlsx" role="button" class="secondary outline">Excel остатков</a>
+    <a href="/products/new" role="button">+ Новый товар</a>
+  </div>
+</div>
+
+<form method="get" class="grid">
+  <input type="search" name="q" value="{{ q }}" placeholder="Артикул или название" aria-label="Поиск">
+  <select name="store" aria-label="Магазин">
+    <option value="">Все магазины</option>
+    {% for s in stores %}<option {% if s == store %}selected{% endif %}>{{ s }}</option>{% endfor %}
+  </select>
+  <select name="stock" aria-label="Наличие">
+    <option value="">Любой остаток</option>
+    <option value="yes" {% if stock == 'yes' %}selected{% endif %}>В наличии</option>
+    <option value="no" {% if stock == 'no' %}selected{% endif %}>Нет в наличии</option>
+  </select>
+  <button type="submit">Найти</button>
+</form>
+
+<form method="get" action="/labels" id="labels-form">
+<div class="table-wrap"><table class="striped">
+  <thead><tr>
+    <th><input type="checkbox" aria-label="Выбрать все" onclick="document.querySelectorAll('.pick').forEach(c=>c.checked=this.checked);sync()"></th>
+    <th>Артикул</th><th>Название</th><th>Детали</th><th>Магазин</th><th class="num">Цена</th><th class="num">Мин.</th><th class="num">Остаток</th>
+  </tr></thead>
+  <tbody>
+  {% for p in rows %}
+    <tr>
+      <td><input type="checkbox" class="pick" value="{{ p.article_number }}" onchange="sync()" aria-label="Выбрать {{ p.article_number }}"></td>
+      <td><a href="/products/{{ p.id }}">{{ p.article_number }}</a></td>
+      <td>{{ p.model }}<br><small class="muted">{{ p.product_type }}{% if p.inserts %} · {{ p.inserts }}{% endif %}</small></td>
+      <td><small>{{ details(p) }}</small></td>
+      <td>{{ p.Store }}</td>
+      <td class="num">{{ p.price | money }}</td>
+      <td class="num muted">{{ p.min_price | money }}</td>
+      <td class="num"><span class="badge {% if p.quantity <= 0 %}zero{% endif %}">{{ p.quantity }}</span></td>
+    </tr>
+  {% else %}
+    <tr><td colspan="8" class="muted">Ничего не найдено.{% if not q %} <a href="/import">Загрузите каталог</a> или <a href="/products/new">добавьте товар</a>.{% endif %}</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+<input type="hidden" name="articles" id="picked">
+<button type="submit" id="labels-btn" class="secondary" disabled>Ценники для выбранных</button>
+</form>
+
+{% if pages > 1 %}
+<nav class="row-actions" style="justify-content:center">
+  {% if page > 1 %}<a href="?q={{ q | urlencode }}&store={{ store | urlencode }}&stock={{ stock }}&page={{ page - 1 }}">← Назад</a>{% endif %}
+  <span class="muted">Стр. {{ page }} из {{ pages }}</span>
+  {% if page < pages %}<a href="?q={{ q | urlencode }}&store={{ store | urlencode }}&stock={{ stock }}&page={{ page + 1 }}">Вперёд →</a>{% endif %}
+</nav>
+{% endif %}
+<script>
+function sync() {
+  const picked = [...document.querySelectorAll('.pick:checked')].map(c => c.value);
+  document.getElementById('picked').value = picked.join(' ');
+  const btn = document.getElementById('labels-btn');
+  btn.disabled = !picked.length;
+  btn.textContent = picked.length ? `Ценники для выбранных (${picked.length})` : 'Ценники для выбранных';
+}
+</script>
+{% endblock %}

@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Вход{% endblock %}
+{% block content %}
+<article style="max-width:32rem;margin:4rem auto">
+  <h2>Вход в админку</h2>
+  {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+  <p>Откройте бота в Telegram и нажмите кнопку <strong>«Веб-админка»</strong> в главном меню.
+     Бот пришлёт одноразовую ссылку для входа — она действует 10 минут.</p>
+  <p class="muted">Админка доступна менеджерам и администраторам.</p>
+</article>
+{% endblock %}

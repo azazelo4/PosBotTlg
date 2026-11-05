@@ -82,6 +82,9 @@ def register_handlers():
     from handlers.cash_withdrawal_handler import register_withdrawal_handlers
     from handlers.report_handler import register_report_handlers
     from handlers.stock_handler import register_stock_handlers
+    from handlers.labels_handler import register_labels_handlers
+    from handlers.import_handler import register_import_handlers
+    from handlers.web_handler import register_web_handlers
     from user_management import configure_user_management
 
     bot.setup_middleware(SessionMiddleware())
@@ -101,6 +104,9 @@ def register_handlers():
     register_withdrawal_handlers()
     register_report_handlers()
     register_stock_handlers()
+    register_labels_handlers()
+    register_import_handlers()
+    register_web_handlers()
     configure_user_management()
 
     bot.register_message_handler(on_fallback, content_types=['text', 'photo', 'document', 'sticker', 'voice', 'video', 'audio', 'location'])

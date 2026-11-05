@@ -57,7 +57,9 @@ jobs:
           cache: pip
 
       - name: Зависимости
-        run: pip install -r requirements.txt -r requirements-dev.txt
+        run: |
+          sudo apt-get install -y -q fonts-dejavu-core >/dev/null
+          pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Сценарные тесты на реальной БД
         env:
@@ -101,6 +103,12 @@ jobs:
           DAILY_REPORT_TIME: ${{ vars.DAILY_REPORT_TIME || '23:00' }}
           LOW_STOCK_TIME: ${{ vars.LOW_STOCK_TIME || '09:00' }}
           LOW_STOCK_THRESHOLD: ${{ vars.LOW_STOCK_THRESHOLD || '5' }}
+          WEB_DOMAIN: ${{ vars.WEB_DOMAIN }}
+          WEB_SECRET: ${{ secrets.WEB_SECRET }}
+          LABEL_WIDTH_MM: ${{ vars.LABEL_WIDTH_MM || '40' }}
+          LABEL_HEIGHT_MM: ${{ vars.LABEL_HEIGHT_MM || '30' }}
+          LABEL_TITLE: ${{ vars.LABEL_TITLE }}
+          IMPORT_MIN_PRICE_PERCENT: ${{ vars.IMPORT_MIN_PRICE_PERCENT || '100' }}
         run: |
           for v in TOKEN MYSQL_USER MYSQL_PASSWORD MYSQL_DATABASE MYSQL_ROOT_PASSWORD; do
             if [ -z "${!v}" ]; then echo "::error::Не задан секрет $v"; exit 1; fi
@@ -122,6 +130,17 @@ jobs:
             echo "DAILY_REPORT_TIME=$DAILY_REPORT_TIME"
             echo "LOW_STOCK_TIME=$LOW_STOCK_TIME"
             echo "LOW_STOCK_THRESHOLD=$LOW_STOCK_THRESHOLD"
+            echo "LABEL_WIDTH_MM=$LABEL_WIDTH_MM"
+            echo "LABEL_HEIGHT_MM=$LABEL_HEIGHT_MM"
+            echo "LABEL_TITLE=$LABEL_TITLE"
+            echo "IMPORT_MIN_PRICE_PERCENT=$IMPORT_MIN_PRICE_PERCENT"
+            if [ -n "$WEB_DOMAIN" ]; then
+              # Веб-админка, Mini App и HTTPS-прокси (сервисы web и caddy в docker-compose.yml)
+              echo "COMPOSE_PROFILES=web"
+              echo "WEB_DOMAIN=$WEB_DOMAIN"
+              echo "WEB_URL=https://$WEB_DOMAIN"
+              echo "WEB_SECRET=$WEB_SECRET"
+            fi
           } > "$DEPLOY_DIR/.env"
 
       - name: Перезапустить контейнеры
@@ -142,3 +161,18 @@ jobs:
             exit 1
           fi
           docker compose logs --tail=30 bot
+          if grep -q '^COMPOSE_PROFILES=web' .env; then
+            web_ok=""
+            for i in $(seq 1 10); do
+              if docker compose exec -T web python -c "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/health')"; then
+                web_ok=1; break
+              fi
+              sleep 3
+            done
+            if [ -z "$web_ok" ]; then
+              docker compose logs --tail=100 web
+              echo "::error::Веб-админка не отвечает"
+              exit 1
+            fi
+            echo "Веб-админка: https://$(grep -m1 '^WEB_DOMAIN=' .env | cut -d= -f2-)"
+          fi

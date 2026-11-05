@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Сводка{% endblock %}
+{% block content %}
+<hgroup>
+  <h2>Сводка</h2>
+  <p>{{ today | ddmmyyyy }}</p>
+</hgroup>
+
+{% set t = periods.today %}{% set m = periods.month %}
+{% if t %}
+<div class="grid-cards">
+  <article><div class="muted">Продажи сегодня</div><div class="stat">{{ t.sales_total | money }}</div>
+    <small class="muted">{{ t.sales_count }} шт.{% if t.returns_count %} · возвратов {{ t.returns_count }}{% endif %}</small></article>
+  <article><div class="muted">Наличные в кассе за день</div><div class="stat">{{ t.cash_balance | money }}</div>
+    <small class="muted">после инкассации {{ t.withdrawals_total | money }}</small></article>
+  <article><div class="muted">Продажи за месяц</div><div class="stat">{{ m.net_sales | money }}</div>
+    <small class="muted">{{ m.sales_count }} шт., средний чек {{ m.sales_avg | money }}</small></article>
+  <article><div class="muted">Скупка / Trade-In сегодня</div><div class="stat">{{ t.buybacks_count }} / {{ t.trade_ins_count }}</div>
+    <small class="muted">скупка на {{ t.buybacks_total | money }}</small></article>
+</div>
+
+<h4 style="margin-top:2rem">Сегодня по способам оплаты</h4>
+<div class="table-wrap"><table>
+  <thead><tr><th>Способ</th><th class="num">Продажи</th><th class="num">Движение денег</th></tr></thead>
+  <tbody>
+  {% for pt in payment_types %}
+    {% set sp = t.sales_by_payment.get(pt) %}
+    <tr><td>{{ pt }}</td><td class="num">{{ (sp[1] if sp else 0) | money }}{% if sp %} <span class="muted">· {{ sp[0] }} шт.</span>{% endif %}</td>
+        <td class="num">{{ t.flow.get(pt, 0) | money }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% else %}
+<div class="flash error">Не удалось получить данные из базы.</div>
+{% endif %}
+
+<div class="grid" style="margin-top:1.5rem">
+  <article>
+    <header><strong>Склад</strong> <a href="/stock.xlsx" style="float:right">Excel</a></header>
+    {% for store, (positions, qty, value) in totals.items() %}
+      <p style="margin-bottom:.4rem"><strong>{{ store }}</strong>: {{ positions }} поз., {{ qty }} шт. на {{ value | money }}</p>
+    {% else %}<p class="muted">Товаров пока нет. <a href="/import">Загрузить каталог</a></p>{% endfor %}
+  </article>
+  <article>
+    <header><strong>Заканчиваются</strong> <span class="muted">({{ low_count }})</span></header>
+    {% for p in low_stock %}
+      <p style="margin-bottom:.3rem"><a href="/products?q={{ p.article_number | urlencode }}">{{ p.article_number }}</a>
+        {{ p.model }} — <span class="badge {% if p.quantity <= 0 %}zero{% endif %}">{{ p.quantity }} шт.</span></p>
+    {% else %}<p class="muted">Нет товаров с низким остатком.</p>{% endfor %}
+  </article>
+</div>
+{% endblock %}

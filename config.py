@@ -57,3 +57,21 @@ LOW_STOCK_TIME = _optional_str("LOW_STOCK_TIME", "09:00")
 LOW_STOCK_THRESHOLD = _optional_int("LOW_STOCK_THRESHOLD", 5)
 
 LOG_LEVEL = _optional_str("LOG_LEVEL", "INFO")
+
+# ---------------------------------------------------------------- веб-админка и Mini App
+# Публичный HTTPS-адрес (например, https://pos.example.kz). Пусто — веб выключен,
+# бот не показывает кнопки админки и кассы-приложения.
+WEB_URL = (_optional_str("WEB_URL") or "").rstrip("/") or None
+# Ключ подписи cookie сессий веб-админки. Если не задан — выводится из TOKEN.
+WEB_SECRET = _optional_str("WEB_SECRET")
+WEB_SESSION_HOURS = _optional_int("WEB_SESSION_HOURS", 12)
+
+# ---------------------------------------------------------------- ценники
+LABEL_WIDTH_MM = float(_optional_str("LABEL_WIDTH_MM", "40"))
+LABEL_HEIGHT_MM = float(_optional_str("LABEL_HEIGHT_MM", "30"))
+# Строка вверху ценника (название магазина). Пусто — печатается магазин товара.
+LABEL_TITLE = _optional_str("LABEL_TITLE")
+
+# ---------------------------------------------------------------- импорт каталога
+# Если в файле нет минимальной цены: какой процент от цены считать минимальной
+IMPORT_MIN_PRICE_PERCENT = float(_optional_str("IMPORT_MIN_PRICE_PERCENT", "100"))

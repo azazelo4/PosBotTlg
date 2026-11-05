@@ -1,5 +1,6 @@
 from telebot import types
 
+from config import WEB_URL
 from state import user_data
 
 PAYMENT_TYPES = ["Наличные", "Безналичные", "Kaspi"]
@@ -8,6 +9,7 @@ ROLE_TITLES = {'admin': 'администратор', 'manager': 'менедже
 # Кнопки меню — используются и как фильтры хендлеров
 BTN_CASH, BTN_STOCK, BTN_STAFF, BTN_BACK, BTN_CANCEL = "Касса", "Склад", "Персонал", "Назад", "Отмена"
 BTN_CONFIRM = "Подтвердить"
+BTN_WEB = "Веб-админка"
 MENU_BUTTONS = {BTN_CASH, BTN_STOCK, BTN_STAFF, BTN_BACK}
 
 
@@ -23,11 +25,11 @@ def create_cashier_buttons():
 
 
 def create_manager_buttons():
-    return _kb([BTN_CASH, BTN_STOCK])
+    return _kb([BTN_CASH, BTN_STOCK], *([[BTN_WEB]] if WEB_URL else []))
 
 
 def create_admin_buttons():
-    return _kb([BTN_CASH, BTN_STOCK], [BTN_STAFF])
+    return _kb([BTN_CASH, BTN_STOCK], [BTN_STAFF] + ([BTN_WEB] if WEB_URL else []))
 
 
 def create_share_contact_markup():
@@ -61,7 +63,7 @@ def create_cash_operations_buttons():
 
 
 def create_stock_management_buttons():
-    return _kb(["Добавить товар", "Пополнить остатки"], ["Отчет об остатках"], [BTN_BACK])
+    return _kb(["Добавить товар", "Пополнить остатки"], ["Ценники", "Импорт каталога"], ["Отчет об остатках"], [BTN_BACK])
 
 
 def create_cancel_markup():

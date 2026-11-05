@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Предпросмотр импорта{% endblock %}
+{% block content %}
+<h2>Предпросмотр: {{ filename }}</h2>
+<div class="grid-cards">
+  <article><div class="muted">Новых товаров</div><div class="stat">{{ plan.new }}</div></article>
+  <article><div class="muted">Уже есть в базе</div><div class="stat">{{ plan.existing }}</div></article>
+  <article><div class="muted">Строк с ошибками</div><div class="stat">{{ plan.errors | length }}</div></article>
+</div>
+<p style="margin-top:1rem"><strong>Распознаны колонки:</strong> {% for c in plan.columns %}{{ titles[c] }}{% if not loop.last %}, {% endif %}{% endfor %}
+  {% if plan.ignored %}<br><span class="muted">Пропущены: {{ plan.ignored | join(', ') }}</span>{% endif %}</p>
+{% for w in plan.warnings %}<div class="flash error">⚠️ {{ w }}</div>{% endfor %}
+
+{% if plan.rows %}
+<form method="post" action="/import/{{ plan_id }}" class="row-actions" style="margin:1rem 0">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  {% if plan.existing %}
+  <button name="mode" value="all">Загрузить: новые и обновить {{ plan.existing }}</button>
+  <button name="mode" value="new" class="secondary">Только новые ({{ plan.new }})</button>
+  {% else %}
+  <button name="mode" value="new">Загрузить {{ plan.new }} товаров</button>
+  {% endif %}
+  <a href="/import" role="button" class="secondary outline">Отмена</a>
+</form>
+{% endif %}
+
+{% if plan.errors %}
+<details {% if not plan.rows %}open{% endif %}>
+  <summary>Ошибки ({{ plan.errors | length }}) — эти строки не загрузятся</summary>
+  <ul>{% for n, msg in plan.errors[:200] %}<li>строка {{ n }}: {{ msg }}</li>{% endfor %}</ul>
+</details>
+{% endif %}
+
+{% if sample %}
+<h4>Первые строки</h4>
+<div class="table-wrap"><table class="striped">
+  <thead><tr><th></th><th>Артикул</th><th>Название</th><th>Тип</th><th>Металл</th><th>Проба</th><th>Вес</th><th>Магазин</th><th class="num">Цена</th><th class="num">Мин.</th><th class="num">Остаток</th></tr></thead>
+  <tbody>{% for r in sample %}
+    <tr><td>{% if r._exists %}<span class="badge">обновится</span>{% else %}<span class="badge" style="background:#1a7f37;color:#fff">новый</span>{% endif %}</td>
+      <td>{{ r.article_number }}</td><td>{{ r.model }}</td><td>{{ r.product_type }}</td><td>{{ r.metal_type }}</td>
+      <td>{{ r.fineness or '' }}</td><td>{{ r.weight or '' }}</td><td>{{ r.Store }}</td>
+      <td class="num">{{ r.price | money }}</td><td class="num">{{ r.min_price | money }}</td>
+      <td class="num">{{ r.quantity if r.quantity is not none else '—' }}</td></tr>
+  {% endfor %}</tbody>
+</table></div>
+{% endif %}
+{% endblock %}
