@@ -60,7 +60,7 @@ def test_clean_server_waits_for_setup(fresh):
     assert not settings_store.is_configured() and config.TOKEN is None
     r = fresh.get("/", follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"] == "/setup"
-    assert fresh.get("/health").json() == {"ok": True, "configured": False}
+    assert fresh.get("/health").json() == {"ok": True, "configured": False, "version": "dev"}
     page = fresh.get("/setup")
     assert "Первоначальная настройка" in page.text and 'name="stores"' in page.text
     assert 'value="https://pos.example.kz"' in page.text      # адрес подсказан по домену запроса

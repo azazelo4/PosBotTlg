@@ -58,6 +58,7 @@ templates.env.filters['ddmmyyyy'] = lambda d: d.strftime('%d.%m.%Y') if d else '
 templates.env.filters['ddmmhhmm'] = lambda d: d.strftime('%d.%m %H:%M') if d else ''
 templates.env.globals['ROLE_TITLES'] = ROLE_TITLES
 templates.env.globals['TIMEZONES'] = config.TIMEZONES
+templates.env.globals['VERSION'] = config.VERSION
 
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -194,7 +195,7 @@ def logout(request: Request):
 
 @app.get("/health")
 def health():
-    return {"ok": True, "configured": settings_store.is_configured()}
+    return {"ok": True, "configured": settings_store.is_configured(), "version": config.VERSION}
 
 
 # ---------------------------------------------------------------- дашборд

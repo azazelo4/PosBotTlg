@@ -164,7 +164,7 @@ def wait_for_token(sleep=time.sleep):
 
 
 def main():
-    logger.info("Запуск бота...")
+    logger.info("Запуск бота (версия %s)...", config.VERSION)
     prepare_database()
     wait_for_token()
     from state import bot

@@ -48,6 +48,9 @@ MASTER_KEY = _optional_str("POSBOT_MASTER_KEY")
 
 LOG_LEVEL = _optional_str("LOG_LEVEL", "INFO")
 
+# Версия сборки (проставляется при публикации образа)
+VERSION = _optional_str("POSBOT_VERSION", "dev")
+
 # Ключ подписи cookie веб-админки. Пусто — выводится из MASTER_KEY.
 WEB_SECRET = _optional_str("WEB_SECRET")
 WEB_SESSION_HOURS = _optional_int("WEB_SESSION_HOURS", 12)

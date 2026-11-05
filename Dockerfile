@@ -15,7 +15,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends fonts-dejavu-co
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
-# Код приложения
+# Код приложения. deploy/ тоже внутри: установщик и `posbot update` берут оттуда compose-файл и скрипты
 COPY . /app
+
+# Версия (тег релиза или sha коммита) — проставляет CI при публикации образа
+ARG POSBOT_VERSION=dev
+ENV POSBOT_VERSION=${POSBOT_VERSION}
+LABEL org.opencontainers.image.source="https://github.com/azazelo4/PosBotTlg" \
+      org.opencontainers.image.title="PosBotTlg" \
+      org.opencontainers.image.version="${POSBOT_VERSION}"
 
 CMD ["python", "main.py"]
