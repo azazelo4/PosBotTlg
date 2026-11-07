@@ -202,3 +202,16 @@ def test_withdrawal_and_shift(tg, client):
     assert s["cash_balance"] == 100000 and s["withdrawals_total"] == 50000
     assert [o["kind"] for o in s["journal"]].count("Продажа") == 2
     assert any(o["kind"] == "Инкассация" and o["amount"] == -50000 and o["what"] == "в банк" for o in s["journal"])
+
+
+def test_scanned_product_code_from_label(tg, client):
+    """Длинный артикул на ценнике заменяется штрихкодом «#<id>» — касса находит по нему товар."""
+    kassa_login(tg, client)
+    product_id = db_query("SELECT id FROM products WHERE article_number='A100'")[0]['id']
+    p = client.get("/kassa/api/product", params={"article": f"#{product_id}"}).json()
+    assert p["article"] == "A100"
+    r = post(client, "sale", {"article": f"#{product_id}", "price": 150000, "payment": "Kaspi"})
+    assert r.status_code == 200, r.text
+    sales = client.get("/kassa/api/sales-for-return", params={"article": f"#{product_id}"}).json()
+    assert len(sales) == 1 and sales[0]["article"] == "A100"
+    assert client.get("/kassa/api/product", params={"article": "#999999"}).status_code == 404

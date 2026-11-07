@@ -118,6 +118,8 @@ SETTINGS = (
     Setting("LABEL_WIDTH_MM", "Ширина ценника, мм", "labels", kind="float", default=30.0),
     Setting("LABEL_HEIGHT_MM", "Высота ценника, мм", "labels", kind="float", default=20.0),
     Setting("LABEL_TITLE", "Строка вверху ценника", "labels", help="Пусто — название магазина товара."),
+    Setting("LABEL_BARCODE", "Штрихкод на ценнике", "labels", kind="bool", default=True,
+            help="Штрихкод Code128 с артикулом для обычных USB-сканеров (1D) — в дополнение к QR-коду."),
     Setting("IMPORT_MIN_PRICE_PERCENT", "Минимальная цена при импорте, % от цены", "labels", kind="float",
             default=100.0, help="Если в файле каталога нет колонки минимальной цены."),
     Setting("FISCAL_ENABLED", "Фискализировать операции через Webkassa", "fiscal", kind="bool", default=False,
@@ -241,7 +243,7 @@ def source(key):
 
 # Начальные значения (до чтения БД): окружение и значения по умолчанию.
 TOKEN = ORG_NAME = ORG_BIN = WEB_URL = TIMEZONE = DAILY_REPORT_TIME = REPORT_CHAT_ID = None
-LOW_STOCK_TIME = LOW_STOCK_THRESHOLD = LABEL_WIDTH_MM = LABEL_HEIGHT_MM = LABEL_TITLE = None
+LOW_STOCK_TIME = LOW_STOCK_THRESHOLD = LABEL_WIDTH_MM = LABEL_HEIGHT_MM = LABEL_TITLE = LABEL_BARCODE = None
 IMPORT_MIN_PRICE_PERCENT = FISCAL_ENABLED = WEBKASSA_URL = WEBKASSA_LOGIN = WEBKASSA_PASSWORD = None
 WEBKASSA_API_KEY = SETUP_DONE = SETUP_CODE = None
 apply({})

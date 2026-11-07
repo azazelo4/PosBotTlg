@@ -301,8 +301,23 @@ def update_store(cursor, store_id, name, address=None, is_active=True):
 
 @with_connection
 def get_product_by_article(cursor, article_number):
+    """Товар по артикулу или по коду «#<id>» (штрихкод ценника, если артикул в него не поместился)."""
+    product_id = product_id_from_code(article_number)
+    if product_id:
+        cursor.execute("SELECT p.*, st.name AS Store FROM products p LEFT JOIN stores st ON st.id = p.store_id WHERE p.id = %s", (product_id,))
+        row = cursor.fetchone()
+        if row:
+            return row
     cursor.execute("SELECT p.*, st.name AS Store FROM products p LEFT JOIN stores st ON st.id = p.store_id WHERE p.article_number = %s ORDER BY p.id LIMIT 1", (article_number,))
     return cursor.fetchone()
+
+
+def product_id_from_code(code):
+    """'#123' → 123, иначе None. Такой код печатается штрихкодом вместо длинного артикула."""
+    code = str(code or "").strip()
+    if len(code) > 1 and code[0] == "#" and code[1:].isdigit() and len(code) <= 10:
+        return int(code[1:])
+    return None
 
 
 def _change_quantity(cursor, article, delta):
@@ -572,6 +587,12 @@ def record_sale(cursor, product_id, product_article, user_id, sale_price, paymen
 @with_connection
 def get_sales_for_return(cursor, article_number, days=60):
     """Продажи артикула за последние N дней с отметкой, был ли уже возврат."""
+    product_id = product_id_from_code(article_number)
+    if product_id:
+        cursor.execute("SELECT article_number FROM products WHERE id = %s", (product_id,))
+        row = cursor.fetchone()
+        if row:
+            article_number = row['article_number']
     cursor.execute("""
         SELECT s.id AS sale_id, s.sold_price, s.payment_type AS sale_payment_type, s.sale_date,
                p.id AS product_id, p.article_number, p.model AS product_model, p.product_type,

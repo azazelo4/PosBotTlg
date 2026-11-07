@@ -3,6 +3,7 @@ import io
 import re
 
 import openpyxl
+import pytest
 from pypdf import PdfReader
 
 from conftest import ADMIN, MANAGER, CASHIER, login, reply_buttons, db_query
@@ -113,3 +114,35 @@ def test_labels_portrait_layout_for_tall_labels(tg):
     assert count == 1 and round(float(page.mediabox.width) / 72 * 25.4) == 20
     text = page.extract_text()
     assert "Кольцо" in text and "150 000" in text and "A100" in text
+
+
+def test_label_barcode_fits_whole_printer_dots():
+    from reportlab.lib.units import mm
+    from utils.labels import barcode, PRINTER_DOT
+    code = barcode("A100", 28 * mm)
+    assert code is not None and code.width <= 28 * mm
+    assert abs(code.barWidth / PRINTER_DOT - round(code.barWidth / PRINTER_DOT)) < 1e-6  # целое число точек 203 dpi
+    assert barcode("A100", 15 * mm) is None             # мельче 2 точек на штрих — не печатаем
+    assert barcode("AB-2024-000123", 28 * mm) is None   # длинный артикул не помещается…
+    assert barcode("#4321", 28 * mm) is not None        # …тогда на ценнике короткий код товара
+    assert barcode("ЖК-1", 58 * mm) is None             # Code128 — только латиница и цифры
+
+
+def test_label_pdf_with_barcode_decodes(tg):
+    """Если в системе есть zbarimg, проверяем, что штрихкод и QR читаются при печати 203 dpi."""
+    import shutil
+    import subprocess
+    import tempfile
+    from utils.labels import generate_labels_pdf
+    if not (shutil.which("zbarimg") and shutil.which("pdftoppm")):
+        pytest.skip("нет zbarimg/pdftoppm")
+    db_query("UPDATE products SET article_number = 'AB-2024-000123' WHERE article_number = 'A200'")
+    products = db_query("SELECT * FROM products WHERE article_number IN ('A100', 'AB-2024-000123') ORDER BY article_number")
+    pdf, _ = generate_labels_pdf(products, width_mm=30, height_mm=20)
+    with tempfile.TemporaryDirectory() as d:
+        open(f"{d}/l.pdf", "wb").write(pdf)
+        subprocess.run(["pdftoppm", "-r", "203", "-mono", "-png", f"{d}/l.pdf", f"{d}/l"], check=True)
+        out = [subprocess.run(["zbarimg", "-q", f"{d}/l-{i}.png"], capture_output=True, text=True).stdout for i in (1, 2)]
+    product_id = products[1]['id']
+    assert "CODE-128:A100" in out[0] and "QR-Code:A100" in out[0]
+    assert f"CODE-128:#{product_id}" in out[1] and "QR-Code:AB-2024-000123" in out[1]

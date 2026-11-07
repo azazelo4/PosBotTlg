@@ -2,14 +2,17 @@
 
 PDF печатается на термопринтере (Xprinter и т. п.) через обычный драйвер:
 размер страницы совпадает с размером этикетки, масштаб — 100 %.
-На этикетке QR-код с артикулом — его сканирует касса в Telegram Mini App.
+На этикетке QR-код с артикулом — его сканирует касса в Telegram Mini App и USB-сканер 2D,
+и (если помещается) штрихкод Code128 с тем же артикулом — для обычных USB-сканеров 1D на кассе ПК.
 """
 import io
 import logging
+import math
 import os
 from decimal import Decimal
 
 from reportlab.graphics import renderPDF
+from reportlab.graphics.barcode.code128 import Code128, Code128Auto
 from reportlab.graphics.barcode.qr import QrCodeWidget
 from reportlab.graphics.shapes import Drawing
 from reportlab.lib.units import mm
@@ -26,6 +29,11 @@ FONT_DIRS = [os.environ.get("LABEL_FONT_DIR", ""), "/usr/share/fonts/truetype/de
              "/usr/share/fonts/TTF", "C:/Windows/Fonts"]
 FONT, FONT_BOLD = "LabelSans", "LabelSans-Bold"
 METAL_SHORT = {'золото': 'Au', 'серебро': 'Ag', 'бижутерия': 'Биж.'}
+
+# Термопринтеры этикеток печатают с разрешением 203 dpi: ширина штриха — целое число точек,
+# иначе принтер округлит штрихи по-разному и сканер не прочитает код. Меньше 2 точек не читается.
+PRINTER_DOT = 25.4 / 203 * mm
+MIN_DOTS, MAX_DOTS = 2, 3
 
 _fonts_ready = False
 
@@ -91,17 +99,55 @@ def details_line(product):
     return " · ".join(parts)
 
 
+def barcode(value, max_width):
+    """Штрихкод Code128 шириной не больше max_width или None, если не помещается (или не ASCII)."""
+    value = str(value or "")
+    if not value or not value.isascii() or not value.isprintable():
+        return None
+    # Code128Auto сжимает цифры (набор C), обычный бывает короче для коротких буквенных артикулов
+    modules, cls = min(((cls(value, barWidth=1, quiet=False).width, cls) for cls in (Code128, Code128Auto)),
+                       key=lambda pair: pair[0])
+    dots = min(math.floor(max_width / (modules * PRINTER_DOT) + 1e-9), MAX_DOTS)
+    if dots < MIN_DOTS:
+        return None
+    return cls(value, barWidth=dots * PRINTER_DOT, quiet=False)
+
+
+def _draw_barcode(c, product, w, h):
+    """Штрихкод внизу по центру. Возвращает высоту занятой полосы (0 — штрихкода нет)."""
+    if not config.LABEL_BARCODE:
+        return 0
+    margin = 1 * mm
+    code = barcode(product['article_number'], w - 2 * margin)
+    if code is None and product.get('id'):
+        # длинный артикул не помещается — короткий код товара, касса понимает «#<id>»
+        code = barcode(f"#{product['id']}", w - 2 * margin)
+    if code is None:
+        return 0
+    code.barHeight = min(max(h * 0.2, 3.5 * mm), 6 * mm)
+    code.drawOn(c, (w - code.width) / 2, 0.8 * mm)
+    return 0.8 * mm + code.barHeight + 0.5 * mm
+
+
 def _draw_label(c, product, w, h):
     k = h / (30 * mm)  # масштаб шрифтов: базовый макет рассчитан на высоту 30 мм
     pad = 1.5 * mm
-    qr_size = min(h * 0.58, w * 0.42)
-    text_w = w - 2 * pad - qr_size - 1 * mm
+    bottom = _draw_barcode(c, product, w, h) or pad
 
-    # QR с артикулом — справа сверху
+    # Строка цены: цена крупно слева, артикул справа
+    article, art_size = _fit(product['article_number'], FONT, 5.5 * k, w * 0.4, 3.5)
+    art_w = pdfmetrics.stringWidth(article, FONT, art_size)
+    price, size = _fit(money(product.get('price')), FONT_BOLD, 11 * k, w - 2 * pad - art_w - 1 * mm, 5)
+    c.setFont(FONT_BOLD, size)
+    c.drawString(pad, bottom, price)
+    c.setFont(FONT, art_size)
+    c.drawRightString(w - pad, bottom, article)
+    top_of_price = bottom + size * 0.8 + 0.6 * mm
+
+    # QR с артикулом — справа сверху, сколько позволяет место над ценой
+    qr_size = min(h - pad - top_of_price, w * 0.42)
     _draw_qr(c, product['article_number'], w - pad - qr_size, h - pad - qr_size, qr_size)
-    article, size = _fit(product['article_number'], FONT, 5.5 * k, qr_size + 1 * mm, 4)
-    c.setFont(FONT, size)
-    c.drawCentredString(w - pad - qr_size / 2, h - pad - qr_size - size - 0.3 * mm, article)
+    text_w = w - 2 * pad - qr_size - 1 * mm
 
     # Текст слева
     y = h - pad
@@ -122,14 +168,11 @@ def _draw_label(c, product, w, h):
     for extra in (details_line(product), product.get('inserts')):
         if extra:
             t, size = _fit(extra, FONT, 5.5 * k, text_w, 3.5)
+            if y - size - 0.3 * mm < top_of_price:
+                break
             y -= size + 0.3 * mm
             c.setFont(FONT, size)
             c.drawString(pad, y, t)
-
-    # Цена — крупно внизу по всей ширине
-    price, size = _fit(money(product.get('price')), FONT_BOLD, 11 * k, w - 2 * pad, 6)
-    c.setFont(FONT_BOLD, size)
-    c.drawString(pad, pad, price)
 
 
 def _draw_qr(c, value, x, y, size):
@@ -167,13 +210,14 @@ def _draw_label_portrait(c, product, w, h):
             c.drawString(pad, y, t)
     price, price_size = _fit(money(product.get('price')), FONT_BOLD, 8.5 * k, text_w, 5)
     article, art_size = _fit(product['article_number'], FONT, 4.4 * k, text_w, 3.5)
-    bottom = pad + price_size + 0.8 * mm + art_size + 0.4 * mm
+    base = _draw_barcode(c, product, w, h) or pad
+    bottom = base + price_size + 0.8 * mm + art_size + 0.4 * mm
     qr_size = max(min(text_w, y - 0.8 * mm - bottom), 6 * mm)
     _draw_qr(c, product['article_number'], (w - qr_size) / 2, bottom, qr_size)
     c.setFont(FONT, art_size)
     c.drawCentredString(w / 2, bottom - art_size - 0.1 * mm, article)
     c.setFont(FONT_BOLD, price_size)
-    c.drawCentredString(w / 2, pad, price)
+    c.drawCentredString(w / 2, base, price)
 
 
 def generate_labels_pdf(products, copies="one", width_mm=None, height_mm=None):
