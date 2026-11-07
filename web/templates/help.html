@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<style>
+  .manual-nav { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+  .manual-nav a { padding: .35rem .8rem; border-radius: 1rem; border: 1px solid var(--pico-muted-border-color); text-decoration: none; }
+  .manual-nav a.on { background: var(--pico-primary-background); color: var(--pico-primary-inverse); border-color: transparent; }
+  .manual { max-width: 52rem; }
+  .manual img { border: 1px solid var(--pico-muted-border-color); border-radius: 8px; margin: .5rem 0 1rem; }
+  .manual .toc { background: var(--pico-card-background-color); border-radius: 8px; padding: .75rem 1.25rem; margin-bottom: 1.5rem; }
+  .manual .toc .toctitle { font-weight: 600; }
+  .manual .toc ul { margin-bottom: 0; }
+  .manual h2 { margin-top: 2.2rem; }
+  .manual kbd { font-size: .8em; }
+  @media print { .manual-nav, header, footer { display: none; } }
+</style>
+<div class="manual-nav">
+  <a href="/help" class="{{ 'on' if not slug }}">Все инструкции</a>
+  {% for key, m in manuals.items() %}<a href="/help/{{ key }}" class="{{ 'on' if slug == key }}">{{ m[1] }}</a>{% endfor %}
+</div>
+{% if slug %}
+<article class="manual">{{ html | safe }}</article>
+{% else %}
+<h1>Инструкции</h1>
+<div class="grid-cards">
+  {% for key, m in manuals.items() %}
+  <article><h3 style="margin-bottom:.4rem"><a href="/help/{{ key }}">{{ m[1] }}</a></h3>
+    <p class="muted" style="margin:0">{{ m[2] }}</p></article>
+  {% endfor %}
+</div>
+<p class="muted" style="margin-top:1.5rem">Ссылку на свою инструкцию можно отправить сотруднику заранее — страницы открываются без входа.
+  Краткая справка в боте — команда /help.</p>
+{% endif %}
+{% endblock %}
