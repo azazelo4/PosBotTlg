@@ -10,6 +10,24 @@
   {{ groups_form(groups, open_all=False, allow_clear=True) }}
   <button type="submit">Сохранить</button>
 </form>
+<h3 id="demo">Демо-данные</h3>
+{% if demo and (demo.products or demo.operations) %}
+<p>Сейчас в базе демо-данные: <strong>{{ demo.products }}</strong> товаров с артикулами <code>DEMO-…</code> и
+  <strong>{{ demo.operations }}</strong> операций. Удалятся и операции, которые сотрудники провели с демо-товарами.
+  Настоящие товары и операции не затрагиваются.</p>
+<form method="post" action="/settings/demo" onsubmit="return confirm('Удалить все демо-товары и операции с ними?')">
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="remove">
+  <button type="submit" class="secondary">Удалить демо-данные</button>
+</form>
+{% else %}
+<p class="muted">Пример каталога и продаж за две недели — чтобы показать систему или обучить сотрудников. Товары
+  получают артикулы <code>DEMO-…</code> и удаляются здесь же одной кнопкой.</p>
+<form method="post" action="/settings/demo">
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="add">
+  <button type="submit" class="secondary outline">Добавить демо-данные</button>
+</form>
+{% endif %}
+
 {% if changes %}
 <h3>Последние изменения</h3>
 <div class="table-wrap"><table class="striped">

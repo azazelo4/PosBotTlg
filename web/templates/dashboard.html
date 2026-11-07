@@ -6,6 +6,12 @@
   <p>{{ today | ddmmyyyy }}</p>
 </hgroup>
 
+{% if demo %}
+<p class="flash info">🧪 В системе демо-данные (товары <code>DEMO-…</code>) — они попадают в сводку, отчёты и кассу.
+  {% if user.role == 'admin' %}Перед началом работы удалите их: <a href="/settings#demo">Настройки → Демо-данные</a>.
+  {% else %}Удалить их может администратор.{% endif %}</p>
+{% endif %}
+
 {% set t = periods.today %}{% set m = periods.month %}
 {% if t %}
 <div class="grid-cards">
