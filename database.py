@@ -1,4 +1,5 @@
 import logging
+import secrets
 import threading
 import time
 from datetime import timedelta
@@ -339,7 +340,7 @@ def update_product_quantity(cursor, product_article, quantity_change):
 
 PRODUCT_FIELDS = ('article_number', 'store_id', 'metal_type', 'product_type', 'model', 'size', 'fineness', 'inserts',
                   'weight', 'price_per_gram', 'price', 'min_price', 'arrival_date', 'quantity', 'manufacturer',
-                  'commentaries', 'track_stock')
+                  'commentaries', 'track_stock', 'cost_price')
 
 
 @with_transaction
@@ -575,13 +576,84 @@ def consume_kassa_login(cursor, token_hash):
 
 # ---------------------------------------------------------------- кассовые операции
 
+MAX_RECEIPT_ITEMS = 50
+
+
+def _record_receipt(cursor, items, user_id, payment_type, store_id=None):
+    """Чек: позиции [(product_id, цена), ...] одним платежом. Каждая позиция — строка sales (одна штука).
+
+    Проверяет остаток (с учётом одинаковых позиций в чеке) и минимальную цену, списывает товар.
+    Возвращает {'receipt_id', 'sale_ids', 'total'}.
+    """
+    if not items:
+        raise BusinessError("Чек пуст — добавьте товар.")
+    if len(items) > MAX_RECEIPT_ITEMS:
+        raise BusinessError(f"В одном чеке — не больше {MAX_RECEIPT_ITEMS} позиций.")
+    products, need = {}, {}
+    for product_id, price in items:
+        if product_id not in products:
+            cursor.execute("SELECT id, article_number, model, price, min_price, quantity, store_id "
+                           "FROM products WHERE id = %s FOR UPDATE", (product_id,))
+            row = cursor.fetchone()
+            if not row:
+                raise BusinessError("Товар не найден.")
+            products[product_id] = row
+        p = products[product_id]
+        need[product_id] = need.get(product_id, 0) + 1
+        if (p['quantity'] or 0) < need[product_id]:
+            raise BusinessError(f"Недостаточно товара {p['article_number']} на складе (остаток {p['quantity'] or 0}).")
+        if price is None or price <= 0:
+            raise BusinessError(f"Укажите сумму для {p['article_number']}.")
+        if price < (p['min_price'] or 0):
+            raise BusinessError(f"{p['article_number']}: сумма {int(price)} ниже минимальной цены {int(p['min_price'])}.")
+    stores = {p['store_id'] for p in products.values()}
+    if len(stores) > 1:
+        raise BusinessError("В одном чеке — товары одного магазина.")
+    receipt_store = stores.pop() or store_id
+    total = sum(price for _, price in items)
+    moment = now()
+    cursor.execute("""INSERT INTO receipts (store_id, user_id, created_at, total, items_count, payment_type, public_token)
+                      VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                   (receipt_store, user_id, moment, total, len(items), payment_type, secrets.token_hex(16)))
+    receipt_id = cursor.lastrowid
+    sale_ids = []
+    for product_id, price in items:
+        p = products[product_id]
+        cursor.execute("""INSERT INTO sales (product_id, user_id, sale_date, sold_price, payment_type, store_id,
+                                             receipt_id, list_price) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                       (product_id, user_id, moment, price, payment_type, p['store_id'] or store_id, receipt_id, p['price']))
+        sale_ids.append(cursor.lastrowid)
+    for product_id, count in need.items():
+        cursor.execute("UPDATE products SET quantity = quantity - %s WHERE id = %s", (count, product_id))
+    return {"receipt_id": receipt_id, "sale_ids": sale_ids, "total": total}
+
+
+@with_transaction
+def record_receipt(cursor, items, user_id, payment_type, store_id=None):
+    """(True, {'receipt_id', 'sale_ids', 'total'}) или (False, причина)."""
+    return True, _record_receipt(cursor, items, user_id, payment_type, store_id)
+
+
 @with_transaction
 def record_sale(cursor, product_id, product_article, user_id, sale_price, payment_type):
-    _change_quantity(cursor, product_article, -1)
-    cursor.execute("INSERT INTO sales (product_id, user_id, sale_date, sold_price, payment_type, store_id) "
-                   "SELECT %s, %s, %s, %s, %s, store_id FROM products WHERE id = %s",
-                   (product_id, user_id, now(), sale_price, payment_type, product_id))
-    return True, cursor.lastrowid
+    """Продажа одного товара — чек из одной позиции. Возвращает (True, id продажи)."""
+    result = _record_receipt(cursor, [(product_id, sale_price)], user_id, payment_type)
+    return True, result['sale_ids'][0]
+
+
+@with_connection
+def get_receipt(cursor, receipt_id):
+    cursor.execute("""SELECT r.*, st.name AS store, u.name AS user_name FROM receipts r
+                      LEFT JOIN stores st ON st.id = r.store_id LEFT JOIN users u ON u.id = r.user_id
+                      WHERE r.id = %s""", (receipt_id,))
+    receipt = cursor.fetchone()
+    if receipt:
+        cursor.execute("""SELECT s.id AS sale_id, s.sold_price, s.list_price, p.article_number, p.model, p.product_type,
+                                 p.metal_type, p.fineness, p.weight, p.size, p.inserts
+                          FROM sales s JOIN products p ON p.id = s.product_id WHERE s.receipt_id = %s ORDER BY s.id""",
+                       (receipt_id,))
+        receipt['items'] = cursor.fetchall()
+    return receipt
 
 
 @with_connection
@@ -703,9 +775,9 @@ def get_period_operations(cursor, start_dt, end_dt, store_id=None):
         return cursor.fetchall()
 
     result['sales'] = run("""
-        SELECT s.id, s.sale_date, s.sold_price, s.payment_type, s.store_id, st.name AS store,
+        SELECT s.id, s.receipt_id, s.sale_date, s.sold_price, s.payment_type, s.store_id, st.name AS store,
                p.article_number, p.product_type, p.model, p.size, p.metal_type, p.weight,
-               p.price AS list_price, u.name AS user_name, r.id AS return_id
+               COALESCE(s.list_price, p.price) AS list_price, p.cost_price, u.name AS user_name, r.id AS return_id
         FROM sales s
         JOIN products p ON s.product_id = p.id
         LEFT JOIN stores st ON st.id = s.store_id

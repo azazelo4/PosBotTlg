@@ -73,7 +73,7 @@ def test_report_for_one_store(tg):
     assert "· Отау Сауда" in text and "Продажи: 1 шт. на <b>20 000 ₸</b>" in text and "По магазинам" not in text
     wb = openpyxl.load_workbook(io.BytesIO(tg.documents[-1].data))
     rows = list(wb["Продажи"].iter_rows(min_row=2, values_only=True))
-    assert len(rows) == 1 and rows[0][2] == "A200" and rows[0][11] == "Отау Сауда"
+    assert len(rows) == 1 and rows[0][3] == "A200" and rows[0][12] == "Отау Сауда"
     assert wb["Сводка"]["B2"].value == "Отау Сауда"
 
 
@@ -150,7 +150,7 @@ def test_web_staff_store_and_reports_filter(tg):
     assert "Сегодня по магазинам" in client.get("/").text
     x = client.get("/reports.xlsx?store=1")
     rows = list(openpyxl.load_workbook(io.BytesIO(x.content))["Продажи"].iter_rows(min_row=2, values_only=True))
-    assert [r[2] for r in rows] == ["A100"]
+    assert [r[3] for r in rows] == ["A100"]
 
 
 def test_import_store_column_matches_case_insensitive(tg):

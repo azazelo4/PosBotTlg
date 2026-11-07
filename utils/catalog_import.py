@@ -33,6 +33,7 @@ HEADERS = {
     'price': ["цена", "цена продажи", "розничная цена", "стоимость", "цена розничная", "цена тг", "цена розн"],
     'min_price': ["мин цена", "минимальная цена", "цена мин", "мин стоимость"],
     'price_per_gram': ["цена за грамм", "цена за г", "цена грамма"],
+    'cost_price': ["себестоимость", "закупочная цена", "цена закупки", "закупка", "цена закуп", "закуп"],
     'quantity': ["количество", "кол во", "колво", "остаток", "остатки", "qty", "в наличии"],
     'Store': ["магазин", "склад", "точка", "торговая точка"],
     'manufacturer': ["производитель", "поставщик", "бренд", "завод"],
@@ -42,7 +43,7 @@ HEADERS = {
 FIELD_TITLES = {
     'article_number': "артикул", 'model': "название", 'product_type': "тип", 'metal_type': "металл",
     'fineness': "проба", 'weight': "вес", 'size': "размер", 'inserts': "вставки", 'price': "цена",
-    'min_price': "мин. цена", 'price_per_gram': "цена за грамм", 'quantity': "остаток", 'Store': "магазин",
+    'min_price': "мин. цена", 'price_per_gram': "цена за грамм", 'cost_price': "себестоимость", 'quantity': "остаток", 'Store': "магазин",
     'manufacturer': "производитель", 'commentaries': "комментарий", 'arrival_date': "дата поступления",
 }
 
@@ -295,6 +296,7 @@ def build_plan(data: bytes, filename: str, default_store=None) -> ImportPlan:
             'size': _text(row.get('size'), 32), 'inserts': _text(row.get('inserts'), 255),
             'price': price, 'min_price': min_price,
             'price_per_gram': _money_value(row.get('price_per_gram')) or Decimal(0),
+            'cost_price': _money_value(row.get('cost_price')),
             'quantity': quantity, 'store_id': store, '_store_name': store_names.get(store),
             'manufacturer': _text(row.get('manufacturer'), 255), 'commentaries': _text(row.get('commentaries'), 500),
             'arrival_date': arrival,

@@ -48,11 +48,14 @@ def build_summary(ops):
     withdrawn = sum((_d(w['amount']) for w in withdrawals), D0)
 
     sales_total = sum((_d(s['sold_price']) for s in sales), D0)
+    # чек — несколько позиций одной оплатой; старые продажи без чека считаются чеком из одной позиции
+    receipts_count = len({s.get('receipt_id') or -s['id'] for s in sales})
     returns_total = sum((_d(r['return_price']) for r in returns), D0)
     return {
         'sales_count': len(sales),
         'sales_total': sales_total,
-        'sales_avg': (sales_total / len(sales)) if sales else D0,
+        'receipts_count': receipts_count,
+        'sales_avg': (sales_total / receipts_count) if receipts_count else D0,
         'sales_by_payment': dict(sales_by_payment),
         'returns_count': len(returns),
         'returns_total': returns_total,
@@ -97,6 +100,8 @@ def summary_text(summary, start, end, store_name=None, breakdown=None):
     title = f"<b>Отчёт за {period}</b>" + (f" · {h(store_name)}" if store_name else " · все магазины" if breakdown else "")
     lines = [title, ""]
     lines.append(f"Продажи: {summary['sales_count']} шт. на <b>{money(summary['sales_total'])}</b>")
+    if summary['receipts_count']:
+        lines.append(f"Чеков: {summary['receipts_count']}, средний чек {money(summary['sales_avg'])}")
     for pt, (cnt, total) in sorted(summary['sales_by_payment'].items()):
         lines.append(f"  • {h(pt)}: {cnt} шт., {money(total)}")
     if summary['returns_count']:
@@ -160,6 +165,7 @@ def build_excel(ops, summary, start, end, store_name=None, breakdown=None):
         (),
         ("Продажи, шт.", summary['sales_count']),
         ("Продажи, сумма", summary['sales_total']),
+        ("Чеков", summary['receipts_count']),
         ("Средний чек", summary['sales_avg'].quantize(Decimal('1'))),
         ("Возвраты, шт.", summary['returns_count']),
         ("Возвраты, сумма", summary['returns_total']),
@@ -192,9 +198,9 @@ def build_excel(ops, summary, start, end, store_name=None, breakdown=None):
     ws.column_dimensions['C'].width = 18
 
     _sheet(wb, "Продажи",
-           ["№", "Дата", "Артикул", "Тип", "Модель", "Размер", "Металл", "Вес, г", "Цена по прайсу",
+           ["№", "Чек", "Дата", "Артикул", "Тип", "Модель", "Размер", "Металл", "Вес, г", "Цена по прайсу",
             "Сумма продажи", "Оплата", "Магазин", "Продавец", "Возврат"],
-           [(s['id'], s['sale_date'], s['article_number'], s['product_type'], s['model'], s['size'], s['metal_type'],
+           [(s['id'], s.get('receipt_id') or "", s['sale_date'], s['article_number'], s['product_type'], s['model'], s['size'], s['metal_type'],
              s['weight'], s['list_price'], s['sold_price'], s['payment_type'], s['store'], s['user_name'],
              f"№{s['return_id']}" if s['return_id'] else "") for s in ops['sales']])
     _sheet(wb, "Возвраты",

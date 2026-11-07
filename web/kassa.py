@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 import config
 from buttons import PAYMENT_TYPES, ROLE_TITLES
-from database import (get_user_by_id, get_stores, get_product_by_article, record_sale, get_sales_for_return,
+from database import (get_user_by_id, get_stores, get_product_by_article, record_receipt, MAX_RECEIPT_ITEMS, get_sales_for_return,
                       get_sale_details_by_id, create_return_record, create_buyback_record, create_trade_in_record,
                       create_cash_withdrawal_record, get_period_operations, create_kassa_login, consume_kassa_login)
 from schema import METAL_TYPES
@@ -282,14 +282,29 @@ def _result(ok, result, failed):
 
 @router.post("/sale")
 async def sale(request: Request, user=Depends(kassa_user), _=Depends(same_origin)):
+    """Чек: {"items": [{"article", "price"}, ...], "payment"}; одиночная продажа {"article", "price"} тоже принимается."""
     body = await request.json()
-    p = _for_sale(body.get("article"))
-    price = _money(body.get("price"), "сумму продажи")
-    _check_min(p, price)
+    raw = body.get("items")
+    if raw is None:
+        raw = [{"article": body.get("article"), "price": body.get("price")}]
+    if not isinstance(raw, list) or not raw:
+        raise HTTPException(400, "Чек пуст — добавьте товар.")
+    if len(raw) > MAX_RECEIPT_ITEMS:
+        raise HTTPException(400, f"В одном чеке — не больше {MAX_RECEIPT_ITEMS} позиций.")
+    items, names = [], []
+    for row in raw:
+        row = row if isinstance(row, dict) else {}
+        p = _for_sale(row.get("article"))
+        price = _money(row.get("price"), f"сумму для {p['article_number']}")
+        _check_min(p, price)
+        items.append((p['id'], price))
+        names.append(p['model'] or p['article_number'])
     payment = _payment(body.get("payment"))
-    sale_id = _result(*record_sale(p['id'], p['article_number'], user['id'], price, payment), "Продажа не оформлена")
-    logger.info("Касса ПК: продажа #%s, %s за %s (%s)", sale_id, p['article_number'], price, user['id'])
-    return {"id": sale_id, "text": f"Продажа №{sale_id}: {p['model'] or p['article_number']}, {money(price)}, {payment}"}
+    result = _result(*record_receipt(items, user['id'], payment, kassa_store_id(request, user)), "Продажа не оформлена")
+    logger.info("Касса ПК: чек #%s, %s поз. на %s (%s)", result['receipt_id'], len(items), result['total'], user['id'])
+    what = names[0] if len(names) == 1 else f"{len(names)} поз."
+    return {"id": result['receipt_id'], "sale_ids": result['sale_ids'],
+            "text": f"Чек №{result['receipt_id']}: {what}, {money(result['total'])}, {payment}"}
 
 
 @router.get("/sales-for-return")
@@ -381,9 +396,17 @@ async def withdrawal(request: Request, user=Depends(kassa_user), _=Depends(same_
 def _journal(ops):
     """Операции дня одним списком, новые сверху."""
     rows = []
-    for s in ops['sales']:
-        rows.append((s['sale_date'], "Продажа", f"{s['model'] or ''} · {s['article_number']}", int(s['sold_price']),
-                     s['payment_type'], s['user_name']))
+    receipts = {}
+    for s in ops['sales']:   # позиции одного чека — одной строкой
+        key = s.get('receipt_id') or -s['id']
+        receipts.setdefault(key, []).append(s)
+    for key, items in receipts.items():
+        s = items[0]
+        what = f"{s['model'] or ''} · {s['article_number']}" if len(items) == 1 else \
+            f"{len(items)} поз.: " + ", ".join(i['model'] or i['article_number'] for i in items)
+        if key > 0:
+            what = f"чек №{key} · {what}"
+        rows.append((s['sale_date'], "Продажа", what, sum(int(i['sold_price']) for i in items), s['payment_type'], s['user_name']))
     for r in ops['returns']:
         rows.append((r['return_date'], "Возврат", f"{r['model'] or ''} · {r['product_article']} (продажа №{r['original_sale_id']})",
                      -int(r['return_price']), r['payment_type'], r['user_name']))
@@ -412,7 +435,7 @@ def shift(request: Request, user=Depends(kassa_user)):
     store = next((s['name'] for s in get_stores(active_only=False) or [] if s['id'] == store_id), None)
     return {
         "date": d.strftime('%d.%m.%Y'), "store": store or "все магазины",
-        "sales_count": summary['sales_count'], "sales_total": int(summary['sales_total']),
+        "sales_count": summary["sales_count"], "receipts_count": summary["receipts_count"], "sales_total": int(summary['sales_total']),
         "returns_count": summary['returns_count'], "returns_total": int(summary['returns_total']),
         "buybacks_count": summary['buybacks_count'], "buybacks_total": int(summary['buybacks_total']),
         "trade_ins_count": summary['trade_ins_count'],

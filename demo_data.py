@@ -6,6 +6,7 @@
 """
 import logging
 import random
+import secrets
 from datetime import timedelta
 
 from database import with_connection, with_transaction, BusinessError
@@ -107,10 +108,10 @@ def seed_demo(cursor, days=14, seed=None):
             cursor.execute(
                 """INSERT INTO products (article_number, store_id, metal_type, product_type, model, size, fineness,
                        inserts, weight, price_per_gram, price, min_price, arrival_date, quantity, manufacturer,
-                       commentaries, track_stock)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1)""",
+                       commentaries, track_stock, cost_price)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1, %s)""",
                 (article, store['id'], metal, ptype, name, size, fineness, inserts, weight, per_gram, price,
-                 min_price, arrival, qty + 2, maker, COMMENT))
+                 min_price, arrival, qty + 2, maker, COMMENT, int(round(price * rnd.uniform(0.68, 0.8), -2))))
             products.append({"id": cursor.lastrowid, "article": article, "store_id": store['id'],
                              "price": price, "min_price": min_price, "stock": qty + 2, "metal": metal})
 
@@ -126,20 +127,32 @@ def seed_demo(cursor, days=14, seed=None):
     for store in stores[:5]:
         pool = [p for p in products if p['store_id'] == store['id']]
         for d in range(days):
-            for _ in range(rnd.randint(2, 6)):
-                candidates = [p for p in pool if p['stock'] > 1]
-                if not candidates:
-                    break
-                p = rnd.choice(candidates)
-                price = p['price'] if rnd.random() < 0.7 else max(p['min_price'], int(round(p['price'] * 0.95, -2)))
+            for _ in range(rnd.randint(2, 5)):        # чеков в день; в чеке 1–3 позиции
                 when = moment(d)
                 if when is None:
                     continue
-                cursor.execute("""INSERT INTO sales (product_id, user_id, sale_date, sold_price, payment_type, store_id)
-                                  VALUES (%s, %s, %s, %s, %s, %s)""",
-                               (p['id'], user_id, when, price, rnd.choice(PAYMENTS), store['id']))
-                p['stock'] -= 1
-                sales.append({"id": cursor.lastrowid, "product": p, "price": price, "when": when})
+                lines = []
+                for _ in range(rnd.choices([1, 2, 3], weights=[70, 22, 8])[0]):
+                    candidates = [p for p in pool if p['stock'] > 1]
+                    if not candidates:
+                        break
+                    p = rnd.choice(candidates)
+                    price = p['price'] if rnd.random() < 0.7 else max(p['min_price'], int(round(p['price'] * 0.95, -2)))
+                    p['stock'] -= 1
+                    lines.append((p, price))
+                if not lines:
+                    break
+                payment = rnd.choice(PAYMENTS)
+                cursor.execute("""INSERT INTO receipts (store_id, user_id, created_at, total, items_count, payment_type,
+                                      public_token) VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                               (store['id'], user_id, when, sum(pr for _, pr in lines), len(lines), payment,
+                                secrets.token_hex(16)))
+                receipt_id = cursor.lastrowid
+                for p, price in lines:
+                    cursor.execute("""INSERT INTO sales (product_id, user_id, sale_date, sold_price, payment_type, store_id,
+                                          receipt_id, list_price) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                                   (p['id'], user_id, when, price, payment, store['id'], receipt_id, p['price']))
+                    sales.append({"id": cursor.lastrowid, "product": p, "price": price, "when": when})
 
         # возврат одной продажи, скупка, инкассация раз в несколько дней
         own = [s for s in sales if s['product']['store_id'] == store['id'] and s['when'].date() < current.date()]
@@ -185,8 +198,18 @@ def remove_demo(cursor):
         cursor.execute(f"""DELETE r FROM returns r JOIN sales s ON s.id = r.original_sale_id
                            WHERE s.product_id IN ({marks})""", ids)
         removed += cursor.rowcount
+        cursor.execute(f"SELECT DISTINCT receipt_id FROM sales WHERE product_id IN ({marks}) AND receipt_id IS NOT NULL", ids)
+        receipts = [r['receipt_id'] for r in cursor.fetchall()]
         cursor.execute(f"DELETE FROM sales WHERE product_id IN ({marks})", ids)
         removed += cursor.rowcount
+        if receipts:
+            # чек удаляется, если в нём не осталось настоящих позиций; иначе пересчитывается
+            rmarks = ",".join(["%s"] * len(receipts))
+            cursor.execute(f"""DELETE r FROM receipts r LEFT JOIN sales s ON s.receipt_id = r.id
+                               WHERE r.id IN ({rmarks}) AND s.id IS NULL""", receipts)
+            cursor.execute(f"""UPDATE receipts r JOIN (SELECT receipt_id, SUM(sold_price) AS total, COUNT(*) AS n
+                                FROM sales WHERE receipt_id IN ({rmarks}) GROUP BY receipt_id) x ON x.receipt_id = r.id
+                               SET r.total = x.total, r.items_count = x.n""", receipts)
     cursor.execute("DELETE FROM trade_ins WHERE new_product_article LIKE %s OR old_product_article LIKE %s", (like, like))
     removed += cursor.rowcount
     cursor.execute("DELETE FROM buybacks WHERE product_article LIKE %s OR description LIKE %s", (like, MARK + "%"))
