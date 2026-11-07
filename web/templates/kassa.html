@@ -39,7 +39,7 @@
     @media (max-width: 640px) { .login-card { grid-template-columns: 1fr; justify-items: center; padding: 20px; } }
 
     /* ---------- касса */
-    #app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
+    #app { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; height: 100%; }
     header { display: flex; align-items: center; gap: 16px; padding: 10px 20px; background: var(--panel);
              border-bottom: 1px solid var(--line); }
     header .org { font-weight: 700; }
@@ -102,6 +102,28 @@
     .stat { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
     .stat b { display: block; font-size: 22px; }
 
+    /* ---------- экранная клавиатура */
+    #osk-toggle.on { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+    #osk { background: var(--panel); border-top: 1px solid var(--line); padding: 8px 16px 12px;
+           user-select: none; -webkit-user-select: none; touch-action: manipulation; }
+    .osk-bar { display: flex; gap: 6px; justify-content: center; margin-bottom: 8px; }
+    .osk-bar button { padding: 5px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; font-size: 14px; }
+    .osk-bar button.on { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+    .osk-bar .spacer { flex: 0 0 24px; }
+    .osk-text { max-width: 1000px; margin: 0 auto; display: flex; flex-direction: column; gap: 6px; }
+    .osk-row { display: flex; gap: 6px; }
+    .osk-num { max-width: 440px; margin: 0 auto; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+    #osk .k { flex: 1 1 0; min-width: 0; height: 54px; border: 0; border-radius: 8px; background: var(--key);
+              font-size: 21px; cursor: pointer; }
+    #osk .k:active { background: var(--accent); color: var(--accent-text); }
+    #osk .k.fn { background: var(--line); font-size: 16px; }
+    #osk .k.on { background: var(--accent); color: var(--accent-text); }
+    #osk .k.enter { background: var(--accent); color: var(--accent-text); font-weight: 600; font-size: 17px; }
+    #osk .k.space { flex-grow: 5; }
+    #osk .k.wide { flex-grow: 1.6; }
+    .osk-num .k.enter { grid-row: span 2; height: auto; }
+    @media (max-height: 820px) { #osk .k { height: 44px; font-size: 19px; } }
+
     /* ---------- подтверждение */
     dialog { border: 0; border-radius: 14px; padding: 24px; max-width: 520px; width: 92%; background: var(--panel); color: var(--text); }
     dialog::backdrop { background: rgba(0,0,0,.45); }
@@ -155,6 +177,7 @@
     <span class="spacer"></span>
     <span><span class="muted">Кассир:</span> <b id="who"></b></span>
     <a class="muted" href="/help/kassir" target="_blank">Справка</a>
+    <button class="btn" id="osk-toggle" title="Экранная клавиатура для сенсорного экрана" aria-pressed="false">⌨ Клавиатура</button>
     <span class="clock num" id="clock"></span>
     <button class="btn" id="logout">Выйти</button>
   </header>
@@ -173,6 +196,7 @@
       </section>
     </aside>
   </div>
+  <div id="osk" class="hidden no-print" aria-label="Экранная клавиатура"></div>
 </section>
 
 <dialog id="confirm">
@@ -369,7 +393,7 @@ function itemBlock(root, onChange) {
     <div id="item-other" class="hidden">
       <label>Металл</label><div class="choices" id="item-metal"></div>
       <div class="row"><div><label for="item-weight">Вес, г</label><input type="text" id="item-weight" inputmode="decimal" placeholder="3.45" style="max-width:140px"></div>
-      <div style="flex:1"><label for="item-desc">Описание</label><input type="text" id="item-desc" placeholder="кольцо 585, с камнем"></div></div>
+      <div style="flex:1"><label for="item-desc">Описание</label><input type="text" id="item-desc" data-osk="ru" placeholder="кольцо 585, с камнем"></div></div>
     </div>`;
   const state = {kind: "our", product: null, metal: null};
   choices($("#item-kind", root), ["Наше изделие", "Без артикула"], "Наше изделие", v => {
@@ -606,7 +630,7 @@ VIEWS.tradein = root => {
 VIEWS.withdrawal = root => {
   root.innerHTML = `<h2>Инкассация</h2><p class="muted">Изъятие наличных из кассы: сдача в банк, расходы.</p>
     <label for="amount">Сумма</label>${moneyInput("amount")}
-    <label for="comment">Комментарий</label><input type="text" id="comment" placeholder="в банк, на расходы…" maxlength="500">
+    <label for="comment">Комментарий</label><input type="text" id="comment" data-osk="ru" placeholder="в банк, на расходы…" maxlength="500">
     <div class="actions"><button class="btn primary big" id="go">Изъять</button></div>
     <div class="msg err hidden"></div>`;
   const go = () => {
@@ -670,6 +694,108 @@ document.addEventListener("keydown", e => {
 $("#confirm").addEventListener("keydown", e => {
   if (e.key === "Enter" && document.activeElement !== $("#confirm-cancel")) { e.preventDefault(); $("#confirm-ok").click(); }
 });
+
+// ============================================================ экранная клавиатура
+// Для сенсорных моноблоков: кнопки вставляют символы в поле, где стоит курсор, «Ввод» работает как Enter.
+const osk = (() => {
+  const box = $("#osk"), toggle = $("#osk-toggle");
+  const ROWS = {
+    ru: ["1234567890", "йцукенгшщзхъ", "фывапролджэ", "ячсмитьбю.-"],
+    kz: ["әіңғүұқөһ", "йцукенгшщзх", "фывапролджэ", "ячсмитьбю.-"],
+    en: ["1234567890", "qwertyuiop", "asdfghjkl#", "zxcvbnm,./-"],
+  };
+  const NUM = ["7", "8", "9", "bs", "4", "5", "6", "clear", "1", "2", "3", "enter", "000", "0", ","];
+  const LABELS = {bs: "⌫", clear: "Очистить", enter: "Ввод ↵", shift: "⇧", space: "Пробел"};
+  let on = false, layout = "num", shift = false, target = null;
+
+  const editable = el => el && el.matches && el.matches("input[type=text], textarea") && !el.disabled && !el.readOnly;
+  const kindOf = el => /numeric|decimal/.test(el.dataset.im ?? el.getAttribute("inputmode") ?? "") ? "num" : (el.dataset.osk || "en");
+  // подходит ли текущая раскладка полю: цифры — для сумм, русская/казахская — для комментариев, иначе как выбрал кассир
+  const fits = (el, l) => {
+    const k = kindOf(el);
+    if (k === "num" || l === "num") return k === l;
+    return el.dataset.osk ? l === k || (k === "ru" && l === "kz") : true;
+  };
+  const visible = el => el && el.isConnected && el.offsetParent !== null;
+
+  // пока клавиатура включена, системная экранная клавиатура (Windows/Android) не всплывает
+  const prepare = root => root.querySelectorAll("input[type=text], textarea").forEach(el => {
+    if (on && el.dataset.im === undefined) { el.dataset.im = el.getAttribute("inputmode") || ""; el.setAttribute("inputmode", "none"); }
+    if (!on && el.dataset.im !== undefined) {
+      if (el.dataset.im) el.setAttribute("inputmode", el.dataset.im); else el.removeAttribute("inputmode");
+      delete el.dataset.im;
+    }
+  });
+  new MutationObserver(() => { if (on) prepare($("#app")); }).observe($("#app"), {childList: true, subtree: true});
+
+  const key = (k, cls = "") => {
+    const label = LABELS[k] ?? (shift ? k.toUpperCase() : k);
+    return `<button type="button" class="k ${cls}" data-k="${esc(k)}">${esc(label)}</button>`;
+  };
+  function render() {
+    const tabs = [["num", "123"], ["ru", "АБВ"], ["kz", "ҚАЗ"], ["en", "ABC"]]
+      .map(([k, t]) => `<button type="button" data-tab="${k}" class="${k === layout ? "on" : ""}">${t}</button>`).join("");
+    const bar = `<div class="osk-bar">${tabs}<span class="spacer"></span><button type="button" data-tab="hide">Скрыть</button></div>`;
+    if (layout === "num") {
+      box.innerHTML = bar + `<div class="osk-num">${NUM.map(k => key(k, k === "enter" ? "enter" : k === "bs" || k === "clear" ? "fn" : "")).join("")}</div>`;
+      return;
+    }
+    const rows = ROWS[layout].map((r, i) => `<div class="osk-row">${[...r].map(c => key(c)).join("")}${i === 0 ? key("bs", "fn wide") : ""}</div>`);
+    rows.push(`<div class="osk-row">${key("shift", "fn wide" + (shift ? " on" : ""))}${key("clear", "fn wide")}${key("space", "space")}${key("enter", "enter wide")}</div>`);
+    box.innerHTML = bar + `<div class="osk-text">${rows.join("")}</div>`;
+  }
+
+  function field() {
+    if (!visible(target)) target = [...$("#panel").querySelectorAll("input[type=text], textarea")].find(visible) || null;
+    if (target && document.activeElement !== target) target.focus();
+    return target;
+  }
+  function press(k) {
+    if (k === "shift") { shift = !shift; render(); return; }
+    const el = field(); if (!el) return;
+    if (k === "enter") { el.dispatchEvent(new KeyboardEvent("keydown", {key: "Enter", code: "Enter", bubbles: true, cancelable: true})); return; }
+    const a = el.selectionStart ?? el.value.length, b = el.selectionEnd ?? a;
+    if (k === "clear") el.value = "";
+    else if (k === "bs") { if (a !== b) el.setRangeText("", a, b, "end"); else if (a > 0) el.setRangeText("", a - 1, a, "end"); }
+    else {
+      const text = k === "space" ? " " : shift ? k.toUpperCase() : k;
+      el.setRangeText(text, a, b, "end");
+      if (shift) { shift = false; render(); }
+    }
+    el.dispatchEvent(new Event("input", {bubbles: true}));
+  }
+
+  // кнопки клавиатуры не забирают фокус у поля ввода
+  box.addEventListener("pointerdown", e => { if (e.target.closest("button")) e.preventDefault(); });
+  box.addEventListener("mousedown", e => { if (e.target.closest("button")) e.preventDefault(); });
+  box.addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    if (b.dataset.tab === "hide") return set(false);
+    if (b.dataset.tab) { layout = b.dataset.tab; shift = false; render(); field(); return; }
+    press(b.dataset.k);
+  });
+  document.addEventListener("focusin", e => {
+    if (!editable(e.target) || !$("#app").contains(e.target)) return;
+    target = e.target;
+    const kind = kindOf(target);
+    if (on && !fits(target, layout)) { layout = kind; shift = false; render(); }
+  });
+
+  function set(value) {
+    on = value;
+    box.classList.toggle("hidden", !on);
+    toggle.classList.toggle("on", on);
+    toggle.setAttribute("aria-pressed", String(on));
+    try { localStorage.setItem("kassa.osk", on ? "1" : "0"); } catch (e) { /* приватный режим */ }
+    prepare($("#app"));
+    if (on) { const el = field(); if (el) layout = kindOf(el); render(); }
+  }
+  toggle.onclick = () => set(!on);
+  let saved = null;
+  try { saved = localStorage.getItem("kassa.osk"); } catch (e) { /* нет хранилища */ }
+  set(saved === null ? matchMedia("(pointer: coarse)").matches && innerWidth >= 900 : saved === "1");
+  return {set};
+})();
 
 // старт: если сессия кассы есть — сразу касса, иначе вход
 start().catch(() => {});

@@ -47,6 +47,19 @@
       </small>
     </fieldset>
 
+    <fieldset>
+      <legend><strong>Демо-данные</strong></legend>
+      <label>
+        <input type="checkbox" name="demo" value="1" role="switch" {% if form.get('demo') %}checked{% endif %}>
+        Заполнить пример каталога и продаж за две недели
+      </label>
+      <small class="muted" style="display:block;margin-bottom:1rem">
+        Около 25 изделий в каждом магазине (артикулы <code>DEMO-…</code>), продажи, возврат, скупка и инкассация —
+        чтобы сразу посмотреть отчёты, кассу и ценники и потренироваться. Перед началом работы удалите их одной
+        кнопкой: «Настройки» → «Демо-данные».
+      </small>
+    </fieldset>
+
     <button type="submit">Сохранить и запустить бота</button>
   </form>
 </article>

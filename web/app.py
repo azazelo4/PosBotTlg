@@ -20,6 +20,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
 import config
+import demo_data
 import settings_store
 from buttons import PAYMENT_TYPES, ROLE_TITLES
 from database import (ensure_admin, get_connection, get_stores, get_store_counts, create_store, update_store, set_user_store, init_pool, get_user_by_id, get_user_by_chat_id, search_products, get_product_by_id,
@@ -244,6 +245,7 @@ def _dashboard(request: Request, user):
     low = get_low_stock_products(config.LOW_STOCK_THRESHOLD) or []
     items = get_stock_report_data() or []
     return render(request, "dashboard.html", user, periods=periods, low_stock=low[:10], low_count=len(low), breakdown=breakdown,
+                  demo=demo_data.has_demo(),
                   totals=stock_totals(items), today=d, payment_types=PAYMENT_TYPES)
 
 
@@ -724,14 +726,20 @@ async def setup_submit(request: Request):
     if not ok:
         return _setup_page(request, 500, [str(result)], dict(form))
     logger.info("Первоначальная настройка завершена (%s).", ip)
+    demo = None
+    if form.get("demo"):
+        demo_ok, demo = await run_in_threadpool(demo_data.seed_demo)
+        if not demo_ok:
+            logger.warning("Демо-данные не добавлены: %s", demo)
+            demo = {"error": demo}
     return templates.TemplateResponse(request, "setup_done.html", {
         "user": None, "messages": [], "bot_name": bot_name, "admin_phone": admin_phone,
-        "web_url": config.WEB_URL})
+        "web_url": config.WEB_URL, "demo": demo})
 
 
 @app.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request, user=Depends(admin_only)):
-    return render(request, "settings.html", user, groups=settings_form.build_groups(),
+    return render(request, "settings.html", user, groups=settings_form.build_groups(), demo=demo_data.demo_counts(),
                   changes=settings_store.recent_changes() or [], titles={s.key: s.title for s in config.SETTINGS})
 
 
@@ -762,6 +770,23 @@ async def settings_submit(request: Request, user=Depends(admin_only)):
         flash(request, "Сохранено: " + ", ".join(config.BY_KEY[k].title for k in result) + "."
               + (" Бот перезапустится в течение минуты." if restart else ""))
     return RedirectResponse("/settings", status_code=303)
+
+
+@app.post("/settings/demo", response_class=HTMLResponse)
+def settings_demo(request: Request, action: str = Form(...), csrf: str = Form(""), user=Depends(admin_only)):
+    check_csrf(request, csrf)
+    if action == "add":
+        ok, result = demo_data.seed_demo()
+        flash(request, f"Добавлены демо-данные: {result['products']} товаров, {result['sales']} продаж за две недели."
+              if ok else result, "ok" if ok else "error")
+    elif action == "remove":
+        ok, result = demo_data.remove_demo()
+        flash(request, f"Демо-данные удалены: {result['products']} товаров, {result['operations']} операций."
+              if ok else result, "ok" if ok else "error")
+    else:
+        raise HTTPException(400, "Неизвестное действие.")
+    logger.info("Демо-данные: %s (%s) пользователем %s", action, "ok" if ok else result, user['id'])
+    return RedirectResponse("/settings#demo", status_code=303)
 
 
 @app.get("/caddy/ask")
