@@ -33,7 +33,7 @@ from utils.common import money, today, now, parse_money, parse_float, parse_int,
 from utils.labels import generate_labels_pdf, details_line
 from utils.report_generator import build_summary, build_excel, store_breakdown
 from utils.stock_report import build_stock_excel, stock_totals
-from web import settings_form
+from web import settings_form, kassa
 from web.security import (session_secret, redeem_login_token, validate_init_data, new_csrf, ADMIN_ROLES, CASH_ROLES)
 
 logger = logging.getLogger("posbot.web")
@@ -123,7 +123,7 @@ def _need_login(request: Request, exc: NeedLogin):
 
 @app.exception_handler(HTTPException)
 def _http_error(request: Request, exc: HTTPException):
-    if request.url.path.startswith("/api/"):
+    if request.url.path.startswith(("/api/", "/kassa/api/")):
         return JSONResponse({"error": exc.detail}, status_code=exc.status_code)
     return templates.TemplateResponse(request, "error.html", {"user": None, "message": exc.detail},
                                       status_code=exc.status_code)
@@ -543,6 +543,18 @@ def _product_json(p):
     return {"id": p['id'], "article": p['article_number'], "model": p['model'], "type": p['product_type'],
             "details": details_line(p), "inserts": p.get('inserts'), "store": p['Store'],
             "price": int(p['price']), "min_price": int(p['min_price']), "quantity": p['quantity']}
+
+
+# ---------------------------------------------------------------- касса для ПК (web/kassa.py)
+
+app.include_router(kassa.router)
+
+
+@app.get("/kassa", response_class=HTMLResponse)
+def kassa_page(request: Request):
+    if not settings_store.is_configured():
+        return RedirectResponse("/setup", status_code=303)
+    return templates.TemplateResponse(request, "kassa.html", {"org": config.ORG_NAME or "POS"})
 
 
 @app.get("/app", response_class=HTMLResponse)

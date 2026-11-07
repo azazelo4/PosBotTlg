@@ -511,6 +511,53 @@ def consume_login_token(cursor, token_hash):
     return True, row['user_id']
 
 
+# ---------------------------------------------------------------- вход на кассу ПК
+
+@with_transaction
+def create_kassa_login(cursor, token_hash, expires_at, client_info=None):
+    cursor.execute("DELETE FROM kassa_logins WHERE expires_at < %s", (now() - timedelta(days=1),))
+    cursor.execute("INSERT INTO kassa_logins (token_hash, client_info, created_at, expires_at) VALUES (%s, %s, %s, %s)",
+                   (token_hash, (client_info or "")[:255] or None, now(), expires_at))
+    return True, "ok"
+
+
+@with_connection
+def get_kassa_login(cursor, token_hash):
+    cursor.execute("SELECT * FROM kassa_logins WHERE token_hash = %s", (token_hash,))
+    return cursor.fetchone()
+
+
+@with_transaction
+def decide_kassa_login(cursor, token_hash, user_id, approve):
+    """Сотрудник в боте подтверждает или отклоняет вход. (True, запись) или (False, причина)."""
+    cursor.execute("SELECT * FROM kassa_logins WHERE token_hash = %s FOR UPDATE", (token_hash,))
+    row = cursor.fetchone()
+    if not row or row['expires_at'] < now():
+        raise BusinessError("QR-код устарел. Обновите страницу кассы на компьютере и отсканируйте новый.")
+    if row['status'] != 'pending':
+        raise BusinessError("Этот QR-код уже использован. Обновите страницу кассы и отсканируйте новый.")
+    status = 'approved' if approve else 'denied'
+    cursor.execute("UPDATE kassa_logins SET status = %s, user_id = %s, decided_at = %s WHERE token_hash = %s",
+                   (status, user_id, now(), token_hash))
+    row.update(status=status, user_id=user_id)
+    return True, row
+
+
+@with_transaction
+def consume_kassa_login(cursor, token_hash):
+    """Браузер забирает подтверждённый вход (один раз). (True, user_id) или (False, статус)."""
+    cursor.execute("SELECT status, user_id, expires_at FROM kassa_logins WHERE token_hash = %s FOR UPDATE", (token_hash,))
+    row = cursor.fetchone()
+    if not row:
+        return False, 'expired'
+    if row['status'] == 'approved':
+        cursor.execute("UPDATE kassa_logins SET status = 'used' WHERE token_hash = %s", (token_hash,))
+        return True, row['user_id']
+    if row['status'] == 'pending' and row['expires_at'] < now():
+        return False, 'expired'
+    return False, 'used' if row['status'] == 'used' else row['status']
+
+
 # ---------------------------------------------------------------- кассовые операции
 
 @with_transaction

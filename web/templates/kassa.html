@@ -1,0 +1,677 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Касса · {{ org }}</title>
+  <style>
+    :root {
+      --bg: #f4f5f7; --panel: #fff; --text: #16181d; --muted: #6b7280; --line: #e3e5ea;
+      --accent: #1f6feb; --accent-text: #fff; --ok: #137a3a; --ok-bg: #e7f6ec; --err: #b42318; --err-bg: #fdecec;
+      --warn-bg: #fff6e0; --key: #eef0f4; --radius: 10px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #111317; --panel: #1b1e24; --text: #e8eaee; --muted: #9aa1ad; --line: #2c313a;
+              --accent: #3b82f6; --ok: #6fdc95; --ok-bg: #13361f; --err: #f6a3a3; --err-bg: #3b1414;
+              --warn-bg: #3a2f12; --key: #2a2f38; }
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body { margin: 0; background: var(--bg); color: var(--text);
+           font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    button, input, select, textarea { font: inherit; color: inherit; }
+    .hidden { display: none !important; }
+    .muted { color: var(--muted); }
+    .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+    kbd { background: var(--key); border-radius: 4px; padding: 0 .35em; font: 12px/1.6 ui-monospace, monospace; color: var(--muted); }
+
+    /* ---------- вход */
+    #login { min-height: 100%; display: grid; place-items: center; padding: 16px; }
+    .login-card { background: var(--panel); border-radius: 16px; padding: 32px; max-width: 760px; width: 100%;
+                  display: grid; grid-template-columns: 260px 1fr; gap: 32px; align-items: center;
+                  box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+    .qr { width: 260px; height: 260px; background: #fff; border-radius: 12px; padding: 10px; display: grid; place-items: center; }
+    .qr svg { width: 100%; height: 100%; }
+    .qr.expired svg { opacity: .12; }
+    .login-card h1 { margin: 0 0 4px; font-size: 26px; }
+    .login-card ol { padding-left: 1.2em; margin: 16px 0; }
+    .login-card li { margin: 6px 0; }
+    @media (max-width: 640px) { .login-card { grid-template-columns: 1fr; justify-items: center; padding: 20px; } }
+
+    /* ---------- касса */
+    #app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
+    header { display: flex; align-items: center; gap: 16px; padding: 10px 20px; background: var(--panel);
+             border-bottom: 1px solid var(--line); }
+    header .org { font-weight: 700; }
+    header .spacer { flex: 1; }
+    header select { padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); }
+    .clock { font-size: 18px; }
+    .main { display: grid; grid-template-columns: 210px minmax(0, 1fr) 360px; gap: 16px; padding: 16px; min-height: 0; }
+    nav.ops { display: flex; flex-direction: column; gap: 6px; }
+    nav.ops button { display: flex; justify-content: space-between; align-items: center; text-align: left;
+                     padding: 12px 14px; border: 0; border-radius: var(--radius); background: var(--panel); cursor: pointer; }
+    nav.ops button.on { background: var(--accent); color: var(--accent-text); }
+    nav.ops button.on kbd { background: rgba(255,255,255,.2); color: var(--accent-text); }
+    .panel { background: var(--panel); border-radius: 14px; padding: 20px 24px; overflow: auto; min-height: 0; }
+    .panel h2 { margin: 0 0 16px; font-size: 22px; }
+    .panel h3 { margin: 20px 0 8px; font-size: 15px; color: var(--muted); font-weight: 600; }
+    label { display: block; font-size: 14px; color: var(--muted); margin: 14px 0 6px; }
+    input[type=text], textarea, select.field { width: 100%; padding: 10px 12px; border: 1px solid var(--line);
+                                               border-radius: 8px; background: var(--panel); }
+    input:focus, textarea:focus, select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    input.big { font-size: 22px; padding: 12px 14px; }
+    input.money { font-size: 26px; font-weight: 700; max-width: 260px; }
+    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .row > input[type=text] { flex: 1; min-width: 140px; }
+    .btn { padding: 11px 18px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+    .btn.big { font-size: 18px; padding: 14px 26px; }
+    .btn:disabled { opacity: .5; cursor: default; }
+    .choices { display: flex; gap: 8px; flex-wrap: wrap; }
+    .choice { padding: 10px 16px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; }
+    .choice.on { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+    .choice kbd { margin-left: 6px; }
+    .choice.on kbd { background: rgba(255,255,255,.2); color: var(--accent-text); }
+    .product { border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; margin-top: 14px; }
+    .product .title { font-size: 19px; font-weight: 600; }
+    .product .meta { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 6px; font-size: 14px; }
+    .product .price { font-size: 24px; font-weight: 700; }
+    .msg { padding: 10px 14px; border-radius: 8px; margin: 12px 0 0; }
+    .msg.err { background: var(--err-bg); color: var(--err); }
+    .msg.ok { background: var(--ok-bg); color: var(--ok); font-size: 18px; font-weight: 600; }
+    .msg.warn { background: var(--warn-bg); }
+    .actions { margin-top: 22px; display: flex; gap: 12px; align-items: center; }
+    .total-line { font-size: 20px; margin-top: 14px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th { text-align: left; font-weight: 600; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--line); }
+    td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th.amount, td.amount { text-align: right; }
+    tr.pick { cursor: pointer; }
+    tr.pick:hover td { background: var(--bg); }
+    tr.pick.on td { background: var(--ok-bg); }
+    tr.disabled td { color: var(--muted); }
+    .side { display: flex; flex-direction: column; gap: 16px; min-height: 0; }
+    .side .panel { padding: 16px 18px; }
+    .cash { font-size: 30px; font-weight: 700; }
+    .kv { display: flex; justify-content: space-between; padding: 3px 0; font-size: 14px; }
+    .journal { flex: 1; }
+    .journal .op { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+    .journal .op small { display: block; color: var(--muted); }
+    .neg { color: var(--err); }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+    .stat { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
+    .stat b { display: block; font-size: 22px; }
+
+    /* ---------- подтверждение */
+    dialog { border: 0; border-radius: 14px; padding: 24px; max-width: 520px; width: 92%; background: var(--panel); color: var(--text); }
+    dialog::backdrop { background: rgba(0,0,0,.45); }
+    dialog h3 { margin: 0 0 12px; font-size: 20px; }
+    dialog .lines div { padding: 4px 0; }
+    #toast { position: fixed; left: 50%; top: 76px; transform: translateX(-50%); z-index: 10; max-width: 90%; }
+
+    @media (max-width: 1100px) { .main { grid-template-columns: 180px minmax(0, 1fr); } .side { display: none; } }
+    @media (max-width: 700px) {
+      .main { grid-template-columns: 1fr; padding: 10px; }
+      nav.ops { flex-direction: row; overflow-x: auto; }
+      nav.ops button { white-space: nowrap; } nav.ops kbd { display: none; }
+      header { flex-wrap: wrap; padding: 10px 16px; }
+    }
+    @media print {
+      header, nav.ops, .side, .no-print { display: none !important; }
+      body { background: #fff; color: #000; } .main { display: block; padding: 0; } .panel { padding: 0; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ======================= вход ======================= -->
+<section id="login" class="hidden">
+  <div class="login-card">
+    <div class="qr" id="qr"><span class="muted">Загрузка…</span></div>
+    <div>
+      <div class="muted">{{ org }}</div>
+      <h1>Вход на кассу</h1>
+      <ol>
+        <li>Откройте камеру телефона и наведите на QR-код.</li>
+        <li>Telegram откроет бота <b id="bot-name">POS-бота</b> — нажмите <b>Start</b>, затем <b>«✅ Войти»</b>.</li>
+        <li>Касса откроется здесь сама.</li>
+      </ol>
+      <p class="muted" id="login-state">Код действует 5 минут.</p>
+      <div class="row">
+        <button class="btn" id="login-refresh">Новый QR-код</button>
+        <a class="muted" id="login-link" href="#" target="_blank" rel="noopener">Telegram на этом компьютере</a>
+      </div>
+      <div class="msg err hidden" id="login-err"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= касса ======================= -->
+<section id="app" class="hidden">
+  <header>
+    <span class="org">{{ org }}</span>
+    <span id="store-box"></span>
+    <span class="spacer"></span>
+    <span><span class="muted">Кассир:</span> <b id="who"></b></span>
+    <span class="clock num" id="clock"></span>
+    <button class="btn" id="logout">Выйти</button>
+  </header>
+  <div class="main">
+    <nav class="ops" id="ops"></nav>
+    <section class="panel" id="panel"></section>
+    <aside class="side">
+      <section class="panel">
+        <div class="muted">Наличные в кассе сегодня</div>
+        <div class="cash num" id="side-cash">—</div>
+        <div id="side-flow"></div>
+      </section>
+      <section class="panel journal">
+        <strong>Операции за сегодня</strong>
+        <div id="side-journal" class="muted" style="margin-top:6px">—</div>
+      </section>
+    </aside>
+  </div>
+</section>
+
+<dialog id="confirm">
+  <h3 id="confirm-title"></h3>
+  <div class="lines" id="confirm-lines"></div>
+  <div class="actions">
+    <button class="btn primary big" id="confirm-ok">Подтвердить <kbd>Enter</kbd></button>
+    <button class="btn" id="confirm-cancel">Отмена <kbd>Esc</kbd></button>
+  </div>
+  <div class="msg err hidden" id="confirm-err"></div>
+</dialog>
+<div id="toast"></div>
+
+{% raw %}
+<script>
+"use strict";
+const $ = (sel, root = document) => root.querySelector(sel);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+const fmt = n => new Intl.NumberFormat("ru-RU").format(Math.round(n)) + " ₸";
+const parseMoney = s => { const v = String(s ?? "").replace(/[\s ₸]/g, "").replace(",", "."); return v && !isNaN(v) ? Math.round(Number(v)) : null; };
+
+class ApiError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
+async function api(path, body) {
+  const opts = body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json", "X-Kassa": "1"}, body: JSON.stringify(body)};
+  const r = await fetch("/kassa/api/" + path, {credentials: "same-origin", ...opts});
+  let data = {};
+  try { data = await r.json(); } catch (e) { /* пустой ответ */ }
+  if (r.status === 401) { showLogin(); throw new ApiError(401, data.error || "Войдите на кассу."); }
+  if (!r.ok) throw new ApiError(r.status, data.error || "Ошибка сервера. Попробуйте ещё раз.");
+  return data;
+}
+
+// ============================================================ вход
+let pollTimer = null, expireTimer = null;
+function showLogin() {
+  if ($("#confirm").open) $("#confirm").close();
+  $("#app").classList.add("hidden");
+  $("#login").classList.remove("hidden");
+  newQr();
+}
+async function newQr() {
+  clearInterval(pollTimer); clearTimeout(expireTimer);
+  $("#login-err").classList.add("hidden");
+  $("#qr").classList.remove("expired");
+  $("#login-state").textContent = "Код действует 5 минут.";
+  try {
+    const d = await api("login", {});
+    $("#qr").innerHTML = d.qr;
+    $("#bot-name").textContent = d.bot;
+    $("#login-link").href = d.link;
+    expireTimer = setTimeout(expired, d.ttl * 1000);
+    pollTimer = setInterval(poll, 2000);
+  } catch (e) {
+    $("#qr").innerHTML = '<span class="muted">QR недоступен</span>';
+    $("#login-err").textContent = e.message; $("#login-err").classList.remove("hidden");
+  }
+}
+function expired() {
+  clearInterval(pollTimer);
+  $("#qr").classList.add("expired");
+  $("#login-state").textContent = "Код устарел — нажмите «Новый QR-код».";
+}
+async function poll() {
+  let d;
+  try { d = await api("login"); } catch (e) { return; }
+  if (d.status === "approved") { clearInterval(pollTimer); clearTimeout(expireTimer); start(); }
+  else if (d.status === "denied") { clearInterval(pollTimer); $("#login-state").textContent = "Вход отклонён в Telegram."; $("#qr").classList.add("expired"); }
+  else if (d.status !== "pending") expired();
+}
+$("#login-refresh").onclick = newQr;
+
+// ============================================================ касса
+let me = null;
+const OPS = [
+  ["sale", "Продажа"], ["return", "Возврат"], ["buyback", "Скупка"], ["tradein", "Trade-In"],
+  ["withdrawal", "Инкассация"], ["shift", "Итоги смены"],
+];
+let current = "sale";
+
+async function start() {
+  try { me = await api("me"); } catch (e) { return; }
+  $("#login").classList.add("hidden");
+  $("#app").classList.remove("hidden");
+  $("#who").textContent = me.name;
+  renderStore();
+  $("#ops").innerHTML = OPS.map(([key, title], i) => `<button data-op="${key}">${title} <kbd>Alt+${i + 1}</kbd></button>`).join("");
+  $("#ops").onclick = e => { const b = e.target.closest("button"); if (b) open(b.dataset.op); };
+  open(current);
+  refreshSide();
+}
+
+function renderStore() {
+  const box = $("#store-box");
+  if (me.fixed_store || me.stores.length <= 1) {
+    const s = me.stores.find(s => s.id === me.store_id);
+    box.innerHTML = s ? `<span class="muted">Магазин:</span> <b>${esc(s.name)}</b>` : "";
+    return;
+  }
+  box.innerHTML = `<span class="muted">Магазин:</span> <select id="store">${
+    (me.store_id ? "" : '<option value="">— выберите —</option>') +
+    me.stores.map(s => `<option value="${s.id}" ${s.id === me.store_id ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</select>`;
+  $("#store").onchange = async e => {
+    try { await api("store", {store_id: Number(e.target.value)}); me.store_id = Number(e.target.value); renderStore(); refreshSide(); }
+    catch (err) { toast(err.message, "err"); }
+  };
+}
+
+$("#logout").onclick = async () => {
+  if (!confirm("Выйти из кассы?")) return;
+  try { await api("logout", {}); } catch (e) { /* всё равно на вход */ }
+  me = null; showLogin();
+};
+
+setInterval(() => { $("#clock").textContent = new Date().toLocaleTimeString("ru-RU", {hour: "2-digit", minute: "2-digit"}); }, 1000);
+
+function open(op) {
+  current = op;
+  document.querySelectorAll("#ops button").forEach(b => b.classList.toggle("on", b.dataset.op === op));
+  const panel = $("#panel");
+  panel.escape = panel.hotkey = null;
+  VIEWS[op](panel);
+}
+
+// ------------------------------------------------------------ общие элементы
+function errBox(root) { return $(".msg.err", root); }
+function showErr(root, text) { const b = errBox(root); b.textContent = text; b.classList.toggle("hidden", !text); }
+
+function choices(container, values, selected, onChange, withKeys = true) {
+  container.innerHTML = values.map((v, i) =>
+    `<button type="button" class="choice ${v === selected ? "on" : ""}" data-v="${esc(v)}">${esc(v)}${withKeys ? ` <kbd>${i + 1}</kbd>` : ""}</button>`).join("");
+  container.onclick = e => {
+    const b = e.target.closest(".choice"); if (!b) return;
+    container.querySelectorAll(".choice").forEach(x => x.classList.toggle("on", x === b));
+    onChange(b.dataset.v);
+  };
+  container.pick = i => { const b = container.querySelectorAll(".choice")[i]; if (b) b.click(); };
+}
+
+function productCard(p) {
+  return `<div class="product">
+    <div class="title">${esc(p.model || p.type || "")}</div>
+    <div class="muted">арт. ${esc(p.article)} · ${esc(p.details || "")}${p.inserts ? " · " + esc(p.inserts) : ""}</div>
+    <div class="meta"><span class="price num">${fmt(p.price)}</span>
+      <span>мин. <b class="num">${fmt(p.min_price)}</b></span>
+      <span>остаток <b>${p.quantity}</b> шт.</span><span class="muted">${esc(p.store || "")}</span></div>
+  </div>`;
+}
+
+function confirmAndRun(title, lines, run, done) {
+  // Подтверждение операции; ошибка сервера показывается в том же окне, можно исправить и повторить
+  const dlg = $("#confirm"), ok = $("#confirm-ok"), err = $("#confirm-err");
+  $("#confirm-title").textContent = title;
+  $("#confirm-lines").innerHTML = lines.filter(Boolean).map(l => `<div>${l}</div>`).join("");
+  err.classList.add("hidden");
+  ok.disabled = false;
+  ok.onclick = async () => {
+    if (ok.disabled) return;
+    ok.disabled = true;
+    try {
+      const r = await run();
+      ok.disabled = false;  // фокус на выключенной кнопке «съедает» клавиатуру
+      dlg.close();
+      toast("✅ " + r.text, "ok");
+      refreshSide();
+      done();
+    } catch (e) {
+      err.textContent = e.message; err.classList.remove("hidden"); ok.disabled = false;
+    }
+  };
+  $("#confirm-cancel").onclick = () => dlg.close();
+  dlg.showModal();
+  ok.focus();
+}
+
+let toastTimer = null;
+function toast(text, kind) {
+  const t = $("#toast");
+  t.innerHTML = `<div class="msg ${kind}">${esc(text)}</div>`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.innerHTML = ""; }, kind === "ok" ? 6000 : 8000);
+}
+
+function moneyInput(id, value) {
+  return `<input type="text" class="money num" id="${id}" inputmode="numeric" autocomplete="off" value="${value ?? ""}">`;
+}
+
+// Изделие клиента для скупки и trade-in
+function itemBlock(root, onChange) {
+  root.innerHTML = `
+    <div class="choices" id="item-kind"></div>
+    <div id="item-our"><label for="item-article">Артикул нашего изделия</label>
+      <div class="row"><input type="text" class="big" id="item-article" autocomplete="off" placeholder="Артикул">
+      <button class="btn" type="button" id="item-find">Найти</button></div><div id="item-card"></div></div>
+    <div id="item-other" class="hidden">
+      <label>Металл</label><div class="choices" id="item-metal"></div>
+      <div class="row"><div><label for="item-weight">Вес, г</label><input type="text" id="item-weight" inputmode="decimal" placeholder="3.45" style="max-width:140px"></div>
+      <div style="flex:1"><label for="item-desc">Описание</label><input type="text" id="item-desc" placeholder="кольцо 585, с камнем"></div></div>
+    </div>`;
+  const state = {kind: "our", product: null, metal: null};
+  choices($("#item-kind", root), ["Наше изделие", "Без артикула"], "Наше изделие", v => {
+    state.kind = v === "Наше изделие" ? "our" : "other";
+    $("#item-our", root).classList.toggle("hidden", state.kind !== "our");
+    $("#item-other", root).classList.toggle("hidden", state.kind === "our");
+    (state.kind === "our" ? $("#item-article", root) : $("#item-weight", root)).focus();
+    onChange(state);
+  }, false);
+  choices($("#item-metal", root), me.metal_types, null, v => { state.metal = v; onChange(state); }, false);
+  const find = async () => {
+    const a = $("#item-article", root).value.trim(); if (!a) return;
+    try { state.product = await api("product?article=" + encodeURIComponent(a)); $("#item-card", root).innerHTML = productCard(state.product); }
+    catch (e) { state.product = null; $("#item-card", root).innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
+    onChange(state);
+  };
+  $("#item-find", root).onclick = find;
+  $("#item-article", root).onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); find(); } };
+  state.payload = () => state.kind === "our"
+    ? {article: state.product ? state.product.article : $("#item-article", root).value.trim()}
+    : {metal: state.metal, weight: $("#item-weight", root).value.trim(), description: $("#item-desc", root).value.trim()};
+  state.title = () => state.kind === "our"
+    ? (state.product ? `${esc(state.product.model || "")}, арт. ${esc(state.product.article)}` : "")
+    : `${esc($("#item-desc", root).value.trim() || "изделие")} (${esc(state.metal || "?")}, ${esc($("#item-weight", root).value.trim())} г), без артикула`;
+  return state;
+}
+
+// ------------------------------------------------------------ Продажа
+const VIEWS = {};
+VIEWS.sale = root => {
+  root.innerHTML = `<h2>Продажа</h2>
+    <label for="article">Артикул товара — введите или отсканируйте, затем <kbd>Enter</kbd></label>
+    <div class="row"><input type="text" class="big" id="article" autocomplete="off" placeholder="Артикул">
+      <button class="btn" id="find">Найти</button></div>
+    <div id="card"></div>
+    <div id="form" class="hidden">
+      <label for="price">Сумма продажи</label>${moneyInput("price")}
+      <label>Оплата <span class="muted">— клавиши 1–${me.payment_types.length}</span></label><div class="choices" id="pay"></div>
+      <div class="actions"><button class="btn primary big" id="go">Продать <kbd>Enter</kbd></button>
+        <button class="btn" id="reset">Отмена <kbd>Esc</kbd></button></div>
+    </div>
+    <div class="msg err hidden"></div>`;
+  let product = null, payment = null;
+  const article = $("#article", root);
+  const reset = () => { product = null; payment = null; article.value = ""; $("#card", root).innerHTML = ""; $("#form", root).classList.add("hidden"); showErr(root, ""); article.focus(); };
+  const find = async () => {
+    const a = article.value.trim(); if (!a) return;
+    showErr(root, "");
+    try {
+      product = await api("product?article=" + encodeURIComponent(a));
+      $("#card", root).innerHTML = productCard(product);
+      if (product.quantity <= 0) { showErr(root, "Товара нет в наличии."); $("#form", root).classList.add("hidden"); return; }
+      $("#price", root).value = product.price;
+      payment = null;
+      choices($("#pay", root), me.payment_types, null, v => { payment = v; });
+      $("#form", root).classList.remove("hidden");
+      $("#price", root).focus(); $("#price", root).select();
+    } catch (e) { product = null; $("#card", root).innerHTML = ""; $("#form", root).classList.add("hidden"); showErr(root, e.message); article.select(); }
+  };
+  const go = () => {
+    const price = parseMoney($("#price", root).value);
+    if (!price || price <= 0) return showErr(root, "Введите сумму продажи.");
+    if (price < product.min_price) return showErr(root, `Сумма ниже минимальной цены ${fmt(product.min_price)}.`);
+    if (!payment) return showErr(root, "Выберите способ оплаты (клавиши 1–" + me.payment_types.length + ").");
+    showErr(root, "");
+    confirmAndRun("Подтвердите продажу", [
+      `${esc(product.model || "")}, арт. ${esc(product.article)}`,
+      `Сумма: <b class="num">${fmt(price)}</b>${price < product.price ? ` <span class="muted">(скидка ${fmt(product.price - price)})</span>` : ""}`,
+      `Оплата: <b>${esc(payment)}</b>`,
+    ], () => api("sale", {article: product.article, price, payment}), reset);
+  };
+  $("#find", root).onclick = find;
+  article.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); find(); } };
+  $("#price", root).onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); go(); } };
+  $("#go", root).onclick = go;
+  $("#reset", root).onclick = reset;
+  root.hotkey = e => {
+    if (!product || $("#form", root).classList.contains("hidden")) return false;
+    if (/^[1-9]$/.test(e.key) && document.activeElement !== $("#price", root)) { $("#pay", root).pick(Number(e.key) - 1); return true; }
+    if (e.key === "Enter" && document.activeElement.tagName !== "INPUT") { go(); return true; }
+    return false;
+  };
+  root.escape = reset;
+  article.focus();
+};
+
+// ------------------------------------------------------------ Возврат
+VIEWS.return = root => {
+  root.innerHTML = `<h2>Возврат</h2>
+    <label for="article">Артикул возвращаемого товара</label>
+    <div class="row"><input type="text" class="big" id="article" autocomplete="off" placeholder="Артикул">
+      <button class="btn" id="find">Найти продажи</button></div>
+    <div id="sales"></div>
+    <div id="form" class="hidden">
+      <label for="price">Сумма возврата</label>${moneyInput("price")}
+      <label>Выплата клиенту</label><div class="choices" id="pay"></div>
+      <div class="actions"><button class="btn primary big" id="go">Оформить возврат</button><button class="btn" id="reset">Отмена</button></div>
+    </div>
+    <div class="msg err hidden"></div>`;
+  let sale = null, payment = null, list = [];
+  const article = $("#article", root);
+  const reset = () => { sale = null; article.value = ""; $("#sales", root).innerHTML = ""; $("#form", root).classList.add("hidden"); showErr(root, ""); article.focus(); };
+  const pick = s => {
+    sale = s;
+    root.querySelectorAll("tr.pick").forEach(tr => tr.classList.toggle("on", Number(tr.dataset.id) === s.sale_id));
+    $("#price", root).value = s.price;
+    payment = s.payment;
+    choices($("#pay", root), me.payment_types, me.payment_types.includes(s.payment) ? s.payment : null, v => { payment = v; }, false);
+    $("#form", root).classList.remove("hidden");
+    $("#price", root).focus(); $("#price", root).select();
+  };
+  const find = async () => {
+    const a = article.value.trim(); if (!a) return;
+    showErr(root, ""); $("#form", root).classList.add("hidden"); sale = null;
+    try { list = await api("sales-for-return?article=" + encodeURIComponent(a)); }
+    catch (e) { return showErr(root, e.message); }
+    const open = list.filter(s => !s.returned);
+    if (!list.length) { $("#sales", root).innerHTML = ""; return showErr(root, `Продаж артикула ${a} за 60 дней не найдено.`); }
+    $("#sales", root).innerHTML = `<h3>Продажи за 60 дней — выберите</h3><table><tr><th>№</th><th>Дата</th><th>Товар</th><th>Оплата</th><th class="amount">Сумма</th></tr>${
+      list.map(s => `<tr class="${s.returned ? "disabled" : "pick"}" data-id="${s.sale_id}"><td>${s.sale_id}</td><td class="num">${esc(s.date)}</td>
+        <td>${esc(s.model || "")}${s.returned ? ' <span class="muted">— уже возвращена</span>' : ""}</td><td>${esc(s.payment)}</td>
+        <td class="amount num">${fmt(s.price)}</td></tr>`).join("")}</table>`;
+    root.querySelectorAll("tr.pick").forEach(tr => tr.onclick = () => pick(list.find(s => s.sale_id === Number(tr.dataset.id))));
+    if (!open.length) showErr(root, "Все продажи этого артикула уже возвращены.");
+    else if (open.length === 1) pick(open[0]);
+  };
+  const go = () => {
+    const price = parseMoney($("#price", root).value);
+    if (!price || price <= 0 || price > sale.price) return showErr(root, `Сумма возврата — больше нуля и не больше ${fmt(sale.price)}.`);
+    if (!payment) return showErr(root, "Выберите способ выплаты.");
+    showErr(root, "");
+    confirmAndRun("Подтвердите возврат", [
+      `Продажа №${sale.sale_id} от ${esc(sale.date)}: ${esc(sale.model || "")}, арт. ${esc(sale.article)}`,
+      `К выплате: <b class="num">${fmt(price)}</b>, ${esc(payment)}`, `<span class="muted">Товар вернётся на склад.</span>`,
+    ], () => api("return", {sale_id: sale.sale_id, price, payment}), reset);
+  };
+  $("#find", root).onclick = find;
+  article.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); find(); } };
+  $("#price", root).onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); go(); } };
+  $("#go", root).onclick = go; $("#reset", root).onclick = reset;
+  root.escape = reset;
+  article.focus();
+};
+
+// ------------------------------------------------------------ Скупка
+VIEWS.buyback = root => {
+  root.innerHTML = `<h2>Скупка изделия у клиента</h2><div id="item"></div>
+    <label for="price">Сумма скупки</label>${moneyInput("price")}
+    <label>Выплата клиенту</label><div class="choices" id="pay"></div>
+    <div class="actions"><button class="btn primary big" id="go">Оформить скупку</button><button class="btn" id="reset">Очистить</button></div>
+    <div class="msg err hidden"></div>`;
+  let payment = null;
+  const item = itemBlock($("#item", root), () => {});
+  choices($("#pay", root), me.payment_types, null, v => { payment = v; }, false);
+  const go = () => {
+    const price = parseMoney($("#price", root).value);
+    if (item.kind === "our" && !item.product) return showErr(root, "Найдите изделие по артикулу или выберите «Без артикула».");
+    if (item.kind === "other" && !item.metal) return showErr(root, "Выберите металл изделия.");
+    if (!price || price <= 0) return showErr(root, "Введите сумму скупки.");
+    if (!payment) return showErr(root, "Выберите способ выплаты.");
+    showErr(root, "");
+    confirmAndRun("Подтвердите скупку", [
+      `Изделие: ${item.title()}`, `Выплата клиенту: <b class="num">${fmt(price)}</b>, ${esc(payment)}`,
+      item.kind === "our" ? `<span class="muted">Изделие вернётся на склад.</span>` : "",
+    ], () => api("buyback", {item: item.payload(), price, payment}), () => VIEWS.buyback(root));
+  };
+  $("#go", root).onclick = go; $("#reset", root).onclick = () => VIEWS.buyback(root);
+  $("#price", root).onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); go(); } };
+  root.escape = () => VIEWS.buyback(root);
+  $("#item-article", root).focus();
+};
+
+// ------------------------------------------------------------ Trade-In
+VIEWS.tradein = root => {
+  root.innerHTML = `<h2>Trade-In</h2>
+    <h3>1. Клиент сдаёт</h3><div id="item"></div>
+    <label for="old">Оценка сдаваемого изделия</label>${moneyInput("old")}
+    <h3>2. Клиент получает</h3>
+    <div class="row"><input type="text" class="big" id="new-article" autocomplete="off" placeholder="Артикул нового товара">
+      <button class="btn" id="new-find">Найти</button></div>
+    <div id="new-card"></div>
+    <label for="new-price">Цена нового товара</label>${moneyInput("new-price")}
+    <div class="total-line" id="diff"></div>
+    <div id="pay-box" class="hidden"><label id="pay-label">Способ оплаты</label><div class="choices" id="pay"></div></div>
+    <div class="actions"><button class="btn primary big" id="go">Оформить Trade-In</button><button class="btn" id="reset">Очистить</button></div>
+    <div class="msg err hidden"></div>`;
+  let product = null, payment = null;
+  const item = itemBlock($("#item", root), () => {});
+  choices($("#pay", root), me.payment_types, null, v => { payment = v; }, false);
+  const diff = () => {
+    const o = parseMoney($("#old", root).value), n = parseMoney($("#new-price", root).value);
+    if (o === null || n === null) { $("#diff", root).textContent = ""; $("#pay-box", root).classList.add("hidden"); return null; }
+    const d = n - o;
+    $("#diff", root).innerHTML = d > 0 ? `Клиент доплачивает <b class="num">${fmt(d)}</b>` : d < 0 ? `Выплачиваем клиенту <b class="num">${fmt(-d)}</b>` : "Без доплаты";
+    $("#pay-label", root).textContent = d > 0 ? "Способ оплаты доплаты" : "Способ выплаты клиенту";
+    $("#pay-box", root).classList.toggle("hidden", d === 0);
+    return d;
+  };
+  $("#old", root).oninput = diff; $("#new-price", root).oninput = diff;
+  const findNew = async () => {
+    const a = $("#new-article", root).value.trim(); if (!a) return;
+    try {
+      product = await api("product?article=" + encodeURIComponent(a));
+      $("#new-card", root).innerHTML = productCard(product);
+      $("#new-price", root).value = product.price; diff();
+      $("#new-price", root).focus(); $("#new-price", root).select();
+    } catch (e) { product = null; $("#new-card", root).innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
+  };
+  $("#new-find", root).onclick = findNew;
+  $("#new-article", root).onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); findNew(); } };
+  const go = () => {
+    const o = parseMoney($("#old", root).value), n = parseMoney($("#new-price", root).value), d = diff();
+    if (item.kind === "our" && !item.product) return showErr(root, "Найдите сдаваемое изделие по артикулу или выберите «Без артикула».");
+    if (item.kind === "other" && !item.metal) return showErr(root, "Выберите металл сдаваемого изделия.");
+    if (!o || o <= 0) return showErr(root, "Введите оценку сдаваемого изделия.");
+    if (!product) return showErr(root, "Найдите новый товар по артикулу.");
+    if (product.quantity <= 0) return showErr(root, "Нового товара нет в наличии.");
+    if (!n || n < product.min_price) return showErr(root, `Цена нового товара — не ниже ${fmt(product.min_price)}.`);
+    if (d !== 0 && !payment) return showErr(root, "Выберите способ оплаты разницы.");
+    showErr(root, "");
+    confirmAndRun("Подтвердите Trade-In", [
+      `Сдаёт: ${item.title()} — оценка <b class="num">${fmt(o)}</b>`,
+      `Получает: ${esc(product.model || "")}, арт. ${esc(product.article)} — <b class="num">${fmt(n)}</b>`,
+      d > 0 ? `Доплата клиента: <b class="num">${fmt(d)}</b>, ${esc(payment)}` : d < 0 ? `Выплата клиенту: <b class="num">${fmt(-d)}</b>, ${esc(payment)}` : "Без доплаты",
+    ], () => api("tradein", {item: item.payload(), old_value: o, new_article: product.article, new_price: n, payment: d ? payment : null}),
+    () => VIEWS.tradein(root));
+  };
+  $("#go", root).onclick = go; $("#reset", root).onclick = () => VIEWS.tradein(root);
+  root.escape = () => VIEWS.tradein(root);
+  $("#item-article", root).focus();
+};
+
+// ------------------------------------------------------------ Инкассация
+VIEWS.withdrawal = root => {
+  root.innerHTML = `<h2>Инкассация</h2><p class="muted">Изъятие наличных из кассы: сдача в банк, расходы.</p>
+    <label for="amount">Сумма</label>${moneyInput("amount")}
+    <label for="comment">Комментарий</label><input type="text" id="comment" placeholder="в банк, на расходы…" maxlength="500">
+    <div class="actions"><button class="btn primary big" id="go">Изъять</button></div>
+    <div class="msg err hidden"></div>`;
+  const go = () => {
+    const amount = parseMoney($("#amount", root).value);
+    if (!amount || amount <= 0) return showErr(root, "Введите сумму.");
+    const comment = $("#comment", root).value.trim();
+    showErr(root, "");
+    confirmAndRun("Подтвердите инкассацию", [`Сумма: <b class="num">${fmt(amount)}</b>`, `Комментарий: ${esc(comment || "—")}`],
+      () => api("withdrawal", {amount, comment}), () => VIEWS.withdrawal(root));
+  };
+  $("#go", root).onclick = go;
+  $("#amount", root).onkeydown = $("#comment", root).onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); go(); } };
+  $("#amount", root).focus();
+};
+
+// ------------------------------------------------------------ Итоги смены
+VIEWS.shift = async root => {
+  root.innerHTML = `<h2>Итоги смены</h2><p class="muted">Загрузка…</p>`;
+  let s;
+  try { s = await api("shift"); } catch (e) { root.innerHTML = `<h2>Итоги смены</h2><div class="msg err">${esc(e.message)}</div>`; return; }
+  root.innerHTML = `<div class="row" style="justify-content:space-between"><h2 style="margin:0">Итоги смены</h2>
+      <button class="btn no-print" onclick="window.print()">Печать</button></div>
+    <p class="muted">${esc(s.date)} · ${esc(s.store)}</p>
+    <div class="stats">
+      <div class="stat"><span class="muted">Наличные в кассе</span><b class="num">${fmt(s.cash_balance)}</b></div>
+      <div class="stat"><span class="muted">Продажи (${s.sales_count})</span><b class="num">${fmt(s.sales_total)}</b></div>
+      <div class="stat"><span class="muted">Возвраты (${s.returns_count})</span><b class="num">${fmt(s.returns_total)}</b></div>
+      <div class="stat"><span class="muted">Скупка (${s.buybacks_count})</span><b class="num">${fmt(s.buybacks_total)}</b></div>
+      <div class="stat"><span class="muted">Инкассация</span><b class="num">${fmt(s.withdrawals_total)}</b></div>
+      <div class="stat"><span class="muted">Trade-In</span><b>${s.trade_ins_count}</b></div>
+    </div>
+    <h3>Движение денег по способам оплаты</h3>
+    <table>${Object.entries(s.flow).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="amount num ${v < 0 ? "neg" : ""}">${fmt(v)}</td></tr>`).join("") || '<tr><td class="muted">Операций нет</td></tr>'}</table>
+    <h3>Операции</h3>
+    <table><tr><th>Время</th><th>Операция</th><th>Что</th><th>Оплата</th><th>Кассир</th><th class="amount">Сумма</th></tr>${
+      s.journal.map(o => `<tr><td class="num">${o.time}</td><td>${esc(o.kind)}</td><td>${esc(o.what)}</td><td>${esc(o.payment)}</td>
+        <td>${esc(o.user)}</td><td class="amount num ${o.amount < 0 ? "neg" : ""}">${fmt(o.amount)}</td></tr>`).join("") ||
+      '<tr><td colspan="6" class="muted">Операций за сегодня нет</td></tr>'}</table>`;
+};
+
+// ------------------------------------------------------------ правая колонка
+async function refreshSide() {
+  let s;
+  try { s = await api("shift"); } catch (e) { return; }
+  $("#side-cash").textContent = fmt(s.cash_balance);
+  $("#side-flow").innerHTML = Object.entries(s.flow).filter(([k]) => k !== "Наличные")
+    .map(([k, v]) => `<div class="kv"><span class="muted">${esc(k)}</span><span class="num">${fmt(v)}</span></div>`).join("");
+  $("#side-journal").innerHTML = s.journal.slice(0, 30).map(o =>
+    `<div class="op"><span>${esc(o.kind)}<small>${o.time} · ${esc(o.what)}</small></span><span class="num ${o.amount < 0 ? "neg" : ""}">${fmt(o.amount)}</span></div>`).join("")
+    || "Операций пока нет";
+}
+
+// ------------------------------------------------------------ клавиатура
+document.addEventListener("keydown", e => {
+  if (!me || $("#app").classList.contains("hidden") || $("#confirm").open) return;
+  if (e.altKey && /^[1-6]$/.test(e.key)) { e.preventDefault(); open(OPS[Number(e.key) - 1][0]); return; }
+  const panel = $("#panel");
+  if (e.key === "Escape" && panel.escape) { e.preventDefault(); panel.escape(); return; }
+  if (current === "sale" && panel.hotkey && panel.hotkey(e)) e.preventDefault();
+});
+$("#confirm").addEventListener("keydown", e => {
+  if (e.key === "Enter" && document.activeElement !== $("#confirm-cancel")) { e.preventDefault(); $("#confirm-ok").click(); }
+});
+
+// старт: если сессия кассы есть — сразу касса, иначе вход
+start().catch(() => {});
+</script>
+{% endraw %}
+</body>
+</html>
