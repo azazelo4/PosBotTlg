@@ -301,8 +301,23 @@ def update_store(cursor, store_id, name, address=None, is_active=True):
 
 @with_connection
 def get_product_by_article(cursor, article_number):
+    """Товар по артикулу или по коду «#<id>» (штрихкод ценника, если артикул в него не поместился)."""
+    product_id = product_id_from_code(article_number)
+    if product_id:
+        cursor.execute("SELECT p.*, st.name AS Store FROM products p LEFT JOIN stores st ON st.id = p.store_id WHERE p.id = %s", (product_id,))
+        row = cursor.fetchone()
+        if row:
+            return row
     cursor.execute("SELECT p.*, st.name AS Store FROM products p LEFT JOIN stores st ON st.id = p.store_id WHERE p.article_number = %s ORDER BY p.id LIMIT 1", (article_number,))
     return cursor.fetchone()
+
+
+def product_id_from_code(code):
+    """'#123' → 123, иначе None. Такой код печатается штрихкодом вместо длинного артикула."""
+    code = str(code or "").strip()
+    if len(code) > 1 and code[0] == "#" and code[1:].isdigit() and len(code) <= 10:
+        return int(code[1:])
+    return None
 
 
 def _change_quantity(cursor, article, delta):
@@ -511,6 +526,53 @@ def consume_login_token(cursor, token_hash):
     return True, row['user_id']
 
 
+# ---------------------------------------------------------------- вход на кассу ПК
+
+@with_transaction
+def create_kassa_login(cursor, token_hash, expires_at, client_info=None):
+    cursor.execute("DELETE FROM kassa_logins WHERE expires_at < %s", (now() - timedelta(days=1),))
+    cursor.execute("INSERT INTO kassa_logins (token_hash, client_info, created_at, expires_at) VALUES (%s, %s, %s, %s)",
+                   (token_hash, (client_info or "")[:255] or None, now(), expires_at))
+    return True, "ok"
+
+
+@with_connection
+def get_kassa_login(cursor, token_hash):
+    cursor.execute("SELECT * FROM kassa_logins WHERE token_hash = %s", (token_hash,))
+    return cursor.fetchone()
+
+
+@with_transaction
+def decide_kassa_login(cursor, token_hash, user_id, approve):
+    """Сотрудник в боте подтверждает или отклоняет вход. (True, запись) или (False, причина)."""
+    cursor.execute("SELECT * FROM kassa_logins WHERE token_hash = %s FOR UPDATE", (token_hash,))
+    row = cursor.fetchone()
+    if not row or row['expires_at'] < now():
+        raise BusinessError("QR-код устарел. Обновите страницу кассы на компьютере и отсканируйте новый.")
+    if row['status'] != 'pending':
+        raise BusinessError("Этот QR-код уже использован. Обновите страницу кассы и отсканируйте новый.")
+    status = 'approved' if approve else 'denied'
+    cursor.execute("UPDATE kassa_logins SET status = %s, user_id = %s, decided_at = %s WHERE token_hash = %s",
+                   (status, user_id, now(), token_hash))
+    row.update(status=status, user_id=user_id)
+    return True, row
+
+
+@with_transaction
+def consume_kassa_login(cursor, token_hash):
+    """Браузер забирает подтверждённый вход (один раз). (True, user_id) или (False, статус)."""
+    cursor.execute("SELECT status, user_id, expires_at FROM kassa_logins WHERE token_hash = %s FOR UPDATE", (token_hash,))
+    row = cursor.fetchone()
+    if not row:
+        return False, 'expired'
+    if row['status'] == 'approved':
+        cursor.execute("UPDATE kassa_logins SET status = 'used' WHERE token_hash = %s", (token_hash,))
+        return True, row['user_id']
+    if row['status'] == 'pending' and row['expires_at'] < now():
+        return False, 'expired'
+    return False, 'used' if row['status'] == 'used' else row['status']
+
+
 # ---------------------------------------------------------------- кассовые операции
 
 @with_transaction
@@ -525,6 +587,12 @@ def record_sale(cursor, product_id, product_article, user_id, sale_price, paymen
 @with_connection
 def get_sales_for_return(cursor, article_number, days=60):
     """Продажи артикула за последние N дней с отметкой, был ли уже возврат."""
+    product_id = product_id_from_code(article_number)
+    if product_id:
+        cursor.execute("SELECT article_number FROM products WHERE id = %s", (product_id,))
+        row = cursor.fetchone()
+        if row:
+            article_number = row['article_number']
     cursor.execute("""
         SELECT s.id AS sale_id, s.sold_price, s.payment_type AS sale_payment_type, s.sale_date,
                p.id AS product_id, p.article_number, p.model AS product_model, p.product_type,

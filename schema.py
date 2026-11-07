@@ -168,6 +168,19 @@ TABLES = {
           PRIMARY KEY (`token_hash`),
           KEY `idx_wlt_user` (`user_id`)
         ) {CHARSET}""",
+    # Вход на кассу ПК: браузер показывает QR → сотрудник подтверждает в боте → браузер забирает вход
+    "kassa_logins": f"""
+        CREATE TABLE IF NOT EXISTS `kassa_logins` (
+          `token_hash` char(64) NOT NULL,
+          `status` enum('pending','approved','denied','used') NOT NULL DEFAULT 'pending',
+          `user_id` int DEFAULT NULL,
+          `client_info` varchar(255) DEFAULT NULL,
+          `created_at` datetime NOT NULL,
+          `expires_at` datetime NOT NULL,
+          `decided_at` datetime DEFAULT NULL,
+          PRIMARY KEY (`token_hash`),
+          KEY `idx_kl_expires` (`expires_at`)
+        ) {CHARSET}""",
     "cash_withdrawals": f"""
         CREATE TABLE IF NOT EXISTS `cash_withdrawals` (
           `id` int NOT NULL AUTO_INCREMENT,

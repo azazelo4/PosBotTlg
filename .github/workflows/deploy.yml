@@ -158,7 +158,8 @@ jobs:
 
       - name: Зависимости
         run: |
-          sudo apt-get install -y -q fonts-dejavu-core >/dev/null
+          sudo apt-get update -q >/dev/null
+          sudo apt-get install -y -q fonts-dejavu-core zbar-tools poppler-utils >/dev/null
           pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Сценарные тесты на реальной БД

@@ -38,6 +38,7 @@ def register_handlers():
     from state import bot
     from handlers.navigation import (on_cancel, on_back, on_cash_menu, on_stock_menu, on_staff_menu, on_fallback,
                                      on_stale_callback)
+    from handlers.kassa_login import register_kassa_login_handlers
     from handlers.start_handler import register_start_handlers
     from handlers.help_handler import register_help_handlers
     from handlers.sales_handler import register_sales_handlers
@@ -53,6 +54,7 @@ def register_handlers():
     from user_management import configure_user_management
 
     bot.setup_middleware(SessionMiddleware())
+    register_kassa_login_handlers()  # /start k_<токен> — до обычного /start
     register_start_handlers()
     register_help_handlers()
     # Навигация регистрируется до операций: срабатывает в любом состоянии и прерывает текущую операцию
