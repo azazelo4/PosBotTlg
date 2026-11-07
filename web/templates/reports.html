@@ -12,7 +12,7 @@
 </form>
 
 <div class="grid-cards">
-  <article><div class="muted">Продажи</div><div class="stat">{{ s.sales_total | money }}</div><small class="muted">{{ s.sales_count }} шт., средний чек {{ s.sales_avg | money }}</small></article>
+  <article><div class="muted">Продажи</div><div class="stat">{{ s.sales_total | money }}</div><small class="muted">{{ s.sales_count }} шт. в {{ s.receipts_count }} чеках, средний чек {{ s.sales_avg | money }}</small></article>
   <article><div class="muted">Возвраты</div><div class="stat">{{ s.returns_total | money }}</div><small class="muted">{{ s.returns_count }} шт.</small></article>
   <article><div class="muted">За вычетом возвратов</div><div class="stat">{{ s.net_sales | money }}</div></article>
   <article><div class="muted">Наличные после инкассации</div><div class="stat">{{ s.cash_balance | money }}</div><small class="muted">инкассация {{ s.withdrawals_total | money }}</small></article>

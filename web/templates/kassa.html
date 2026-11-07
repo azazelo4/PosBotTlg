@@ -61,6 +61,9 @@
     input:focus, textarea:focus, select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
     input.big { font-size: 22px; padding: 12px 14px; }
     input.money { font-size: 26px; font-weight: 700; max-width: 260px; }
+    input.line-price { width: 140px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+                       background: var(--panel); font-size: 18px; font-weight: 600; text-align: right; }
+    #cart td { vertical-align: middle; }
     .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
     .row > input[type=text] { flex: 1; min-width: 140px; }
     .btn { padding: 11px 18px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; }
@@ -425,59 +428,106 @@ function itemBlock(root, onChange) {
 const VIEWS = {};
 VIEWS.sale = root => {
   root.innerHTML = `<h2>Продажа</h2>
-    <label for="article">Артикул товара — введите или отсканируйте, затем <kbd>Enter</kbd></label>
+    <label for="article">Артикул — введите или отсканируйте, <kbd>Enter</kbd> добавляет в чек</label>
     <div class="row"><input type="text" class="big" id="article" autocomplete="off" placeholder="Артикул">
-      <button class="btn" id="find">Найти</button></div>
-    <div id="card"></div>
+      <button class="btn" id="find">Добавить</button></div>
+    <div class="msg err hidden"></div>
+    <div id="cart"></div>
     <div id="form" class="hidden">
-      <label for="price">Сумма продажи</label>${moneyInput("price")}
+      <div class="total-line" id="total"></div>
       <label>Оплата <span class="muted">— клавиши 1–${me.payment_types.length}</span></label><div class="choices" id="pay"></div>
-      <div class="actions"><button class="btn primary big" id="go">Продать <kbd>Enter</kbd></button>
-        <button class="btn" id="reset">Отмена <kbd>Esc</kbd></button></div>
-    </div>
-    <div class="msg err hidden"></div>`;
-  let product = null, payment = null;
+      <div class="actions"><button class="btn primary big" id="go">Оформить чек <kbd>Enter</kbd></button>
+        <button class="btn" id="reset">Очистить <kbd>Esc</kbd></button></div>
+    </div>`;
+  let cart = [], payment = null;
   const article = $("#article", root);
-  const reset = () => { product = null; payment = null; article.value = ""; $("#card", root).innerHTML = ""; $("#form", root).classList.add("hidden"); showErr(root, ""); article.focus(); };
-  const find = async () => {
+  const priceOf = i => parseMoney($(`#cart input[data-i="${i}"]`, root)?.value);
+  const total = () => cart.reduce((sum, it, i) => sum + (priceOf(i) || 0), 0);
+  const updateTotal = () => {
+    const t = total(), list = cart.reduce((sum, it) => sum + it.product.price, 0);
+    $("#total", root).innerHTML = `Итого: <b class="num">${fmt(t)}</b> <span class="muted">· ${cart.length} поз.` +
+      (list > t ? ` · скидка ${fmt(list - t)}` : "") + "</span>";
+  };
+  const render = (focusIndex = null) => {
+    // суммы, которые продавец уже исправил, сохраняются при перерисовке
+    cart.forEach((it, i) => { const v = $(`#cart input[data-i="${i}"]`, root)?.value; if (v !== undefined) it.price = v; });
+    $("#form", root).classList.toggle("hidden", !cart.length);
+    if (!cart.length) { $("#cart", root).innerHTML = ""; return; }
+    $("#cart", root).innerHTML = `<h3>Чек</h3><table><tr><th>№</th><th>Товар</th><th class="amount">По ценнику</th><th class="amount">Сумма</th><th></th></tr>${
+      cart.map((it, i) => `<tr><td>${i + 1}</td>
+        <td><b>${esc(it.product.model || it.product.type || "")}</b><br><span class="muted">арт. ${esc(it.product.article)} · ${esc(it.product.details || "")}${it.product.inserts ? " · " + esc(it.product.inserts) : ""}</span></td>
+        <td class="amount num">${fmt(it.product.price)}<br><span class="muted">мин. ${fmt(it.product.min_price)}</span></td>
+        <td class="amount"><input type="text" class="num line-price" data-i="${i}" inputmode="numeric" autocomplete="off" value="${esc(it.price)}"></td>
+        <td><button class="btn" data-del="${i}" title="Убрать из чека">✕</button></td></tr>`).join("")}</table>`;
+    root.querySelectorAll("#cart input").forEach(inp => {
+      inp.oninput = updateTotal;
+      inp.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); article.focus(); } };
+    });
+    root.querySelectorAll("#cart [data-del]").forEach(b => b.onclick = () => {
+      cart.splice(Number(b.dataset.del), 1); render(); showErr(root, ""); article.focus();
+    });
+    updateTotal();
+    if (focusIndex !== null) { const inp = $(`#cart input[data-i="${focusIndex}"]`, root); inp.focus(); inp.select(); }
+  };
+  const reset = () => { cart = []; payment = null; article.value = ""; render(); choices($("#pay", root), me.payment_types, null, v => { payment = v; showErr(root, ""); }); showErr(root, ""); article.focus(); };
+  const add = async () => {
     const a = article.value.trim(); if (!a) return;
     showErr(root, "");
     try {
-      product = await api("product?article=" + encodeURIComponent(a));
-      $("#card", root).innerHTML = productCard(product);
-      if (product.quantity <= 0) { showErr(root, "Товара нет в наличии."); $("#form", root).classList.add("hidden"); return; }
-      $("#price", root).value = product.price;
-      payment = null;
-      choices($("#pay", root), me.payment_types, null, v => { payment = v; });
-      $("#form", root).classList.remove("hidden");
-      $("#price", root).focus(); $("#price", root).select();
-    } catch (e) { product = null; $("#card", root).innerHTML = ""; $("#form", root).classList.add("hidden"); showErr(root, e.message); article.select(); }
+      const product = await api("product?article=" + encodeURIComponent(a));
+      const inCart = cart.filter(it => it.product.id === product.id).length;
+      if (product.quantity - inCart <= 0) {
+        showErr(root, inCart ? `Больше нет: все ${inCart} шт. ${product.article} уже в чеке.` : `Товара ${product.article} нет в наличии.`);
+        article.select(); return;
+      }
+      cart.push({product, price: product.price});
+      article.value = "";
+      render();
+      article.focus();
+    } catch (e) { showErr(root, e.message); article.select(); }
   };
   const go = () => {
-    const price = parseMoney($("#price", root).value);
-    if (!price || price <= 0) return showErr(root, "Введите сумму продажи.");
-    if (price < product.min_price) return showErr(root, `Сумма ниже минимальной цены ${fmt(product.min_price)}.`);
-    if (!payment) return showErr(root, "Выберите способ оплаты (клавиши 1–" + me.payment_types.length + ").");
+    if (!cart.length) return showErr(root, "Добавьте товар в чек.");
+    const items = [];
+    for (let i = 0; i < cart.length; i++) {
+      const p = cart[i].product, price = priceOf(i);
+      if (!price || price <= 0) { render(i); return showErr(root, `Введите сумму для ${p.article}.`); }
+      if (price < p.min_price) { render(i); return showErr(root, `${p.article}: сумма ниже минимальной цены ${fmt(p.min_price)}.`); }
+      items.push({article: p.article, price, product: p});
+    }
+    if (!payment) {
+      showErr(root, "Выберите способ оплаты (клавиши 1–" + me.payment_types.length + ").");
+      document.activeElement.blur(); return;
+    }
     showErr(root, "");
+    const sum = items.reduce((s, it) => s + it.price, 0);
     confirmAndRun("Подтвердите продажу", [
-      `${esc(product.model || "")}, арт. ${esc(product.article)}`,
-      `Сумма: <b class="num">${fmt(price)}</b>${price < product.price ? ` <span class="muted">(скидка ${fmt(product.price - price)})</span>` : ""}`,
+      ...items.map((it, i) => `${i + 1}. ${esc(it.product.model || "")}, арт. ${esc(it.article)} — <b class="num">${fmt(it.price)}</b>` +
+        (it.price < it.product.price ? ` <span class="muted">(скидка ${fmt(it.product.price - it.price)})</span>` : "")),
+      `Итого: <b class="num">${fmt(sum)}</b>${items.length > 1 ? ` (${items.length} поз.)` : ""}`,
       `Оплата: <b>${esc(payment)}</b>`,
-    ], () => api("sale", {article: product.article, price, payment}), reset);
+    ], () => api("sale", {items: items.map(it => ({article: it.article, price: it.price})), payment}), reset);
   };
-  $("#find", root).onclick = find;
-  article.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); find(); } };
-  $("#price", root).onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); go(); } };
+  $("#find", root).onclick = add;
+  article.onkeydown = e => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    if (article.value.trim()) add(); else if (cart.length) go();
+  };
   $("#go", root).onclick = go;
-  $("#reset", root).onclick = reset;
+  $("#reset", root).onclick = () => { if (cart.length < 2 || confirm("Очистить чек?")) reset(); };
   root.hotkey = e => {
-    if (!product || $("#form", root).classList.contains("hidden")) return false;
-    if (/^[1-9]$/.test(e.key) && document.activeElement !== $("#price", root)) { $("#pay", root).pick(Number(e.key) - 1); return true; }
-    if (e.key === "Enter" && document.activeElement.tagName !== "INPUT") { go(); return true; }
+    if (!cart.length) return false;
+    const typing = document.activeElement && document.activeElement.tagName === "INPUT";
+    if (/^[1-9]$/.test(e.key) && !typing) { $("#pay", root).pick(Number(e.key) - 1); return true; }
+    if (e.key === "Enter" && !typing) { go(); return true; }
     return false;
   };
-  root.escape = reset;
-  article.focus();
+  root.escape = () => {
+    if (article.value) { article.value = ""; article.focus(); return; }
+    if (cart.length < 2 || confirm("Очистить чек?")) reset();
+  };
+  reset();
 };
 
 // ------------------------------------------------------------ Возврат
@@ -656,7 +706,7 @@ VIEWS.shift = async root => {
     <p class="muted">${esc(s.date)} · ${esc(s.store)}</p>
     <div class="stats">
       <div class="stat"><span class="muted">Наличные в кассе</span><b class="num">${fmt(s.cash_balance)}</b></div>
-      <div class="stat"><span class="muted">Продажи (${s.sales_count})</span><b class="num">${fmt(s.sales_total)}</b></div>
+      <div class="stat"><span class="muted">Продажи (${s.sales_count} поз., ${s.receipts_count} чек.)</span><b class="num">${fmt(s.sales_total)}</b></div>
       <div class="stat"><span class="muted">Возвраты (${s.returns_count})</span><b class="num">${fmt(s.returns_total)}</b></div>
       <div class="stat"><span class="muted">Скупка (${s.buybacks_count})</span><b class="num">${fmt(s.buybacks_total)}</b></div>
       <div class="stat"><span class="muted">Инкассация</span><b class="num">${fmt(s.withdrawals_total)}</b></div>

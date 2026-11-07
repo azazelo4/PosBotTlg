@@ -37,6 +37,7 @@
     <label>Цена, ₸ *<input name="price" value="{{ product.price | num }}" inputmode="numeric" required></label>
     <label>Мин. цена, ₸ *<input name="min_price" value="{{ product.min_price | num }}" inputmode="numeric" required></label>
     <label>Цена за грамм<input name="price_per_gram" value="{{ (product.price_per_gram | num) or '' }}" inputmode="numeric"></label>
+    <label>Себестоимость, ₸<input name="cost_price" value="{{ (product.cost_price | num) if product.cost_price is not none else '' }}" inputmode="numeric" placeholder="для аналитики маржи"></label>
   </div>
   <div class="grid">
     <label>Остаток, шт<input name="quantity" type="number" min="0" value="{{ product.quantity or 0 }}"></label>

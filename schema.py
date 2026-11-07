@@ -86,9 +86,27 @@ TABLES = {
           `manufacturer` text DEFAULT NULL,
           `commentaries` text DEFAULT NULL,
           `track_stock` tinyint(1) NOT NULL DEFAULT 1,
+          `cost_price` decimal(12,0) DEFAULT NULL,
           PRIMARY KEY (`id`),
           KEY `idx_products_article` (`article_number`),
           KEY `idx_products_store` (`store_id`)
+        ) {CHARSET}""",
+    "receipts": f"""
+        CREATE TABLE IF NOT EXISTS `receipts` (
+          `id` int NOT NULL AUTO_INCREMENT,
+          `store_id` int DEFAULT NULL,
+          `user_id` int DEFAULT NULL,
+          `created_at` datetime NOT NULL,
+          `total` decimal(12,0) NOT NULL,
+          `items_count` int NOT NULL,
+          `payment_type` varchar(32) NOT NULL,
+          `customer_id` int DEFAULT NULL,
+          `public_token` char(32) DEFAULT NULL,
+          PRIMARY KEY (`id`),
+          UNIQUE KEY `uq_receipts_token` (`public_token`),
+          KEY `idx_receipts_date` (`created_at`),
+          KEY `idx_receipts_store` (`store_id`),
+          CONSTRAINT `receipts_user_fk` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
         ) {CHARSET}""",
     "sales": f"""
         CREATE TABLE IF NOT EXISTS `sales` (
@@ -100,7 +118,10 @@ TABLES = {
           `payment_type` varchar(32) NOT NULL,
           `shift_num` int DEFAULT NULL,
           `store_id` int DEFAULT NULL,
+          `receipt_id` int DEFAULT NULL,
+          `list_price` decimal(12,0) DEFAULT NULL,
           PRIMARY KEY (`id`),
+          KEY `idx_sales_receipt` (`receipt_id`),
           KEY `product_id` (`product_id`),
           KEY `idx_sales_store` (`store_id`),
           KEY `user_id` (`user_id`),
@@ -216,6 +237,10 @@ COLUMNS = [
     ("trade_ins", "old_item_value", "decimal(12,0) DEFAULT NULL"),
     ("trade_ins", "new_sale_price", "decimal(12,0) DEFAULT NULL"),
     ("trade_ins", "store_id", "int DEFAULT NULL"),
+    # чеки из нескольких позиций, цена по ценнику на момент продажи, себестоимость — для аналитики
+    ("sales", "receipt_id", "int DEFAULT NULL"),
+    ("sales", "list_price", "decimal(12,0) DEFAULT NULL"),
+    ("products", "cost_price", "decimal(12,0) DEFAULT NULL"),
 ]
 
 # Колонки, которые раньше были NOT NULL без значения по умолчанию,
@@ -239,6 +264,7 @@ INDEXES = [
     ("users", "idx_users_chat", "(`chat_id`)"),
     ("sales", "idx_sales_date", "(`sale_date`)"),
     ("products", "idx_products_article", "(`article_number`)"),
+    ("sales", "idx_sales_receipt", "(`receipt_id`)"),
 ]
 
 

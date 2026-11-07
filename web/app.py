@@ -300,6 +300,11 @@ def _product_form_data(form):
         if v is None or v < 0:
             errors.append(f"«{FIELD_TITLES[key]}» — число.")
         data[key] = v.quantize(Decimal('1')) if v is not None else None
+    raw_cost = (form.get('cost_price') or '').strip()
+    cost = parse_money(raw_cost) if raw_cost else None
+    if raw_cost and (cost is None or cost < 0):
+        errors.append("«Себестоимость» — число.")
+    data['cost_price'] = cost.quantize(Decimal('1')) if cost is not None and cost >= 0 else None
     if data.get('price') is not None and data.get('min_price') is not None and data['min_price'] > data['price']:
         errors.append("Минимальная цена не может быть выше цены.")
     qty = parse_int(form.get('quantity') or '0')

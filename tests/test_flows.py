@@ -255,7 +255,7 @@ def test_report_today_includes_all_operations(tg):
     wb = openpyxl.load_workbook(io.BytesIO(tg.documents[-1].data))
     assert wb.sheetnames == ["Сводка", "Продажи", "Возвраты", "Скупка", "Trade-In", "Инкассация"]
     sales_rows = list(wb["Продажи"].iter_rows(min_row=2, values_only=True))
-    assert len(sales_rows) == 2 and {r[2] for r in sales_rows} == {"A100", "A200"}
+    assert len(sales_rows) == 2 and {r[3] for r in sales_rows} == {"A100", "A200"}
     assert any(r[13] for r in sales_rows)  # отметка о возврате
     assert wb["Возвраты"].max_row == 2 and wb["Скупка"].max_row == 2
 
