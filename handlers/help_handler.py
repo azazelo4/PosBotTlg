@@ -1,7 +1,8 @@
 from telebot import types
 
+import config
 from buttons import get_keyboard_by_role
-from state import bot
+from state import bot, user_data
 
 HELP_TEXT = """<b>Команды</b>
 /start — вход по номеру телефона
@@ -32,8 +33,19 @@ HELP_TEXT = """<b>Команды</b>
 Суммы можно вводить как 15000, 15 000 или 15000,50. Даты — ДД.ММ.ГГГГ."""
 
 
+def help_text(chat_id):
+    """Справка + ссылка на подробную инструкцию для роли пользователя (если задан адрес веб-админки)."""
+    from web.manual import ROLE_SLUGS
+    slug = ROLE_SLUGS.get((user_data.get(chat_id) or {}).get('role'))
+    if not config.WEB_URL:
+        return HELP_TEXT
+    link = f"{config.WEB_URL}/help/{slug}" if slug else f"{config.WEB_URL}/help"
+    return HELP_TEXT + f"\n\n📖 <b>Подробная инструкция:</b> {link}"
+
+
 def help_command_handler(message: types.Message):
-    bot.send_message(message.chat.id, HELP_TEXT, parse_mode='HTML', reply_markup=get_keyboard_by_role(message.chat.id))
+    bot.send_message(message.chat.id, help_text(message.chat.id), parse_mode='HTML',
+                     reply_markup=get_keyboard_by_role(message.chat.id))
 
 
 def register_help_handlers():

@@ -33,7 +33,7 @@ from utils.common import money, today, now, parse_money, parse_float, parse_int,
 from utils.labels import generate_labels_pdf, details_line
 from utils.report_generator import build_summary, build_excel, store_breakdown
 from utils.stock_report import build_stock_excel, stock_totals
-from web import settings_form, kassa
+from web import settings_form, kassa, manual
 from web.security import (session_secret, redeem_login_token, validate_init_data, new_csrf, ADMIN_ROLES, CASH_ROLES)
 
 logger = logging.getLogger("posbot.web")
@@ -191,6 +191,31 @@ def login(request: Request, t: str = ""):
 def logout(request: Request):
     request.session.clear()
     return RedirectResponse("/login", status_code=303)
+
+
+# ---------------------------------------------------------------- инструкции (web/manual.py)
+
+def _optional_user(request: Request):
+    """Вошедший в админку пользователь (для меню) или None — справка открыта всем."""
+    user_id = request.session.get("user_id")
+    user = get_user_by_id(user_id) if user_id else None
+    return user if user and user.get('is_active') and user.get('role') in ADMIN_ROLES else None
+
+
+@app.get("/help", response_class=HTMLResponse)
+def help_index(request: Request):
+    return templates.TemplateResponse(request, "help.html", {"user": _optional_user(request), "slug": None,
+                                                             "title": "Инструкции", "manuals": manual.MANUALS})
+
+
+@app.get("/help/{slug}", response_class=HTMLResponse)
+def help_page(request: Request, slug: str):
+    page = manual.render(slug)
+    if page is None:
+        raise HTTPException(404, "Такой инструкции нет.")
+    title, html = page
+    return templates.TemplateResponse(request, "help.html", {"user": _optional_user(request), "slug": slug,
+                                                             "title": title, "html": html, "manuals": manual.MANUALS})
 
 
 @app.get("/health")
