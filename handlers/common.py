@@ -4,7 +4,9 @@ import logging
 from auth import has_role
 from buttons import (create_cash_operations_buttons, create_choice_markup, create_skip_cancel_markup,
                      create_cancel_markup, BTN_CANCEL)
-from database import get_product_by_article, get_stores
+from database import (get_product_by_article, get_stores, find_by_mark_code, marking_required, SELLABLE_CODE,
+                      CODE_STATUS_TITLES)
+from utils import mark_codes
 from schema import METAL_TYPES
 from state import bot, user_data, user_state, end_op, get_op, register_cancel
 from utils.common import parse_float, parse_money, money, h
@@ -181,6 +183,32 @@ class CustomerItemIntake:
             title = f"{item['description']} ({title})"
         item['title'] = h(title) + ", без артикула"
         self.on_done(chat_id)
+
+
+def resolve_for_sale(chat_id, text):
+    """Артикул или код маркировки товара для продажи → (товар, код | None). При ошибке пишет в чат и возвращает (None, None)."""
+    text = (text or '').strip()
+    if mark_codes.looks_like_code(text):
+        found = find_by_mark_code(text)
+        if found:
+            if found['code']['status'] not in SELLABLE_CODE:
+                bot.send_message(chat_id, f"Код {h(mark_codes.short(text))} уже {CODE_STATUS_TITLES[found['code']['status']]}. "
+                                          "Отсканируйте другой.", reply_markup=create_cancel_markup())
+                return None, None
+            return found['product'], text
+    product = get_product_by_article(text)
+    if not product:
+        what = "Код маркировки" if mark_codes.looks_like_code(text) else "Артикул"
+        bot.send_message(chat_id, f"{what} <code>{h(mark_codes.short(text))}</code> не найден. Введите другой или нажмите «Отмена».",
+                         parse_mode='HTML', reply_markup=create_cancel_markup())
+        return None, None
+    if marking_required(product):
+        bot.send_message(chat_id, f"{product_line(product)} — маркируемый товар. Пришлите <b>код маркировки</b> с бирки: "
+                                  "отсканируйте DataMatrix приложением-сканером и вставьте текст сюда "
+                                  "(или продайте на кассе ПК со сканером).",
+                         parse_mode='HTML', reply_markup=create_cancel_markup())
+        return None, None
+    return product, None
 
 
 def ask_money(chat_id, text, suggestion=None):

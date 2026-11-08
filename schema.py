@@ -87,6 +87,7 @@ TABLES = {
           `commentaries` text DEFAULT NULL,
           `track_stock` tinyint(1) NOT NULL DEFAULT 1,
           `cost_price` decimal(12,0) DEFAULT NULL,
+          `is_marked` tinyint(1) NOT NULL DEFAULT 0,
           PRIMARY KEY (`id`),
           KEY `idx_products_article` (`article_number`),
           KEY `idx_products_store` (`store_id`)
@@ -108,6 +109,24 @@ TABLES = {
           KEY `idx_receipts_store` (`store_id`),
           CONSTRAINT `receipts_user_fk` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
         ) {CHARSET}""",
+    "product_codes": f"""
+        CREATE TABLE IF NOT EXISTS `product_codes` (
+          `id` int NOT NULL AUTO_INCREMENT,
+          `code` varchar(255) NOT NULL,
+          `code_key` varchar(255) NOT NULL,
+          `product_id` int NOT NULL,
+          `store_id` int DEFAULT NULL,
+          `status` enum('in_stock','sold','returned','written_off') NOT NULL DEFAULT 'in_stock',
+          `sale_id` int DEFAULT NULL,
+          `created_at` datetime NOT NULL,
+          `created_by` int DEFAULT NULL,
+          `updated_at` datetime NOT NULL,
+          `note` varchar(255) DEFAULT NULL,
+          PRIMARY KEY (`id`),
+          UNIQUE KEY `uq_product_codes_key` (`code_key`),
+          KEY `idx_product_codes_product` (`product_id`, `status`),
+          CONSTRAINT `product_codes_product_fk` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`)
+        ) {CHARSET}""",
     "sales": f"""
         CREATE TABLE IF NOT EXISTS `sales` (
           `id` int NOT NULL AUTO_INCREMENT,
@@ -120,6 +139,7 @@ TABLES = {
           `store_id` int DEFAULT NULL,
           `receipt_id` int DEFAULT NULL,
           `list_price` decimal(12,0) DEFAULT NULL,
+          `mark_code_id` int DEFAULT NULL,
           PRIMARY KEY (`id`),
           KEY `idx_sales_receipt` (`receipt_id`),
           KEY `product_id` (`product_id`),
@@ -176,6 +196,7 @@ TABLES = {
           `user_id` int NOT NULL,
           `store_id` int DEFAULT NULL,
           `trade_in_date` datetime NOT NULL,
+          `new_mark_code_id` int DEFAULT NULL,
           PRIMARY KEY (`id`),
           KEY `idx_trade_ins_date` (`trade_in_date`),
           CONSTRAINT `trade_ins_user_fk` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
@@ -241,6 +262,10 @@ COLUMNS = [
     ("sales", "receipt_id", "int DEFAULT NULL"),
     ("sales", "list_price", "decimal(12,0) DEFAULT NULL"),
     ("products", "cost_price", "decimal(12,0) DEFAULT NULL"),
+    # маркировка: поштучные коды DataMatrix
+    ("products", "is_marked", "tinyint(1) NOT NULL DEFAULT 0"),
+    ("sales", "mark_code_id", "int DEFAULT NULL"),
+    ("trade_ins", "new_mark_code_id", "int DEFAULT NULL"),
 ]
 
 # Колонки, которые раньше были NOT NULL без значения по умолчанию,

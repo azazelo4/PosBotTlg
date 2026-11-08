@@ -21,15 +21,17 @@ from starlette.middleware.sessions import SessionMiddleware
 
 import config
 import demo_data
+import marking
 import settings_store
 from buttons import PAYMENT_TYPES, ROLE_TITLES
-from database import (ensure_admin, get_connection, get_stores, get_store_counts, create_store, update_store, set_user_store, init_pool, get_user_by_id, get_user_by_chat_id, search_products, get_product_by_id,
+from database import (marking_required, ensure_admin, get_connection, get_stores, get_store_counts, create_store, update_store, set_user_store, init_pool, get_user_by_id, get_user_by_chat_id, search_products, get_product_by_id,
                       get_product_by_article, get_products_by_articles, get_products_for_labels, add_product_to_db,
                       update_product, get_stock_report_data, get_low_stock_products, get_period_operations,
                       record_sale, get_today_sales_by_user, get_all_users, add_user_to_db, change_user_role_function,
                       deactivate_user_in_db, update_user_phone)
 from schema import METAL_TYPES, PRODUCT_TYPES, ensure_schema
 from utils.catalog_import import build_plan, apply_plan, FIELD_TITLES
+from utils import mark_codes
 from utils.common import money, today, now, parse_money, parse_float, parse_int, parse_date, normalize_phone, day_bounds
 from utils.labels import generate_labels_pdf, details_line
 from utils.report_generator import build_summary, build_excel, store_breakdown
@@ -60,6 +62,7 @@ templates.env.filters['ddmmhhmm'] = lambda d: d.strftime('%d.%m %H:%M') if d els
 templates.env.globals['ROLE_TITLES'] = ROLE_TITLES
 templates.env.globals['TIMEZONES'] = config.TIMEZONES
 templates.env.globals['VERSION'] = config.VERSION
+templates.env.globals['marking_enabled'] = lambda: bool(config.MARKING_ENABLED)
 
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -312,6 +315,7 @@ def _product_form_data(form):
         errors.append("Остаток — целое число от 0.")
     data['quantity'] = qty or 0
     data['track_stock'] = 1 if form.get('track_stock') else 0
+    data['is_marked'] = 1 if form.get('is_marked') else 0
     arrival = parse_date(form.get('arrival_date') or '')
     if form.get('arrival_date') and not arrival:
         errors.append("Дата поступления: ДД.ММ.ГГГГ или ГГГГ-ММ-ДД.")
@@ -365,6 +369,82 @@ async def product_save(request: Request, product_id: int, user=Depends(current_u
         errors.append(msg)
     data['id'] = product_id
     return render(request, "product_form.html", user, errors=errors, **_form_ctx(data))
+
+
+# ---------------------------------------------------------------- маркировка
+
+def _marking_page(request, user, **ctx):
+    stores = get_stores() or []
+    store = ctx.pop("store", None)
+    return render(request, "marking.html", user, stores=stores, store=store,
+                  products=marking.marked_products(store) or [], **ctx)
+
+
+@app.get("/marking", response_class=HTMLResponse)
+def marking_page(request: Request, store: int = 0, user=Depends(current_user)):
+    return _marking_page(request, user, store=store or None)
+
+
+@app.post("/marking/accept", response_class=HTMLResponse)
+async def marking_accept(request: Request, user=Depends(current_user)):
+    form = await request.form()
+    check_csrf(request, form.get("csrf"))
+    article = (form.get("article") or "").strip()
+    product = get_product_by_article(article) if article else None
+    codes = mark_codes.split_codes(form.get("codes"))
+    if not product:
+        flash(request, f"Товар с артикулом «{article}» не найден." if article else "Укажите артикул товара.", "error")
+        return _marking_page(request, user, accept_form={"article": article, "codes": form.get("codes") or ""})
+    ok, result = marking.accept_codes(product['id'], codes, user['id'], add_to_stock=bool(form.get("add_to_stock")))
+    if not ok:
+        flash(request, result, "error")
+        return _marking_page(request, user, accept_form={"article": article, "codes": form.get("codes") or ""})
+    parts = [f"Принято кодов: {result['added']} к {product['article_number']}"
+             + (f", остаток увеличен на {result['added']}" if form.get("add_to_stock") and result['added'] else "") + "."]
+    if result['duplicates']:
+        parts.append(f"Уже были у этого товара: {len(result['duplicates'])}.")
+    flash(request, " ".join(parts), "ok")
+    if result['foreign']:
+        flash(request, "Коды другого товара, не приняты: " + ", ".join(result['foreign'][:10]), "error")
+    if result['invalid']:
+        flash(request, "Не похожи на код маркировки: " + ", ".join(result['invalid'][:10]), "error")
+    return RedirectResponse(f"/marking/product/{product['id']}", status_code=303)
+
+
+@app.get("/marking/product/{product_id}", response_class=HTMLResponse)
+def marking_product(request: Request, product_id: int, user=Depends(current_user)):
+    product = get_product_by_id(product_id)
+    if not product:
+        raise HTTPException(404, "Товар не найден.")
+    codes = marking.product_codes(product_id) or []
+    in_stock = sum(1 for c in codes if c['status'] in ('in_stock', 'returned'))
+    return render(request, "marking_product.html", user, product=product, codes=codes, in_stock=in_stock)
+
+
+@app.post("/marking/write-off")
+def marking_write_off(request: Request, code_id: int = Form(...), reason: str = Form(""), csrf: str = Form(""),
+                      user=Depends(current_user)):
+    check_csrf(request, csrf)
+    ok, result = marking.write_off(code_id, user['id'], reason)
+    flash(request, "Код списан, остаток уменьшен на 1." if ok else result, "ok" if ok else "error")
+    if ok:
+        return RedirectResponse(f"/marking/product/{result}", status_code=303)
+    return RedirectResponse(request.headers.get("referer") or "/marking", status_code=303)
+
+
+@app.post("/marking/reconcile", response_class=HTMLResponse)
+async def marking_reconcile(request: Request, user=Depends(current_user)):
+    form = await request.form()
+    check_csrf(request, form.get("csrf"))
+    store = parse_int(form.get("store") or "") or None
+    codes = mark_codes.split_codes(form.get("codes"))
+    if not codes:
+        flash(request, "Отсканируйте коды изделий на витрине.", "error")
+        return _marking_page(request, user, store=store)
+    result = marking.reconcile(codes, store)
+    if result is None:
+        raise HTTPException(500, "Ошибка базы данных.")
+    return _marking_page(request, user, store=store, reconcile=result, scanned=len(codes))
 
 
 @app.get("/stock.xlsx")
@@ -608,6 +688,8 @@ def api_product(article: str, user=Depends(app_user)):
     product = get_product_by_article(article.strip())
     if not product:
         raise HTTPException(404, f"Артикул {article.strip()} не найден.")
+    if marking_required(product):
+        raise HTTPException(400, "Маркируемый товар: продажа по коду маркировки — на кассе ПК со сканером или в боте.")
     return _product_json(product)
 
 
@@ -628,6 +710,8 @@ async def api_sale(request: Request, user=Depends(app_user)):
         raise HTTPException(400, f"Сумма ниже минимальной цены {money(product['min_price'])}.")
     if (product['quantity'] or 0) <= 0:
         raise HTTPException(400, "Товара нет в наличии.")
+    if marking_required(product):
+        raise HTTPException(400, "Маркируемый товар: продажа по коду маркировки — на кассе ПК со сканером или в боте.")
     ok, result = record_sale(product['id'], product['article_number'], user['id'], price, payment)
     if not ok:
         raise HTTPException(400, result)
