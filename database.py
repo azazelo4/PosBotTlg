@@ -8,7 +8,9 @@ from functools import wraps
 import mysql.connector
 from mysql.connector import pooling, Error
 
+import config
 from config import DB_HOST, DB_PORT, DB_USER, DB_PASS, DB_NAME
+from utils import mark_codes
 from utils.common import now, today, normalize_phone
 
 logger = logging.getLogger(__name__)
@@ -313,6 +315,20 @@ def get_product_by_article(cursor, article_number):
     return cursor.fetchone()
 
 
+@with_connection
+def find_by_mark_code(cursor, raw):
+    """Код маркировки → {'code': строка product_codes, 'product': товар} или None."""
+    if not mark_codes.is_valid(raw):
+        return None
+    cursor.execute("SELECT * FROM product_codes WHERE code_key = %s", (mark_codes.key(raw),))
+    code = cursor.fetchone()
+    if not code:
+        return None
+    cursor.execute("SELECT p.*, st.name AS Store FROM products p LEFT JOIN stores st ON st.id = p.store_id WHERE p.id = %s",
+                   (code['product_id'],))
+    return {"code": code, "product": cursor.fetchone()}
+
+
 def product_id_from_code(code):
     """'#123' → 123, иначе None. Такой код печатается штрихкодом вместо длинного артикула."""
     code = str(code or "").strip()
@@ -340,7 +356,7 @@ def update_product_quantity(cursor, product_article, quantity_change):
 
 PRODUCT_FIELDS = ('article_number', 'store_id', 'metal_type', 'product_type', 'model', 'size', 'fineness', 'inserts',
                   'weight', 'price_per_gram', 'price', 'min_price', 'arrival_date', 'quantity', 'manufacturer',
-                  'commentaries', 'track_stock', 'cost_price')
+                  'commentaries', 'track_stock', 'cost_price', 'is_marked')
 
 
 @with_transaction
@@ -579,20 +595,49 @@ def consume_kassa_login(cursor, token_hash):
 MAX_RECEIPT_ITEMS = 50
 
 
-def _record_receipt(cursor, items, user_id, payment_type, store_id=None):
-    """Чек: позиции [(product_id, цена), ...] одним платежом. Каждая позиция — строка sales (одна штука).
+SELLABLE_CODE = ('in_stock', 'returned')
+CODE_STATUS_TITLES = {'in_stock': "на складе", 'sold': "продан", 'returned': "возвращён", 'written_off': "списан"}
 
-    Проверяет остаток (с учётом одинаковых позиций в чеке) и минимальную цену, списывает товар.
+
+def marking_required(product):
+    """Маркируемый товар при включённом учёте продаётся только с кодом."""
+    return bool(config.MARKING_ENABLED and product and product.get('is_marked'))
+
+
+def _take_code(cursor, raw, product, taken):
+    """Проверяет код маркировки для продажи товара и блокирует его. Возвращает строку product_codes."""
+    if not mark_codes.is_valid(raw):
+        raise BusinessError(f"{product['article_number']}: код маркировки не распознан — отсканируйте DataMatrix ещё раз.")
+    k = mark_codes.key(raw)
+    if k in taken:
+        raise BusinessError(f"Код {mark_codes.short(raw)} уже есть в этом чеке.")
+    cursor.execute("SELECT * FROM product_codes WHERE code_key = %s FOR UPDATE", (k,))
+    code = cursor.fetchone()
+    if not code:
+        raise BusinessError(f"Код {mark_codes.short(raw)} не принят на склад. Примите его в разделе «Маркировка».")
+    if code['product_id'] != product['id']:
+        raise BusinessError(f"Код {mark_codes.short(raw)} относится к другому товару.")
+    if code['status'] not in SELLABLE_CODE:
+        raise BusinessError(f"Код {mark_codes.short(raw)} уже {CODE_STATUS_TITLES[code['status']]}.")
+    taken.add(k)
+    return code
+
+
+def _record_receipt(cursor, items, user_id, payment_type, store_id=None):
+    """Чек: позиции [(product_id, цена[, код маркировки]), ...] одним платежом. Позиция — строка sales (одна штука).
+
+    Проверяет остаток (с учётом одинаковых позиций в чеке), минимальную цену и коды маркировки, списывает товар.
     Возвращает {'receipt_id', 'sale_ids', 'total'}.
     """
     if not items:
         raise BusinessError("Чек пуст — добавьте товар.")
     if len(items) > MAX_RECEIPT_ITEMS:
         raise BusinessError(f"В одном чеке — не больше {MAX_RECEIPT_ITEMS} позиций.")
-    products, need = {}, {}
-    for product_id, price in items:
+    items = [(it[0], it[1], it[2] if len(it) > 2 else None) for it in items]
+    products, need, codes, taken = {}, {}, [], set()
+    for product_id, price, raw_code in items:
         if product_id not in products:
-            cursor.execute("SELECT id, article_number, model, price, min_price, quantity, store_id "
+            cursor.execute("SELECT id, article_number, model, price, min_price, quantity, store_id, is_marked "
                            "FROM products WHERE id = %s FOR UPDATE", (product_id,))
             row = cursor.fetchone()
             if not row:
@@ -606,23 +651,34 @@ def _record_receipt(cursor, items, user_id, payment_type, store_id=None):
             raise BusinessError(f"Укажите сумму для {p['article_number']}.")
         if price < (p['min_price'] or 0):
             raise BusinessError(f"{p['article_number']}: сумма {int(price)} ниже минимальной цены {int(p['min_price'])}.")
+        if raw_code:
+            codes.append(_take_code(cursor, raw_code, p, taken))
+        elif marking_required(p):
+            raise BusinessError(f"{p['article_number']}: маркируемый товар — отсканируйте код маркировки DataMatrix.")
+        else:
+            codes.append(None)
     stores = {p['store_id'] for p in products.values()}
     if len(stores) > 1:
         raise BusinessError("В одном чеке — товары одного магазина.")
     receipt_store = stores.pop() or store_id
-    total = sum(price for _, price in items)
+    total = sum(price for _, price, _ in items)
     moment = now()
     cursor.execute("""INSERT INTO receipts (store_id, user_id, created_at, total, items_count, payment_type, public_token)
                       VALUES (%s, %s, %s, %s, %s, %s, %s)""",
                    (receipt_store, user_id, moment, total, len(items), payment_type, secrets.token_hex(16)))
     receipt_id = cursor.lastrowid
     sale_ids = []
-    for product_id, price in items:
+    for (product_id, price, _), code in zip(items, codes):
         p = products[product_id]
         cursor.execute("""INSERT INTO sales (product_id, user_id, sale_date, sold_price, payment_type, store_id,
-                                             receipt_id, list_price) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
-                       (product_id, user_id, moment, price, payment_type, p['store_id'] or store_id, receipt_id, p['price']))
+                                             receipt_id, list_price, mark_code_id)
+                          VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                       (product_id, user_id, moment, price, payment_type, p['store_id'] or store_id, receipt_id,
+                        p['price'], code['id'] if code else None))
         sale_ids.append(cursor.lastrowid)
+        if code:
+            cursor.execute("UPDATE product_codes SET status = 'sold', sale_id = %s, updated_at = %s WHERE id = %s",
+                           (cursor.lastrowid, moment, code['id']))
     for product_id, count in need.items():
         cursor.execute("UPDATE products SET quantity = quantity - %s WHERE id = %s", (count, product_id))
     return {"receipt_id": receipt_id, "sale_ids": sale_ids, "total": total}
@@ -635,9 +691,9 @@ def record_receipt(cursor, items, user_id, payment_type, store_id=None):
 
 
 @with_transaction
-def record_sale(cursor, product_id, product_article, user_id, sale_price, payment_type):
+def record_sale(cursor, product_id, product_article, user_id, sale_price, payment_type, mark_code=None):
     """Продажа одного товара — чек из одной позиции. Возвращает (True, id продажи)."""
-    result = _record_receipt(cursor, [(product_id, sale_price)], user_id, payment_type)
+    result = _record_receipt(cursor, [(product_id, sale_price, mark_code)], user_id, payment_type)
     return True, result['sale_ids'][0]
 
 
@@ -695,7 +751,7 @@ def get_sale_details_by_id(cursor, sale_id):
 
 @with_transaction
 def create_return_record(cursor, sale_id, product_article, return_price, payment_type, user_id, store_id):
-    cursor.execute("SELECT s.id, s.sold_price, s.store_id FROM sales s WHERE s.id = %s FOR UPDATE", (sale_id,))
+    cursor.execute("SELECT s.id, s.sold_price, s.store_id, s.mark_code_id FROM sales s WHERE s.id = %s FOR UPDATE", (sale_id,))
     sale = cursor.fetchone()
     if not sale:
         raise BusinessError("Продажа не найдена.")
@@ -709,6 +765,10 @@ def create_return_record(cursor, sale_id, product_article, return_price, payment
                    (sale_id, product_article, return_price, payment_type, user_id, sale['store_id'] or store_id, now()))
     return_id = cursor.lastrowid
     _change_quantity(cursor, product_article, 1)
+    if sale['mark_code_id']:
+        # код возвращается в оборот вместе с изделием
+        cursor.execute("UPDATE product_codes SET status = 'returned', updated_at = %s WHERE id = %s AND status = 'sold'",
+                       (now(), sale['mark_code_id']))
     return True, return_id
 
 
@@ -735,20 +795,30 @@ def create_buyback_record(cursor, product_article, price, payment_type, user_id,
 @with_transaction
 def create_trade_in_record(cursor, new_product_article, new_sale_price, old_item_value, price_difference,
                            payment_type_difference, user_id, store_id, old_product_article=None,
-                           old_item_description=None, old_metal_type=None, old_weight=None):
+                           old_item_description=None, old_metal_type=None, old_weight=None, new_mark_code=None):
     new_id = _change_quantity(cursor, new_product_article, -1)
-    cursor.execute("SELECT store_id FROM products WHERE id = %s", (new_id,))
-    store_id = cursor.fetchone()['store_id'] or store_id  # магазин нового товара
+    cursor.execute("SELECT id, article_number, store_id, is_marked FROM products WHERE id = %s", (new_id,))
+    new_product = cursor.fetchone()
+    store_id = new_product['store_id'] or store_id  # магазин нового товара
+    code = None
+    if new_mark_code:
+        code = _take_code(cursor, new_mark_code, new_product, set())
+    elif marking_required(new_product):
+        raise BusinessError(f"{new_product['article_number']}: маркируемый товар — отсканируйте код маркировки DataMatrix.")
     if old_product_article:
         _change_quantity(cursor, old_product_article, 1)
     cursor.execute("""INSERT INTO trade_ins (old_product_article, old_item_description, old_metal_type, old_weight,
                                              old_item_value, new_product_article, new_sale_price, price_difference,
-                                             payment_type_difference, user_id, store_id, trade_in_date)
-                      VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                                             payment_type_difference, user_id, store_id, trade_in_date, new_mark_code_id)
+                      VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                    (old_product_article, old_item_description, old_metal_type, old_weight, old_item_value,
                     new_product_article, new_sale_price, price_difference, payment_type_difference,
-                    user_id, store_id, now()))
-    return True, cursor.lastrowid
+                    user_id, store_id, now(), code['id'] if code else None))
+    trade_in_id = cursor.lastrowid
+    if code:
+        cursor.execute("UPDATE product_codes SET status = 'sold', sale_id = NULL, note = %s, updated_at = %s WHERE id = %s",
+                       (f"Trade-In №{trade_in_id}", now(), code['id']))
+    return True, trade_in_id
 
 
 @with_transaction
@@ -777,9 +847,11 @@ def get_period_operations(cursor, start_dt, end_dt, store_id=None):
     result['sales'] = run("""
         SELECT s.id, s.receipt_id, s.sale_date, s.sold_price, s.payment_type, s.store_id, st.name AS store,
                p.article_number, p.product_type, p.model, p.size, p.metal_type, p.weight,
-               COALESCE(s.list_price, p.price) AS list_price, p.cost_price, u.name AS user_name, r.id AS return_id
+               COALESCE(s.list_price, p.price) AS list_price, p.cost_price, u.name AS user_name, r.id AS return_id,
+               mc.code AS mark_code
         FROM sales s
         JOIN products p ON s.product_id = p.id
+        LEFT JOIN product_codes mc ON mc.id = s.mark_code_id
         LEFT JOIN stores st ON st.id = s.store_id
         LEFT JOIN users u ON s.user_id = u.id
         LEFT JOIN returns r ON r.original_sale_id = s.id

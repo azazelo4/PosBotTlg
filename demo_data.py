@@ -216,6 +216,8 @@ def remove_demo(cursor):
     removed += cursor.rowcount
     cursor.execute("DELETE FROM cash_withdrawals WHERE comment LIKE %s", (MARK + "%",))
     removed += cursor.rowcount
+    cursor.execute("DELETE c FROM product_codes c JOIN products p ON p.id = c.product_id WHERE p.article_number LIKE %s",
+                   (like,))
     cursor.execute("DELETE FROM products WHERE article_number LIKE %s", (like,))
     logger.info("Удалены демо-данные: %s товаров, %s операций.", cursor.rowcount, removed)
     return True, {"products": cursor.rowcount, "operations": removed}

@@ -203,7 +203,7 @@ def fake():
 @pytest.fixture
 def tg(fake):
     """Чистые данные перед каждым тестом: пользователи трёх ролей и несколько товаров."""
-    for table in ("returns", "trade_ins", "buybacks", "cash_withdrawals", "sales", "receipts", "products", "users", "stores",
+    for table in ("returns", "trade_ins", "buybacks", "cash_withdrawals", "sales", "receipts", "product_codes", "products", "users", "stores",
                   "settings", "settings_log", "job_runs"):
         db_query(f"DELETE FROM `{table}`")
     db_query("INSERT INTO stores (id, name, sort_order) VALUES (1, 'ЦУМ', 0), (2, 'Отау Сауда', 1)")

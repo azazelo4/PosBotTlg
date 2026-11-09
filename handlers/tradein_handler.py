@@ -6,9 +6,9 @@
 import logging
 
 from buttons import create_cancel_markup, create_confirmation_markup, create_payment_type_markup, PAYMENT_TYPES, BTN_CONFIRM
-from database import get_product_by_article, create_trade_in_record
+from database import create_trade_in_record
 from handlers.common import (CASH_ROLES, CustomerItemIntake, in_state, is_button, user_ids, cash_menu,
-                             register_simple_cancel, product_line, ask_money, read_money)
+                             register_simple_cancel, product_line, ask_money, read_money, resolve_for_sale)
 from state import bot, user_state, get_op, start_op, end_op, cancel_current_operation
 from utils.common import money, h
 
@@ -46,12 +46,10 @@ def on_old_value(message):
 
 
 def on_new_article(message):
-    chat_id, article = message.chat.id, (message.text or '').strip()
+    chat_id = message.chat.id
     op = get_op(chat_id)
-    product = get_product_by_article(article)
+    product, code = resolve_for_sale(chat_id, message.text)
     if not product:
-        bot.send_message(chat_id, f"Артикул <code>{h(article)}</code> не найден. Введите другой.",
-                         parse_mode='HTML', reply_markup=create_cancel_markup())
         return
     if product['article_number'] == op['item'].get('article'):
         bot.send_message(chat_id, "Новый товар не может совпадать со сдаваемым. Введите другой артикул.", reply_markup=create_cancel_markup())
@@ -61,6 +59,7 @@ def on_new_article(message):
                          parse_mode='HTML', reply_markup=create_cancel_markup())
         return
     op['new_product'] = product
+    op['new_code'] = code
     user_state[chat_id] = NEW_PRICE
     ask_money(chat_id, f"Новый товар: {product_line(product)}\n"
                        f"Цена: <b>{money(product['price'])}</b> (минимум {money(product['min_price'])})\n\n"
@@ -131,7 +130,8 @@ def on_confirm(message):
         new_product_article=op['new_product']['article_number'], new_sale_price=op['new_price'],
         old_item_value=op['old_value'], price_difference=op['difference'], payment_type_difference=op['payment'],
         user_id=user_id, store_id=store_id, old_product_article=item.get('article'),
-        old_item_description=item.get('description'), old_metal_type=item.get('metal_type'), old_weight=item.get('weight'))
+        old_item_description=item.get('description'), old_metal_type=item.get('metal_type'), old_weight=item.get('weight'),
+        new_mark_code=op.get('new_code'))
     end_op(chat_id)
     if ok:
         logger.info("Chat %s: trade-in #%s, доплата %s", chat_id, result, op['difference'])

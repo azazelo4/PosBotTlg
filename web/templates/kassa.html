@@ -344,7 +344,8 @@ function productCard(p) {
     <div class="muted">арт. ${esc(p.article)} · ${esc(p.details || "")}${p.inserts ? " · " + esc(p.inserts) : ""}</div>
     <div class="meta"><span class="price num">${fmt(p.price)}</span>
       <span>мин. <b class="num">${fmt(p.min_price)}</b></span>
-      <span>остаток <b>${p.quantity}</b> шт.</span><span class="muted">${esc(p.store || "")}</span></div>
+      <span>остаток <b>${p.quantity}</b> шт.</span><span class="muted">${esc(p.store || "")}</span>${
+      p.code ? `<span class="muted">🏷 код ${esc(p.code_short)}</span>` : ""}</div>
   </div>`;
 }
 
@@ -428,7 +429,7 @@ function itemBlock(root, onChange) {
 const VIEWS = {};
 VIEWS.sale = root => {
   root.innerHTML = `<h2>Продажа</h2>
-    <label for="article">Артикул — введите или отсканируйте, <kbd>Enter</kbd> добавляет в чек</label>
+    <label for="article">Артикул или код маркировки — введите или отсканируйте, <kbd>Enter</kbd> добавляет в чек</label>
     <div class="row"><input type="text" class="big" id="article" autocomplete="off" placeholder="Артикул">
       <button class="btn" id="find">Добавить</button></div>
     <div class="msg err hidden"></div>
@@ -455,7 +456,8 @@ VIEWS.sale = root => {
     if (!cart.length) { $("#cart", root).innerHTML = ""; return; }
     $("#cart", root).innerHTML = `<h3>Чек</h3><table><tr><th>№</th><th>Товар</th><th class="amount">По ценнику</th><th class="amount">Сумма</th><th></th></tr>${
       cart.map((it, i) => `<tr><td>${i + 1}</td>
-        <td><b>${esc(it.product.model || it.product.type || "")}</b><br><span class="muted">арт. ${esc(it.product.article)} · ${esc(it.product.details || "")}${it.product.inserts ? " · " + esc(it.product.inserts) : ""}</span></td>
+        <td><b>${esc(it.product.model || it.product.type || "")}</b><br><span class="muted">арт. ${esc(it.product.article)} · ${esc(it.product.details || "")}${it.product.inserts ? " · " + esc(it.product.inserts) : ""}</span>${
+          it.code ? `<br><span class="muted">🏷 код ${esc(it.product.code_short)}</span>` : ""}</td>
         <td class="amount num">${fmt(it.product.price)}<br><span class="muted">мин. ${fmt(it.product.min_price)}</span></td>
         <td class="amount"><input type="text" class="num line-price" data-i="${i}" inputmode="numeric" autocomplete="off" value="${esc(it.price)}"></td>
         <td><button class="btn" data-del="${i}" title="Убрать из чека">✕</button></td></tr>`).join("")}</table>`;
@@ -474,13 +476,20 @@ VIEWS.sale = root => {
     const a = article.value.trim(); if (!a) return;
     showErr(root, "");
     try {
-      const product = await api("product?article=" + encodeURIComponent(a));
+      const product = await api("product?sale=1&article=" + encodeURIComponent(a));
+      if (product.marked && !product.code) {
+        showErr(root, `${product.article}: маркируемый товар — отсканируйте код маркировки DataMatrix с бирки изделия.`);
+        article.select(); return;
+      }
+      if (product.code && cart.some(it => it.code === product.code)) {
+        showErr(root, `Код ${product.code_short} уже в чеке.`); article.select(); return;
+      }
       const inCart = cart.filter(it => it.product.id === product.id).length;
       if (product.quantity - inCart <= 0) {
         showErr(root, inCart ? `Больше нет: все ${inCart} шт. ${product.article} уже в чеке.` : `Товара ${product.article} нет в наличии.`);
         article.select(); return;
       }
-      cart.push({product, price: product.price});
+      cart.push({product, price: product.price, code: product.code || null});
       article.value = "";
       render();
       article.focus();
@@ -493,7 +502,7 @@ VIEWS.sale = root => {
       const p = cart[i].product, price = priceOf(i);
       if (!price || price <= 0) { render(i); return showErr(root, `Введите сумму для ${p.article}.`); }
       if (price < p.min_price) { render(i); return showErr(root, `${p.article}: сумма ниже минимальной цены ${fmt(p.min_price)}.`); }
-      items.push({article: p.article, price, product: p});
+      items.push({article: p.article, price, product: p, code: cart[i].code});
     }
     if (!payment) {
       showErr(root, "Выберите способ оплаты (клавиши 1–" + me.payment_types.length + ").");
@@ -506,7 +515,7 @@ VIEWS.sale = root => {
         (it.price < it.product.price ? ` <span class="muted">(скидка ${fmt(it.product.price - it.price)})</span>` : "")),
       `Итого: <b class="num">${fmt(sum)}</b>${items.length > 1 ? ` (${items.length} поз.)` : ""}`,
       `Оплата: <b>${esc(payment)}</b>`,
-    ], () => api("sale", {items: items.map(it => ({article: it.article, price: it.price})), payment}), reset);
+    ], () => api("sale", {items: items.map(it => ({article: it.article, price: it.price, code: it.code})), payment}), reset);
   };
   $("#find", root).onclick = add;
   article.onkeydown = e => {
@@ -646,7 +655,11 @@ VIEWS.tradein = root => {
   const findNew = async () => {
     const a = $("#new-article", root).value.trim(); if (!a) return;
     try {
-      product = await api("product?article=" + encodeURIComponent(a));
+      product = await api("product?sale=1&article=" + encodeURIComponent(a));
+      if (product.marked && !product.code) {
+        const msg = `${product.article}: маркируемый товар — отсканируйте код маркировки DataMatrix с бирки.`;
+        product = null; $("#new-card", root).innerHTML = `<div class="msg err">${esc(msg)}</div>`; return;
+      }
       $("#new-card", root).innerHTML = productCard(product);
       $("#new-price", root).value = product.price; diff();
       $("#new-price", root).focus(); $("#new-price", root).select();
@@ -668,7 +681,8 @@ VIEWS.tradein = root => {
       `Сдаёт: ${item.title()} — оценка <b class="num">${fmt(o)}</b>`,
       `Получает: ${esc(product.model || "")}, арт. ${esc(product.article)} — <b class="num">${fmt(n)}</b>`,
       d > 0 ? `Доплата клиента: <b class="num">${fmt(d)}</b>, ${esc(payment)}` : d < 0 ? `Выплата клиенту: <b class="num">${fmt(-d)}</b>, ${esc(payment)}` : "Без доплаты",
-    ], () => api("tradein", {item: item.payload(), old_value: o, new_article: product.article, new_price: n, payment: d ? payment : null}),
+    ], () => api("tradein", {item: item.payload(), old_value: o, new_article: product.article, new_code: product.code || null,
+                             new_price: n, payment: d ? payment : null}),
     () => VIEWS.tradein(root));
   };
   $("#go", root).onclick = go; $("#reset", root).onclick = () => VIEWS.tradein(root);

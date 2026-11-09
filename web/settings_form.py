@@ -2,7 +2,7 @@
 import config
 import settings_store
 
-SETUP_GROUPS = ("telegram", "org", "web", "schedule", "labels", "fiscal")
+SETUP_GROUPS = ("telegram", "org", "web", "schedule", "labels", "fiscal", "marking")
 # В мастере показываем самое нужное, остальное — на странице «Настройки»
 SETUP_KEYS = ("TOKEN", "ORG_NAME", "ORG_BIN", "WEB_URL", "TIMEZONE", "LABEL_WIDTH_MM", "LABEL_HEIGHT_MM",
               "FISCAL_ENABLED", "WEBKASSA_URL", "WEBKASSA_LOGIN", "WEBKASSA_PASSWORD", "WEBKASSA_API_KEY")

@@ -95,6 +95,7 @@ GROUPS = {
     "schedule": "Время и уведомления",
     "labels": "Ценники и импорт",
     "fiscal": "Фискализация (Webkassa)",
+    "marking": "Маркировка",
 }
 
 TIMEZONES = ("Asia/Almaty", "Asia/Qostanay", "Asia/Qyzylorda", "Asia/Aqtobe", "Asia/Aqtau", "Asia/Atyrau", "Asia/Oral",
@@ -136,6 +137,9 @@ SETTINGS = (
     Setting("WEBKASSA_LOGIN", "Логин кассира Webkassa", "fiscal"),
     Setting("WEBKASSA_PASSWORD", "Пароль кассира Webkassa", "fiscal", secret=True),
     Setting("WEBKASSA_API_KEY", "API-ключ интегратора (X-API-KEY)", "fiscal", secret=True),
+    Setting("MARKING_ENABLED", "Учёт кодов маркировки", "marking", kind="bool", default=False,
+            help="Товары с отметкой «Маркируемый» продаются только по скану кода DataMatrix; коды "
+                 "принимаются и сверяются в разделе «Маркировка». Передача кодов в ОФД — вместе с фискализацией."),
     # служебные
     Setting("SETUP_DONE", "Первоначальная настройка завершена", "system", kind="bool", default=False, hidden=True),
     Setting("SETUP_CODE", "Код мастера настройки", "system", secret=True, hidden=True),
