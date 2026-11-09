@@ -3,6 +3,10 @@
 #
 #   sudo bash install.sh --key <ключ_доступа> [--domain pos.example.kz]
 #
+# Маленькая точка — ПК или мини-ПК в магазине без белого IP, домена и открытых портов:
+#
+#   sudo bash install.sh --key <ключ_доступа> --local [--offsite ssh://user@host/путь]
+#
 # Ключ доступа к образу выдаёт поставщик (токен GitHub только на чтение пакетов).
 # Без --domain установщик спросит домен; пустой ответ — бесплатный <IP>.sslip.io.
 #
@@ -16,6 +20,10 @@
 # Параметры:
 #   --key KEY            ключ доступа (или переменная POSBOT_KEY)
 #   --domain DOMAIN      домен веб-админки, A-запись → IP сервера
+#   --local              ПК в магазине: без Caddy и портов 80/443, веб в локальной сети (http://<IP-в-сети>:8000)
+#   --lan-ip IP          адрес ПК в локальной сети (по умолчанию определяется сам)
+#   --offsite АДРЕС      копия бэкапов вне ПК: ssh://user@host/путь, rclone:remote:путь, https://…/
+#   --tailscale          поставить Tailscale для удалённой поддержки (SSH без белого IP)
 #   --version TAG        версия образа (по умолчанию latest)
 #   --dir DIR            каталог установки (по умолчанию /opt/posbot)
 #   --yes                ничего не спрашивать
@@ -30,6 +38,10 @@ DIR="${POSBOT_DIR:-/opt/posbot}"
 KEY="${POSBOT_KEY:-}"
 REGISTRY_USER="${POSBOT_REGISTRY_USER:-azazelo4}"
 DOMAIN=""
+LOCAL=0
+LAN_IP=""
+OFFSITE=""
+TAILSCALE=0
 ASSUME_YES=0
 SKIP_SYSTEM=0
 PULL=1
@@ -41,13 +53,17 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --key) KEY="${2:-}"; shift 2 ;;
     --domain) DOMAIN="${2:-}"; shift 2 ;;
+    --local) LOCAL=1; shift ;;
+    --lan-ip) LAN_IP="${2:-}"; shift 2 ;;
+    --offsite) OFFSITE="${2:-}"; shift 2 ;;
+    --tailscale) TAILSCALE=1; shift ;;
     --version) VERSION="${2:-}"; shift 2 ;;
     --dir) DIR="${2:-}"; shift 2 ;;
     --image) IMAGE="${2:-}"; shift 2 ;;
     --yes|-y) ASSUME_YES=1; shift ;;
     --skip-system) SKIP_SYSTEM=1; shift ;;
     --no-pull) PULL=0; shift ;;
-    -h|--help) sed -n '2,27p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,36p' "$0"; exit 0 ;;
     *) die "неизвестный параметр $1 (см. --help)" ;;
   esac
 done
@@ -74,7 +90,19 @@ public_ip() {
   hostname -I 2>/dev/null | awk '{print $1}'
 }
 
+lan_ip() {
+  # Адрес этого компьютера в локальной сети: интерфейс маршрута по умолчанию
+  local ip
+  ip="$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -1)"
+  [ -n "$ip" ] || ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  echo "${ip:-127.0.0.1}"
+}
+
 FULL_IMAGE="$IMAGE:$VERSION"
+# Повторная установка без --local сохраняет режим прежней установки
+if [ "$LOCAL" = "0" ] && grep -qx "POSBOT_MODE=local" "$DIR/.env" 2>/dev/null; then
+  LOCAL=1
+fi
 
 # ---------------------------------------------------------------- 1. система и Docker
 if [ "$SKIP_SYSTEM" = "0" ]; then
@@ -124,7 +152,7 @@ install -m 755 "$DIR/deploy/posbot.sh" /usr/local/bin/posbot
 
 if [ "$SKIP_SYSTEM" = "0" ]; then
   log "Подготовка сервера"
-  APP_DIR="$DIR" POSBOT_RUNNER=0 bash "$DIR/deploy/setup-server.sh"
+  APP_DIR="$DIR" POSBOT_RUNNER=0 POSBOT_LOCAL="$LOCAL" bash "$DIR/deploy/setup-server.sh"
 fi
 
 bash "$DIR/deploy/bootstrap-env.sh" "$DIR/.env"
@@ -139,10 +167,27 @@ set_env() {
 }
 set_env POSBOT_IMAGE "$IMAGE"
 set_env POSBOT_VERSION "$VERSION"
+if [ "$LOCAL" = "1" ]; then
+  LAN_IP="${LAN_IP:-$(lan_ip)}"
+  set_env POSBOT_MODE local
+  set_env POSBOT_LAN_URL "http://$LAN_IP:8000"
+  bash "$DIR/deploy/bootstrap-env.sh" "$DIR/.env" >/dev/null   # профили compose для режима local
+fi
+
+if [ "$TAILSCALE" = "1" ]; then
+  log "Tailscale для удалённой поддержки"
+  command -v tailscale >/dev/null 2>&1 || curl -fsSL https://tailscale.com/install.sh | sh
+  # Ссылку для входа в сеть Tailscale установщик напечатает — откройте её или передайте поставщику
+  tailscale up --ssh ${TS_AUTHKEY:+--auth-key="$TS_AUTHKEY"} || echo "ВНИМАНИЕ: tailscale up не выполнен, повторите: sudo tailscale up --ssh"
+fi
 
 # ---------------------------------------------------------------- 4. запуск
 log "Запуск"
 cd "$DIR"
+if [ "$LOCAL" = "1" ]; then
+  # Переход сервер → ПК: Caddy теперь вне профиля, compose сам его не остановит
+  docker compose rm -sf caddy >/dev/null 2>&1 || true
+fi
 docker compose up -d --remove-orphans
 
 echo -n "Жду веб-админку"
@@ -162,6 +207,48 @@ fi
 if echo "$health" | grep -q '"configured":true'; then
   log "Готово: бот уже настроен и работает ($(echo "$health" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p'))."
   echo "Обновление: posbot update · статус: posbot status"
+  exit 0
+fi
+
+if [ "$LOCAL" = "1" ]; then
+  if [ -z "$OFFSITE" ] && ! grep -Eq '^BACKUP_(OFFSITE|PAR_URL)=.+' /etc/pos-bot-backup.env 2>/dev/null; then
+    echo
+    echo "Копия бэкапов ВНЕ этого компьютера защищает от поломки диска, кражи и пожара."
+    echo "Адрес: ssh://user@host/путь (сервер поставщика), rclone:remote:путь (облачный диск), https://…/ (Object Storage)."
+    OFFSITE="$(ask "Куда копировать бэкапы (Enter — настроить позже):" "")"
+  fi
+  if [ -n "$OFFSITE" ]; then
+    POSBOT_DIR="$DIR" bash "$DIR/deploy/posbot.sh" offsite "$OFFSITE" || echo "ВНИМАНИЕ: копия вне ПК не настроена"
+  fi
+  code="$(docker compose exec -T web python -m setup_code | sed -n 's/^Код настройки: //p')"
+  offsite_note="Копия бэкапов вне ПК: $(grep -E '^BACKUP_OFFSITE=' /etc/pos-bot-backup.env 2>/dev/null | cut -d= -f2- || true)"
+  if [ "$offsite_note" = "Копия бэкапов вне ПК: " ]; then
+    offsite_note="ВНИМАНИЕ: копия бэкапов вне ПК НЕ настроена. При поломке диска данные пропадут.
+  Настроить: posbot offsite ssh://user@host/путь"
+  fi
+  cat <<EOF
+
+================================================================
+  POS-бот установлен на этот компьютер. Осталась настройка
+  в браузере — на этом ПК или с устройства в той же сети:
+
+    http://$LAN_IP:8000/setup    (на самом ПК: http://localhost:8000/setup)
+    Код настройки: ${code:-<posbot setup-code>}
+
+  Касса для ПК: http://$LAN_IP:8000/kassa
+
+  Без белого IP работают бот, касса и админка в сети магазина.
+  Касса-приложение в Telegram и вход снаружи — через туннель:
+    posbot tunnel tailscale   или   posbot tunnel cloudflare <токен>
+
+  Если адрес ПК в сети сменится (роутер выдал другой) — закрепите его
+  в роутере или поменяйте: posbot web-url http://<новый-IP>:8000
+
+  $offsite_note
+
+  Команды: posbot status | logs | update | backup | offsite | tunnel
+================================================================
+EOF
   exit 0
 fi
 

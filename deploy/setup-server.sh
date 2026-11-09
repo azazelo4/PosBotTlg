@@ -8,7 +8,9 @@
 #   firewall (SSH, HTTP/HTTPS), fail2ban, вход по SSH только по ключу (если ключ уже добавлен).
 #
 # Переменные: TZ_NAME, SWAP_SIZE, APP_DIR (каталог бота, по умолчанию /opt/pos-bot),
-# POSBOT_RUNNER=0 — без пользователя для GitHub runner (так вызывает deploy/install.sh).
+# POSBOT_RUNNER=0 — без пользователя для GitHub runner (так вызывает deploy/install.sh),
+# POSBOT_LOCAL=1 — ПК в магазине (install.sh --local): без портов 80/443, бэкап при первой возможности
+# в течение дня (ПК ночью выключен), без засыпания.
 set -euo pipefail
 
 TZ_NAME="${TZ_NAME:-Asia/Almaty}"
@@ -16,6 +18,7 @@ SWAP_SIZE="${SWAP_SIZE:-2G}"
 RUNNER_USER=gh-runner
 APP_DIR="${APP_DIR:-/opt/pos-bot}"
 POSBOT_RUNNER="${POSBOT_RUNNER:-1}"
+POSBOT_LOCAL="${POSBOT_LOCAL:-0}"
 
 log() { echo -e "\n==> $*"; }
 
@@ -74,27 +77,43 @@ if [ "$POSBOT_RUNNER" = "1" ]; then
   chown "$RUNNER_USER:$RUNNER_USER" "$APP_DIR" "/home/$RUNNER_USER/actions-runner"
 fi
 
-log "Ежедневный бэкап БД в 03:30"
-cat > /etc/cron.d/pos-bot-backup <<EOF
+if [ "$POSBOT_LOCAL" = "1" ]; then
+  log "Бэкап БД раз в сутки: проверка каждый час (ПК может быть выключен ночью)"
+  cat > /etc/cron.d/pos-bot-backup <<EOF
+# Каждый час: бэкап, если последнему больше 20 часов; заодно повтор копии вне ПК, если не было интернета
+17 * * * * root [ -x $APP_DIR/deploy/backup.sh ] && APP_DIR=$APP_DIR $APP_DIR/deploy/backup.sh --if-stale 20 >> /var/log/pos-bot-backup.log 2>&1
+EOF
+else
+  log "Ежедневный бэкап БД в 03:30"
+  cat > /etc/cron.d/pos-bot-backup <<EOF
 # Скрипт появляется в $APP_DIR после первого деплоя/установки
 30 3 * * * root [ -x $APP_DIR/deploy/backup.sh ] && APP_DIR=$APP_DIR $APP_DIR/deploy/backup.sh >> /var/log/pos-bot-backup.log 2>&1
 EOF
+fi
 if [ ! -f /etc/pos-bot-backup.env ]; then
   install -m 600 /dev/null /etc/pos-bot-backup.env
   cat > /etc/pos-bot-backup.env <<'EOF'
 # Сколько дней хранить локальные копии
 KEEP_DAYS=14
-# Необязательно: URL для копии вне сервера (PUT-загрузка, например pre-authenticated
-# request в S3-совместимом хранилище). Пусто — только локально.
-BACKUP_PAR_URL=
+# Копия вне сервера/ПК (настраивается командой posbot offsite):
+#   ssh://user@host/путь, rclone:remote:путь или https://…/ (PUT-загрузка). Пусто — только локально.
+BACKUP_OFFSITE=
 EOF
 fi
 
-log "Firewall: входящие SSH, HTTP и HTTPS"
-ufw allow OpenSSH >/dev/null
-# 80/443 — для веб-админки и Mini App (Caddy с сертификатом Let's Encrypt)
-ufw allow 80/tcp >/dev/null
-ufw allow 443/tcp >/dev/null
+if [ "$POSBOT_LOCAL" = "1" ]; then
+  log "Firewall: входящие SSH и касса в локальной сети (8000)"
+  ufw allow OpenSSH >/dev/null
+  for net in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16; do ufw allow from "$net" to any port 8000 proto tcp >/dev/null; done
+  log "ПК не засыпает: иначе бот перестаёт отвечать"
+  systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target >/dev/null 2>&1 || true
+else
+  log "Firewall: входящие SSH, HTTP и HTTPS"
+  ufw allow OpenSSH >/dev/null
+  # 80/443 — для веб-админки и Mini App (Caddy с сертификатом Let's Encrypt)
+  ufw allow 80/tcp >/dev/null
+  ufw allow 443/tcp >/dev/null
+fi
 ufw --force enable >/dev/null
 ufw status | sed -n '1,6p'
 # Docker публикует порты в обход ufw, поэтому в docker-compose.yml наружу

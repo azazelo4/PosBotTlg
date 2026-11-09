@@ -1,6 +1,11 @@
 # Стек для установки из готового образа (deploy/install.sh). Копируется в каталог установки
 # как docker-compose.yml. Образ и версия — из .env: POSBOT_IMAGE, POSBOT_VERSION.
 # Для разработки и сборки из исходников — docker-compose.yml в корне репозитория.
+#
+# Режим задаёт deploy/bootstrap-env.sh по POSBOT_MODE в .env:
+#   server — Caddy с HTTPS (профиль https), веб только на 127.0.0.1;
+#   local  — ПК в магазине без белого IP: без Caddy, веб в локальной сети (WEB_BIND=0.0.0.0);
+#   туннель (профиль tunnel) — Cloudflare Tunnel для Mini App и доступа снаружи, если задан TUNNEL_TOKEN.
 x-app: &app
   image: ${POSBOT_IMAGE:-ghcr.io/azazelo4/posbottlg}:${POSBOT_VERSION:-latest}
   restart: always
@@ -21,15 +26,17 @@ services:
   bot:
     <<: *app
 
-  # Веб-админка, мастер /setup и Mini App. 8000 — только localhost (SSH-туннель)
+  # Веб-админка, мастер /setup и Mini App. На сервере 8000 — только localhost (за Caddy),
+  # на ПК в магазине — в локальной сети
   web:
     <<: *app
     command: ["uvicorn", "web.app:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
     ports:
-      - "127.0.0.1:8000:8000"
+      - "${WEB_BIND:-127.0.0.1}:8000:8000"
 
   caddy:
     image: caddy:2
+    profiles: ["https"]
     restart: always
     depends_on:
       - web
@@ -40,6 +47,18 @@ services:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+    logging: *logging
+
+  # Публичный HTTPS-адрес без белого IP: туннель Cloudflare (публичный hostname → http://web:8000)
+  tunnel:
+    image: cloudflare/cloudflared:2026.10.3
+    profiles: ["tunnel"]
+    restart: always
+    depends_on:
+      - web
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
     logging: *logging
 
   db:

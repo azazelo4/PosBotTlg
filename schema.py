@@ -223,6 +223,15 @@ TABLES = {
           PRIMARY KEY (`token_hash`),
           KEY `idx_kl_expires` (`expires_at`)
         ) {CHARSET}""",
+    # Отметки фоновых задач: когда бот последний раз связался с Telegram, за какой день отправлен отчёт.
+    # Нужны, чтобы ПК в магазине, выключенный ночью, догонял пропущенное при включении.
+    "job_runs": f"""
+        CREATE TABLE IF NOT EXISTS `job_runs` (
+          `name` varchar(64) NOT NULL,
+          `last_run_at` datetime NOT NULL,
+          `last_for_date` date DEFAULT NULL,
+          PRIMARY KEY (`name`)
+        ) {CHARSET}""",
     "cash_withdrawals": f"""
         CREATE TABLE IF NOT EXISTS `cash_withdrawals` (
           `id` int NOT NULL AUTO_INCREMENT,

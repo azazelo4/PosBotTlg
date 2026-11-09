@@ -84,6 +84,10 @@ class Setting:
         return self.env or self.key
 
 
+# Режим установки (deploy/bootstrap-env.sh): server — облачный сервер с доменом, local — ПК в магазине без белого IP
+INSTALL_MODE = os.environ.get("POSBOT_MODE", "server").strip().lower() or "server"
+LOCAL_MODE = INSTALL_MODE == "local"
+
 GROUPS = {
     "telegram": "Telegram",
     "org": "Организация",
@@ -103,18 +107,21 @@ SETTINGS = (
     Setting("ORG_NAME", "Название ИП / организации", "org", placeholder="ИП Иванов"),
     Setting("ORG_BIN", "ИИН / БИН", "org", kind="bin", help="12 цифр. Понадобится для фискализации."),
     Setting("WEB_URL", "Адрес веб-админки", "web", kind="url",
-            help="https://ваш-домен. Домен должен указывать на IP сервера (A-запись). "
+            help="https://ваш-домен — домен должен указывать на IP сервера (A-запись). "
+                 "ПК в магазине без белого IP: http://адрес-ПК-в-сети:8000 (касса и админка — только в сети магазина, "
+                 "касса-приложение в Telegram — только с туннелем, см. инструкцию). "
                  "Пусто — кнопки админки и кассы-приложения в боте скрыты.",
             placeholder="https://pos.example.kz"),
     Setting("TIMEZONE", "Часовой пояс", "schedule", kind="tz", restart=True,
             default=os.environ.get("TZ") or "Asia/Almaty", env="POSBOT_TIMEZONE",
             help="Даты операций, периоды отчётов и расписание уведомлений."),
-    Setting("DAILY_REPORT_TIME", "Ежедневный отчёт, время", "schedule", kind="time", default="23:00", restart=True,
-            help="ЧЧ:ММ. Пусто — не отправлять."),
+    Setting("DAILY_REPORT_TIME", "Ежедневный отчёт, время", "schedule", kind="time",
+            default="20:00" if LOCAL_MODE else "23:00", restart=True,
+            help="ЧЧ:ММ. Пусто — не отправлять. Если бот в это время был выключен, отчёт придёт после включения."),
     Setting("REPORT_CHAT_ID", "Чат для ежедневного отчёта", "schedule", kind="int",
             help="ID чата/группы Telegram. Пусто — всем администраторам."),
-    Setting("LOW_STOCK_TIME", "Уведомление о низком остатке, время", "schedule", kind="time", default="09:00",
-            restart=True, help="ЧЧ:ММ. Пусто — не отправлять."),
+    Setting("LOW_STOCK_TIME", "Уведомление о низком остатке, время", "schedule", kind="time",
+            default="11:00" if LOCAL_MODE else "09:00", restart=True, help="ЧЧ:ММ. Пусто — не отправлять."),
     Setting("LOW_STOCK_THRESHOLD", "Порог низкого остатка, шт.", "schedule", kind="int", default=5),
     Setting("LABEL_WIDTH_MM", "Ширина ценника, мм", "labels", kind="float", default=30.0),
     Setting("LABEL_HEIGHT_MM", "Высота ценника, мм", "labels", kind="float", default=20.0),
@@ -251,3 +258,10 @@ LOW_STOCK_TIME = LOW_STOCK_THRESHOLD = LABEL_WIDTH_MM = LABEL_HEIGHT_MM = LABEL_
 IMPORT_MIN_PRICE_PERCENT = FISCAL_ENABLED = WEBKASSA_URL = WEBKASSA_LOGIN = WEBKASSA_PASSWORD = None
 WEBKASSA_API_KEY = SETUP_DONE = SETUP_CODE = None
 apply({})
+
+
+def mini_app_url():
+    """Адрес кассы-приложения (Telegram Mini App) или None: Telegram открывает Mini App только по HTTPS."""
+    if WEB_URL and str(WEB_URL).startswith("https://"):
+        return f"{WEB_URL}/app"
+    return None
