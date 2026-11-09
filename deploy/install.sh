@@ -221,7 +221,7 @@ if [ "$LOCAL" = "1" ]; then
     POSBOT_DIR="$DIR" bash "$DIR/deploy/posbot.sh" offsite "$OFFSITE" || echo "ВНИМАНИЕ: копия вне ПК не настроена"
   fi
   code="$(docker compose exec -T web python -m setup_code | sed -n 's/^Код настройки: //p')"
-  offsite_note="Копия бэкапов вне ПК: $(grep -E '^BACKUP_OFFSITE=' /etc/pos-bot-backup.env 2>/dev/null | cut -d= -f2-)"
+  offsite_note="Копия бэкапов вне ПК: $(grep -E '^BACKUP_OFFSITE=' /etc/pos-bot-backup.env 2>/dev/null | cut -d= -f2- || true)"
   if [ "$offsite_note" = "Копия бэкапов вне ПК: " ]; then
     offsite_note="ВНИМАНИЕ: копия бэкапов вне ПК НЕ настроена. При поломке диска данные пропадут.
   Настроить: posbot offsite ssh://user@host/путь"

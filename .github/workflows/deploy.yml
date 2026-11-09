@@ -101,7 +101,7 @@ jobs:
         run: docker build --build-arg POSBOT_VERSION=ci -t posbot-local:ci .
 
       - name: Установка --local (без домена, Caddy и портов 80/443)
-        run: sudo bash deploy/install.sh --yes --skip-system --no-pull --image posbot-local --version ci --local | tee install.log
+        run: set -o pipefail; sudo bash deploy/install.sh --yes --skip-system --no-pull --image posbot-local --version ci --local | tee install.log
 
       - name: Проверка результата
         run: |
