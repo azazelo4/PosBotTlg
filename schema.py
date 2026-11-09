@@ -232,6 +232,25 @@ TABLES = {
           `last_for_date` date DEFAULT NULL,
           PRIMARY KEY (`name`)
         ) {CHARSET}""",
+    # Покупатели: телефон с согласием на хранение; chat_id — если подписались на чеки в Telegram (/start r_…)
+    "customers": f"""
+        CREATE TABLE IF NOT EXISTS `customers` (
+          `id` int NOT NULL AUTO_INCREMENT,
+          `phone` varchar(16) NOT NULL,
+          `name` varchar(100) DEFAULT NULL,
+          `birthday` date DEFAULT NULL,
+          `note` varchar(255) DEFAULT NULL,
+          `chat_id` bigint DEFAULT NULL,
+          `consent_at` datetime NOT NULL,
+          `consent_source` varchar(16) NOT NULL,
+          `consent_by` int DEFAULT NULL,
+          `marketing` tinyint(1) NOT NULL DEFAULT 0,
+          `created_at` datetime NOT NULL,
+          `updated_at` datetime NOT NULL,
+          PRIMARY KEY (`id`),
+          UNIQUE KEY `uq_customers_phone` (`phone`),
+          UNIQUE KEY `uq_customers_chat` (`chat_id`)
+        ) {CHARSET}""",
     # Фискализация (Webkassa): очередь чеков. Операция сохраняется сразу, чек уходит в ОФД из очереди с повторами
     "fiscal_receipts": f"""
         CREATE TABLE IF NOT EXISTS `fiscal_receipts` (
@@ -304,6 +323,8 @@ COLUMNS = [
     ("trade_ins", "new_mark_code_id", "int DEFAULT NULL"),
     # фискализация: заводской номер кассы Webkassa (ЗНК) у магазина
     ("stores", "cashbox", "varchar(32) DEFAULT NULL"),
+    # электронный чек: когда отправлен клиенту в Telegram
+    ("receipts", "sent_at", "datetime DEFAULT NULL"),
 ]
 
 # Колонки, которые раньше были NOT NULL без значения по умолчанию,
@@ -328,6 +349,7 @@ INDEXES = [
     ("sales", "idx_sales_date", "(`sale_date`)"),
     ("products", "idx_products_article", "(`article_number`)"),
     ("sales", "idx_sales_receipt", "(`receipt_id`)"),
+    ("receipts", "idx_receipts_customer", "(`customer_id`)"),
 ]
 
 

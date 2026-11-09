@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>{% if receipt %}Чек №{{ receipt.id }}{% else %}Чек не найден{% endif %}{% if org %} · {{ org }}{% endif %}</title>
+  <link rel="stylesheet" href="/static/pico.min.css">
+  <style>
+    :root { --pico-font-size: 95%; }
+    body { background: var(--pico-background-color); }
+    main.receipt { max-width: 34rem; margin: 1.5rem auto; padding: 0 1rem; }
+    .paper { border: 1px solid var(--pico-muted-border-color); border-radius: .75rem; padding: 1.25rem 1.25rem .5rem; }
+    .paper h1 { font-size: 1.25rem; margin-bottom: .25rem; }
+    .muted { color: var(--pico-muted-color); }
+    .item { display: flex; justify-content: space-between; gap: 1rem; padding: .6rem 0;
+            border-bottom: 1px dashed var(--pico-muted-border-color); }
+    .item .price { white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
+    .total { display: flex; justify-content: space-between; font-size: 1.2rem; font-weight: 700; margin: .9rem 0 .3rem; }
+    .returned { text-decoration: line-through; }
+    .foot { font-size: .85rem; white-space: pre-line; margin-top: 1rem; }
+    .actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: 1rem; }
+    .actions > * { margin: 0; width: auto; }
+    @media print { .actions { display: none; } .paper { border: 0; padding: 0; } main.receipt { margin: 0; } }
+  </style>
+</head>
+<body>
+<main class="receipt">
+{% if not receipt %}
+  <h1>Чек не найден</h1>
+  <p class="muted">Проверьте ссылку или попросите продавца прислать чек ещё раз.</p>
+{% else %}
+  <div class="paper">
+    <h1>{{ org or 'Чек' }}</h1>
+    <div class="muted">{% if bin %}ИИН/БИН {{ bin }} · {% endif %}{{ receipt.store or '' }}{% if receipt.store_address %}, {{ receipt.store_address }}{% endif %}</div>
+    <p style="margin:.75rem 0 .25rem"><strong>Чек №{{ receipt.id }}</strong> <span class="muted">от {{ receipt.created_at.strftime('%d.%m.%Y %H:%M') }}</span></p>
+    {% for it in receipt['items'] %}
+      <div class="item">
+        <div class="{{ 'returned' if it.return_id }}">
+          <strong>{{ it.model or it.product_type or it.article_number }}</strong><br>
+          <small class="muted">арт. {{ it.article_number }}{% if details(it) %} · {{ details(it) }}{% endif %}</small>
+          {% if it.return_id %}<br><small>возвращено{% if it.return_price %} — {{ it.return_price|money }}{% endif %}</small>{% endif %}
+        </div>
+        <div class="price">{{ it.sold_price|money }}
+          {% if it.list_price and it.list_price > it.sold_price %}<br><small class="muted">скидка {{ (it.list_price - it.sold_price)|money }}</small>{% endif %}</div>
+      </div>
+    {% endfor %}
+    <div class="total"><span>Итого</span><span>{{ receipt.total|money }}</span></div>
+    <div class="muted">Оплата: {{ receipt.payment_type }}{% if receipt.user_name %} · продавец {{ receipt.user_name }}{% endif %}</div>
+    {% if receipt.fiscal and receipt.fiscal.ticket_url %}
+      <p style="margin-top:.75rem">Фискальный чек{% if receipt.fiscal.check_number %} №{{ receipt.fiscal.check_number }}{% endif %}:
+        <a href="{{ receipt.fiscal.ticket_url }}" target="_blank" rel="noopener">открыть на сайте ОФД</a></p>
+    {% endif %}
+    {% if footer %}<div class="foot">{{ footer }}</div>{% endif %}
+  </div>
+  <div class="actions">
+    <button onclick="window.print()">Печать / PDF</button>
+  </div>
+{% endif %}
+</main>
+</body>
+</html>

@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}{{ c.name or c.phone }}{% endblock %}
+{% block content %}
+<p><a href="/customers">← Клиенты</a></p>
+<h2>{{ c.name or 'Клиент без имени' }} <span class="muted" style="font-size:1rem">{{ c.phone }}</span></h2>
+<p class="muted">
+  Покупок: {{ c.history|length }} на {{ c.spent|money }}
+  · согласие {{ c.consent_at.strftime('%d.%m.%Y') }} ({{ 'в Telegram' if c.consent_source == 'telegram' else 'на кассе' }})
+  · {% if c.chat_id %}📲 чеки приходят в Telegram{% else %}в Telegram не подписан{% endif %}
+</p>
+
+<div class="grid">
+<article>
+  <form method="post" action="/customers/{{ c.id }}">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Имя<input name="name" value="{{ c.name or '' }}" maxlength="100"></label>
+    <label>День рождения<input name="birthday" value="{{ c.birthday.strftime('%d.%m.%Y') if c.birthday else '' }}" placeholder="ДД.ММ.ГГГГ"></label>
+    <label>Заметка<input name="note" value="{{ c.note or '' }}" maxlength="255" placeholder="размер кольца, предпочтения"></label>
+    <button type="submit">Сохранить</button>
+  </form>
+</article>
+{% if user.role == 'admin' %}
+<article>
+  <header><strong>Удалить по просьбе клиента</strong></header>
+  <p class="muted">Номер, имя и заметка стираются, Telegram отвязывается. Чеки и продажи остаются в отчётах без привязки к человеку.</p>
+  <form method="post" action="/customers/{{ c.id }}/delete" onsubmit="return confirm('Удалить клиента {{ c.phone }}? Это нельзя отменить.')">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit" class="secondary outline">Удалить клиента</button>
+  </form>
+</article>
+{% endif %}
+</div>
+
+<h3>История покупок</h3>
+{% if c.history %}
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Чек</th><th>Дата</th><th>Товары</th><th>Магазин</th><th class="num">Сумма</th><th>Оплата</th></tr></thead>
+  <tbody>
+  {% for r in c.history %}
+    <tr>
+      <td><a href="/r/{{ r.public_token }}" target="_blank">№{{ r.id }}</a></td>
+      <td style="white-space:nowrap">{{ r.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+      <td>{{ r['items'] or '' }}{% if r.returned %} <span class="badge">возврат {{ r.returned }}</span>{% endif %}</td>
+      <td>{{ r.store or '' }}</td>
+      <td class="num">{{ r.total|money }}</td>
+      <td>{{ r.payment_type }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p class="muted">Покупок пока нет.</p>{% endif %}
+{% endblock %}

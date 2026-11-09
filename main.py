@@ -58,7 +58,9 @@ def register_handlers():
     from user_management import configure_user_management
 
     bot.setup_middleware(SessionMiddleware())
+    from handlers.customer_handler import register_customer_handlers, register_customer_fallback
     register_kassa_login_handlers()  # /start k_<токен> — до обычного /start
+    register_customer_handlers()     # /start r_<токен> (электронный чек), номер клиента — до входа сотрудника
     register_start_handlers()
     register_help_handlers()
     # Навигация регистрируется до операций: срабатывает в любом состоянии и прерывает текущую операцию
@@ -81,6 +83,7 @@ def register_handlers():
     register_web_handlers()
     configure_user_management()
 
+    register_customer_fallback()
     bot.register_message_handler(on_fallback, content_types=['text', 'photo', 'document', 'sticker', 'voice', 'video', 'audio', 'location'])
     bot.register_callback_query_handler(on_stale_callback, func=lambda c: True)
 
@@ -121,7 +124,7 @@ def make_settings_watcher(restart=_restart_process):
 def start_scheduler():
     from utils.common import tz
     from utils.scheduled_jobs import (scheduled_daily_report, send_low_stock_notification, catch_up_daily_reports,
-                                      telegram_heartbeat, fiscal_tick)
+                                      telegram_heartbeat, fiscal_tick, send_customer_receipts)
     scheduler = BackgroundScheduler(timezone=tz())
     soon = datetime.now(tz()) + timedelta(seconds=START_DELAY_SECONDS)
     report_time = _parse_hhmm(config.DAILY_REPORT_TIME, "DAILY_REPORT_TIME")
@@ -140,6 +143,8 @@ def start_scheduler():
     # Очередь чеков Webkassa (при выключенной фискализации задача ничего не делает)
     scheduler.add_job(fiscal_tick, 'interval', seconds=FISCAL_POLL_SECONDS, id='fiscal_queue', coalesce=True,
                       max_instances=1)
+    scheduler.add_job(send_customer_receipts, 'interval', seconds=FISCAL_POLL_SECONDS * 2, id='customer_receipts',
+                      coalesce=True, max_instances=1)
     scheduler.add_job(telegram_heartbeat, 'interval', minutes=HEARTBEAT_MINUTES, id='telegram_heartbeat',
                       next_run_time=soon, coalesce=True, max_instances=1)
     scheduler.add_job(make_settings_watcher(), 'interval', seconds=SETTINGS_POLL_SECONDS, id='settings_watch',

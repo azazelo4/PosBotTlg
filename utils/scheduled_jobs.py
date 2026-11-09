@@ -183,3 +183,32 @@ def fiscal_tick():
     """Задача планировщика: отправить очередь чеков в Webkassa."""
     from fiscal import process_queue
     return process_queue(notify=_notify_fiscal_done, on_error=_notify_fiscal_error)
+
+
+# ---------------------------------------------------------------- электронный чек клиенту
+
+def send_customer_receipts():
+    """Чеки клиентам, подписанным в Telegram: по номеру, который продавец ввёл на кассе."""
+    import customers
+    from telebot.apihelper import ApiTelegramException
+    from handlers.customer_handler import send_receipt
+    from database import get_receipt
+    sent = 0
+    for row in customers.pending_deliveries() or []:
+        receipt = get_receipt(row['id'])
+        if not receipt:
+            continue
+        try:
+            send_receipt(row['chat_id'], receipt)
+        except ApiTelegramException as e:
+            if e.error_code == 403:                  # клиент заблокировал бота — больше не пишем
+                customers.unsubscribe(row['chat_id'])
+                customers.mark_sent(row['id'])
+            logger.warning("Чек №%s клиенту не доставлен: %s", row['id'], e)
+            continue
+        except Exception as e:
+            logger.warning("Чек №%s клиенту не доставлен: %s", row['id'], e)
+            continue
+        customers.mark_sent(row['id'])
+        sent += 1
+    return sent

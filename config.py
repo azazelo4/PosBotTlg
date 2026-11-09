@@ -106,6 +106,9 @@ SETTINGS = (
             help="Выдаёт @BotFather: /newbot → токен вида 123456:ABC…", placeholder="123456789:AA…"),
     Setting("ORG_NAME", "Название ИП / организации", "org", placeholder="ИП Иванов"),
     Setting("ORG_BIN", "ИИН / БИН", "org", kind="bin", help="12 цифр. Понадобится для фискализации."),
+    Setting("RECEIPT_FOOTER", "Текст внизу электронного чека", "org",
+            placeholder="Гарантия на изделия — 12 месяцев. Обмен и возврат — 14 дней с чеком.",
+            help="Гарантия, условия обмена и возврата, контакты. Показывается клиенту в Telegram и на странице чека."),
     Setting("WEB_URL", "Адрес веб-админки", "web", kind="url",
             help="https://ваш-домен — домен должен указывать на IP сервера (A-запись). "
                  "ПК в магазине без белого IP: http://адрес-ПК-в-сети:8000 (касса и админка — только в сети магазина, "
@@ -260,7 +263,7 @@ def source(key):
 
 
 # Начальные значения (до чтения БД): окружение и значения по умолчанию.
-TOKEN = ORG_NAME = ORG_BIN = WEB_URL = TIMEZONE = DAILY_REPORT_TIME = REPORT_CHAT_ID = None
+TOKEN = ORG_NAME = ORG_BIN = RECEIPT_FOOTER = WEB_URL = TIMEZONE = DAILY_REPORT_TIME = REPORT_CHAT_ID = None
 LOW_STOCK_TIME = LOW_STOCK_THRESHOLD = LABEL_WIDTH_MM = LABEL_HEIGHT_MM = LABEL_TITLE = LABEL_BARCODE = None
 IMPORT_MIN_PRICE_PERCENT = FISCAL_ENABLED = WEBKASSA_URL = WEBKASSA_LOGIN = WEBKASSA_PASSWORD = None
 WEBKASSA_API_KEY = SETUP_DONE = SETUP_CODE = None
