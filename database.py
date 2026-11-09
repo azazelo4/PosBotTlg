@@ -642,11 +642,30 @@ def _enqueue_fiscal(cursor, kind, ref_id, store_id, total, user_id):
     return cursor.lastrowid
 
 
-def _record_receipt(cursor, items, user_id, payment_type, store_id=None):
+def _upsert_customer(cursor, phone, name=None, source='kassa', user_id=None):
+    """Клиент по телефону (с согласием на хранение номера). Возвращает id. Имя не затирается пустым."""
+    norm = normalize_phone(phone)
+    if not norm:
+        raise BusinessError("Телефон клиента: введите номер вида +7 701 123 45 67.")
+    name = (name or "").strip()[:100] or None
+    moment = now()
+    cursor.execute("SELECT id, name FROM customers WHERE phone = %s FOR UPDATE", (norm,))
+    row = cursor.fetchone()
+    if row:
+        if name and not row['name']:
+            cursor.execute("UPDATE customers SET name = %s, updated_at = %s WHERE id = %s", (name, moment, row['id']))
+        return row['id']
+    cursor.execute("""INSERT INTO customers (phone, name, consent_at, consent_source, consent_by, created_at, updated_at)
+                      VALUES (%s, %s, %s, %s, %s, %s, %s)""", (norm, name, moment, source, user_id, moment, moment))
+    return cursor.lastrowid
+
+
+def _record_receipt(cursor, items, user_id, payment_type, store_id=None, customer=None):
     """Чек: позиции [(product_id, цена[, код маркировки]), ...] одним платежом. Позиция — строка sales (одна штука).
 
     Проверяет остаток (с учётом одинаковых позиций в чеке), минимальную цену и коды маркировки, списывает товар.
-    Возвращает {'receipt_id', 'sale_ids', 'total'}.
+    customer — {'phone', 'name'}: клиент дал согласие на хранение номера, чек привязывается к нему.
+    Возвращает {'receipt_id', 'sale_ids', 'total', 'fiscal', 'customer_id', 'public_token'}.
     """
     if not items:
         raise BusinessError("Чек пуст — добавьте товар.")
@@ -682,9 +701,14 @@ def _record_receipt(cursor, items, user_id, payment_type, store_id=None):
     receipt_store = stores.pop() or store_id
     total = sum(price for _, price, _ in items)
     moment = now()
-    cursor.execute("""INSERT INTO receipts (store_id, user_id, created_at, total, items_count, payment_type, public_token)
-                      VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-                   (receipt_store, user_id, moment, total, len(items), payment_type, secrets.token_hex(16)))
+    customer_id = None
+    if customer and (customer.get('phone') or '').strip():
+        customer_id = _upsert_customer(cursor, customer['phone'], customer.get('name'), 'kassa', user_id)
+    token = secrets.token_hex(16)
+    cursor.execute("""INSERT INTO receipts (store_id, user_id, created_at, total, items_count, payment_type, public_token,
+                                            customer_id)
+                      VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                   (receipt_store, user_id, moment, total, len(items), payment_type, token, customer_id))
     receipt_id = cursor.lastrowid
     sale_ids = []
     for (product_id, price, _), code in zip(items, codes):
@@ -701,13 +725,14 @@ def _record_receipt(cursor, items, user_id, payment_type, store_id=None):
     for product_id, count in need.items():
         cursor.execute("UPDATE products SET quantity = quantity - %s WHERE id = %s", (count, product_id))
     fiscal_id = _enqueue_fiscal(cursor, 'sale', receipt_id, receipt_store, total, user_id)
-    return {"receipt_id": receipt_id, "sale_ids": sale_ids, "total": total, "fiscal": bool(fiscal_id)}
+    return {"receipt_id": receipt_id, "sale_ids": sale_ids, "total": total, "fiscal": bool(fiscal_id),
+            "customer_id": customer_id, "public_token": token}
 
 
 @with_transaction
-def record_receipt(cursor, items, user_id, payment_type, store_id=None):
-    """(True, {'receipt_id', 'sale_ids', 'total'}) или (False, причина)."""
-    return True, _record_receipt(cursor, items, user_id, payment_type, store_id)
+def record_receipt(cursor, items, user_id, payment_type, store_id=None, customer=None):
+    """(True, {'receipt_id', 'sale_ids', 'total', …}) или (False, причина)."""
+    return True, _record_receipt(cursor, items, user_id, payment_type, store_id, customer)
 
 
 @with_transaction
@@ -718,17 +743,29 @@ def record_sale(cursor, product_id, product_article, user_id, sale_price, paymen
 
 
 @with_connection
-def get_receipt(cursor, receipt_id):
-    cursor.execute("""SELECT r.*, st.name AS store, u.name AS user_name FROM receipts r
-                      LEFT JOIN stores st ON st.id = r.store_id LEFT JOIN users u ON u.id = r.user_id
-                      WHERE r.id = %s""", (receipt_id,))
+def get_receipt(cursor, receipt_id=None, token=None):
+    """Чек с позициями — по id или по публичному токену (электронный чек)."""
+    where, value = ("r.public_token = %s", token) if token else ("r.id = %s", receipt_id)
+    if value is None:
+        return None
+    cursor.execute(f"""SELECT r.*, st.name AS store, st.address AS store_address, u.name AS user_name,
+                              c.phone AS customer_phone, c.name AS customer_name, c.chat_id AS customer_chat
+                       FROM receipts r
+                       LEFT JOIN stores st ON st.id = r.store_id LEFT JOIN users u ON u.id = r.user_id
+                       LEFT JOIN customers c ON c.id = r.customer_id
+                       WHERE {where}""", (value,))
     receipt = cursor.fetchone()
     if receipt:
         cursor.execute("""SELECT s.id AS sale_id, s.sold_price, s.list_price, p.article_number, p.model, p.product_type,
-                                 p.metal_type, p.fineness, p.weight, p.size, p.inserts
-                          FROM sales s JOIN products p ON p.id = s.product_id WHERE s.receipt_id = %s ORDER BY s.id""",
-                       (receipt_id,))
+                                 p.metal_type, p.fineness, p.weight, p.size, p.inserts, r.id AS return_id,
+                                 r.return_price
+                          FROM sales s JOIN products p ON p.id = s.product_id
+                          LEFT JOIN returns r ON r.original_sale_id = s.id
+                          WHERE s.receipt_id = %s ORDER BY s.id""", (receipt['id'],))
         receipt['items'] = cursor.fetchall()
+        cursor.execute("""SELECT status, check_number, ticket_url FROM fiscal_receipts WHERE kind = 'sale' AND ref_id = %s
+                          ORDER BY id DESC LIMIT 1""", (receipt['id'],))
+        receipt['fiscal'] = cursor.fetchone()
     return receipt
 
 

@@ -128,6 +128,12 @@
     @media (max-height: 820px) { #osk .k { height: 44px; font-size: 19px; } }
 
     /* ---------- подтверждение */
+    a.btn { text-decoration: none; display: inline-flex; align-items: center; }
+    .receipt-qr { display: flex; gap: 16px; align-items: center; margin: 8px 0 12px; }
+    .receipt-qr #receipt-qr svg { width: 180px; height: 180px; background: #fff; border-radius: 8px; flex: none; }
+    .customer { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; margin: 6px 0 4px; }
+    .customer > div { flex: 1 1 180px; }
+    .customer label.consent { flex-basis: 100%; display: flex; gap: 8px; align-items: center; margin: 0; }
     dialog { border: 0; border-radius: 14px; padding: 24px; max-width: 520px; width: 92%; background: var(--panel); color: var(--text); }
     dialog::backdrop { background: rgba(0,0,0,.45); }
     dialog h3 { margin: 0 0 12px; font-size: 20px; }
@@ -210,6 +216,20 @@
     <button class="btn" id="confirm-cancel">Отмена <kbd>Esc</kbd></button>
   </div>
   <div class="msg err hidden" id="confirm-err"></div>
+</dialog>
+<dialog id="receipt-dlg">
+  <h3 id="receipt-title">Чек клиенту</h3>
+  <div id="receipt-auto" class="msg ok hidden">📲 Клиент подписан — чек придёт ему в Telegram сам.</div>
+  <div class="receipt-qr">
+    <div id="receipt-qr"></div>
+    <div class="muted">Покажите клиенту: он сканирует QR камерой телефона и получает чек в Telegram,
+      а потом может подписаться на следующие чеки.</div>
+  </div>
+  <div class="actions">
+    <a class="btn hidden" id="receipt-wa" target="_blank" rel="noopener">WhatsApp</a>
+    <a class="btn" id="receipt-print" target="_blank">Печать чека</a>
+    <button class="btn primary" id="receipt-close">Готово <kbd>Esc</kbd></button>
+  </div>
 </dialog>
 <div id="toast"></div>
 
@@ -365,7 +385,7 @@ function confirmAndRun(title, lines, run, done) {
       dlg.close();
       toast("✅ " + r.text, "ok");
       refreshSide();
-      done();
+      done(r);
     } catch (e) {
       err.textContent = e.message; err.classList.remove("hidden"); ok.disabled = false;
     }
@@ -373,6 +393,24 @@ function confirmAndRun(title, lines, run, done) {
   $("#confirm-cancel").onclick = () => dlg.close();
   dlg.showModal();
   ok.focus();
+}
+
+function showReceipt(rc) {
+  // После продажи: QR на бота, WhatsApp по номеру клиента, печать чека
+  if (!rc) return;
+  const dlg = $("#receipt-dlg");
+  $("#receipt-title").textContent = `Чек №${rc.id} клиенту`;
+  $("#receipt-auto").classList.toggle("hidden", !rc.telegram_auto);
+  $("#receipt-qr").innerHTML = rc.qr || "";
+  $(".receipt-qr", dlg).classList.toggle("hidden", !rc.qr || rc.telegram_auto);
+  const wa = $("#receipt-wa");
+  wa.classList.toggle("hidden", !rc.whatsapp);
+  if (rc.whatsapp) wa.href = rc.whatsapp;
+  $("#receipt-print").href = rc.url;
+  $("#receipt-close").onclick = () => dlg.close();
+  dlg.onclose = () => { const a = document.querySelector("#article"); if (a) a.focus(); };
+  dlg.showModal();
+  $("#receipt-close").focus();
 }
 
 let toastTimer = null;
@@ -437,6 +475,14 @@ VIEWS.sale = root => {
     <div id="form" class="hidden">
       <div class="total-line" id="total"></div>
       <label>Оплата <span class="muted">— клавиши 1–${me.payment_types.length}</span></label><div class="choices" id="pay"></div>
+      <details id="cust-box"><summary class="muted">Клиент — необязательно: чек в Telegram или WhatsApp и история покупок</summary>
+        <div class="customer">
+          <div><label for="cust-phone">Телефон</label><input type="text" id="cust-phone" inputmode="tel" autocomplete="off" placeholder="+7 701 123 45 67"></div>
+          <div><label for="cust-name">Имя</label><input type="text" id="cust-name" data-osk="ru" autocomplete="off" placeholder="Айгерим"></div>
+          <label class="consent hidden" id="cust-consent-row"><input type="checkbox" id="cust-consent">
+            Клиент согласен, что магазин сохранит его номер и историю покупок</label>
+        </div>
+      </details>
       <div class="actions"><button class="btn primary big" id="go">Оформить чек <kbd>Enter</kbd></button>
         <button class="btn" id="reset">Очистить <kbd>Esc</kbd></button></div>
     </div>`;
@@ -471,7 +517,12 @@ VIEWS.sale = root => {
     updateTotal();
     if (focusIndex !== null) { const inp = $(`#cart input[data-i="${focusIndex}"]`, root); inp.focus(); inp.select(); }
   };
-  const reset = () => { cart = []; payment = null; article.value = ""; render(); choices($("#pay", root), me.payment_types, null, v => { payment = v; showErr(root, ""); }); showErr(root, ""); article.focus(); };
+  const phone = $("#cust-phone", root), consent = $("#cust-consent", root);
+  phone.oninput = () => $("#cust-consent-row", root).classList.toggle("hidden", !phone.value.trim());
+  const customer = () => phone.value.trim()
+    ? {phone: phone.value.trim(), name: $("#cust-name", root).value.trim(), consent: consent.checked} : null;
+  const reset = () => { cart = []; payment = null; article.value = ""; phone.value = ""; $("#cust-name", root).value = "";
+    consent.checked = false; $("#cust-consent-row", root).classList.add("hidden"); $("#cust-box", root).open = false; render(); choices($("#pay", root), me.payment_types, null, v => { payment = v; showErr(root, ""); }); showErr(root, ""); article.focus(); };
   const add = async () => {
     const a = article.value.trim(); if (!a) return;
     showErr(root, "");
@@ -508,6 +559,11 @@ VIEWS.sale = root => {
       showErr(root, "Выберите способ оплаты (клавиши 1–" + me.payment_types.length + ").");
       document.activeElement.blur(); return;
     }
+    const cust = customer();
+    if (cust && !cust.consent) {
+      $("#cust-box", root).open = true; consent.focus();
+      return showErr(root, "Спросите у клиента согласие на хранение номера и отметьте его — или сотрите номер.");
+    }
     showErr(root, "");
     const sum = items.reduce((s, it) => s + it.price, 0);
     confirmAndRun("Подтвердите продажу", [
@@ -515,7 +571,9 @@ VIEWS.sale = root => {
         (it.price < it.product.price ? ` <span class="muted">(скидка ${fmt(it.product.price - it.price)})</span>` : "")),
       `Итого: <b class="num">${fmt(sum)}</b>${items.length > 1 ? ` (${items.length} поз.)` : ""}`,
       `Оплата: <b>${esc(payment)}</b>`,
-    ], () => api("sale", {items: items.map(it => ({article: it.article, price: it.price, code: it.code})), payment}), reset);
+      cust ? `Клиент: <b>${esc(cust.phone)}</b>${cust.name ? " · " + esc(cust.name) : ""}` : "",
+    ], () => api("sale", {items: items.map(it => ({article: it.article, price: it.price, code: it.code})), payment, customer: cust}),
+    r => { reset(); showReceipt(r.receipt); });
   };
   $("#find", root).onclick = add;
   article.onkeydown = e => {

@@ -22,11 +22,13 @@ from starlette.middleware.sessions import SessionMiddleware
 
 import config
 import demo_data
+import customers
 import fiscal
 import marking
 import settings_store
 from buttons import PAYMENT_TYPES, ROLE_TITLES
-from database import (get_job_run, marking_required, ensure_admin, get_connection, get_stores, get_store_counts, create_store, update_store, set_user_store, init_pool, get_user_by_id, get_user_by_chat_id, search_products, get_product_by_id,
+from utils import receipt_text
+from database import (get_receipt, get_job_run, marking_required, ensure_admin, get_connection, get_stores, get_store_counts, create_store, update_store, set_user_store, init_pool, get_user_by_id, get_user_by_chat_id, search_products, get_product_by_id,
                       get_product_by_article, get_products_by_articles, get_products_for_labels, add_product_to_db,
                       update_product, get_stock_report_data, get_low_stock_products, get_period_operations,
                       record_sale, get_today_sales_by_user, get_all_users, add_user_to_db, change_user_role_function,
@@ -386,6 +388,55 @@ def _marking_page(request, user, **ctx):
     store = ctx.pop("store", None)
     return render(request, "marking.html", user, stores=stores, store=store,
                   products=marking.marked_products(store) or [], **ctx)
+
+
+# ---------------------------------------------------------------- электронный чек и клиенты
+
+@app.get("/r/{token}", response_class=HTMLResponse)
+def public_receipt(request: Request, token: str):
+    """Электронный чек для покупателя: без входа, по случайному токену из ссылки."""
+    receipt = get_receipt(token=token) if len(token) == 32 and token.isalnum() else None
+    if not receipt:
+        return templates.TemplateResponse(request, "receipt_public.html", {"receipt": None, "user": None},
+                                          status_code=404)
+    return templates.TemplateResponse(request, "receipt_public.html", {
+        "receipt": receipt, "user": None, "org": config.ORG_NAME, "bin": config.ORG_BIN, "footer": config.RECEIPT_FOOTER,
+        "details": receipt_text.item_details}, headers={"X-Robots-Tag": "noindex", "Cache-Control": "no-store"})
+
+
+@app.get("/customers", response_class=HTMLResponse)
+def customers_page(request: Request, q: str = "", user=Depends(current_user)):
+    return render(request, "customers.html", user, rows=customers.search(q) or [], q=q)
+
+
+@app.get("/customers/{customer_id}", response_class=HTMLResponse)
+def customer_page(request: Request, customer_id: int, user=Depends(current_user)):
+    customer = customers.get(customer_id)
+    if not customer:
+        raise HTTPException(404, "Клиент не найден.")
+    return render(request, "customer.html", user, c=customer)
+
+
+@app.post("/customers/{customer_id}")
+def customer_save(request: Request, customer_id: int, name: str = Form(""), birthday: str = Form(""),
+                  note: str = Form(""), csrf: str = Form(""), user=Depends(current_user)):
+    check_csrf(request, csrf)
+    born = parse_date(birthday) if birthday.strip() else None
+    if birthday.strip() and not born:
+        flash(request, "Дата рождения — в формате ДД.ММ.ГГГГ.", "error")
+        return RedirectResponse(f"/customers/{customer_id}", status_code=303)
+    ok, result = customers.update(customer_id, name, born, note)
+    flash(request, "Сохранено." if ok else result, "ok" if ok else "error")
+    return RedirectResponse(f"/customers/{customer_id}", status_code=303)
+
+
+@app.post("/customers/{customer_id}/delete")
+def customer_delete(request: Request, customer_id: int, csrf: str = Form(""), user=Depends(admin_only)):
+    check_csrf(request, csrf)
+    ok, result = customers.delete(customer_id, user['id'])
+    flash(request, "Клиент удалён: номер и имя стёрты, чеки остались без привязки." if ok else result,
+          "ok" if ok else "error")
+    return RedirectResponse("/customers" if ok else f"/customers/{customer_id}", status_code=303)
 
 
 # ---------------------------------------------------------------- фискализация

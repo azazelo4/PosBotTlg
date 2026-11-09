@@ -130,6 +130,8 @@ def on_confirm(message):
         logger.info("Chat %s: чек #%s, %s поз. на %s", chat_id, result['receipt_id'], len(items), result['total'])
         what = f"{len(items)} поз., " if len(items) > 1 else ""
         cash_menu(chat_id, f"✅ Продажа оформлена, чек №{result['receipt_id']}: {what}{money(result['total'])}, {op['payment']}.")
+        from handlers.customer_handler import seller_qr_markup
+        bot.send_message(chat_id, "Электронный чек — в Telegram клиента:", reply_markup=seller_qr_markup(result['receipt_id']))
     else:
         cash_menu(chat_id, f"❌ Продажа не оформлена: {result}")
 

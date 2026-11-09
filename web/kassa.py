@@ -20,13 +20,14 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 import config
 from buttons import PAYMENT_TYPES, ROLE_TITLES
-from database import (get_user_by_id, get_stores, get_product_by_article, record_receipt, MAX_RECEIPT_ITEMS,
+from database import (get_user_by_id, get_stores, get_product_by_article, record_receipt, MAX_RECEIPT_ITEMS, get_receipt,
                       find_by_mark_code, marking_required, SELLABLE_CODE, CODE_STATUS_TITLES, get_sales_for_return,
                       get_sale_details_by_id, create_return_record, create_buyback_record, create_trade_in_record,
                       create_cash_withdrawal_record, get_period_operations, create_kassa_login, consume_kassa_login)
 from schema import METAL_TYPES
 from utils import mark_codes
-from utils.common import now, today, day_bounds, parse_money, parse_float, money
+from utils.common import now, today, day_bounds, parse_money, parse_float, money, normalize_phone
+from utils import receipt_text
 from utils.labels import details_line
 from utils.report_generator import build_summary
 
@@ -326,11 +327,40 @@ async def sale(request: Request, user=Depends(kassa_user), _=Depends(same_origin
         items.append((p['id'], price, code))
         names.append(p['model'] or p['article_number'])
     payment = _payment(body.get("payment"))
-    result = _result(*record_receipt(items, user['id'], payment, kassa_store_id(request, user)), "Продажа не оформлена")
+    customer = _customer(body.get("customer"))
+    result = _result(*record_receipt(items, user['id'], payment, kassa_store_id(request, user), customer),
+                     "Продажа не оформлена")
     logger.info("Касса ПК: чек #%s, %s поз. на %s (%s)", result['receipt_id'], len(items), result['total'], user['id'])
     what = names[0] if len(names) == 1 else f"{len(names)} поз."
     return {"id": result['receipt_id'], "sale_ids": result['sale_ids'],
-            "text": f"Чек №{result['receipt_id']}: {what}, {money(result['total'])}, {payment}"}
+            "text": f"Чек №{result['receipt_id']}: {what}, {money(result['total'])}, {payment}",
+            "receipt": receipt_delivery(result['receipt_id'], customer)}
+
+
+def _customer(raw):
+    """Телефон клиента из чека — только с отмеченным согласием на хранение номера."""
+    raw = raw if isinstance(raw, dict) else {}
+    phone = str(raw.get("phone") or "").strip()
+    if not phone:
+        return None
+    if not normalize_phone(phone):
+        raise HTTPException(400, "Телефон клиента: введите номер вида +7 701 123 45 67 или уберите его.")
+    if not raw.get("consent"):
+        raise HTTPException(400, "Спросите у клиента согласие на хранение номера и отметьте его — или уберите номер.")
+    return {"phone": phone, "name": str(raw.get("name") or "").strip()[:100] or None}
+
+
+def receipt_delivery(receipt_id, customer=None):
+    """Как отдать чек клиенту: QR на бота, WhatsApp, страница для печати."""
+    receipt = get_receipt(receipt_id)
+    if not receipt:
+        return None
+    tg = receipt_text.bot_link(bot_username(), receipt)
+    phone = (customer or {}).get("phone")
+    return {"id": receipt['id'], "url": f"/r/{receipt['public_token']}", "public_url": receipt_text.public_url(receipt),
+            "telegram": tg, "qr": qr_svg(tg) if tg else None,
+            "whatsapp": receipt_text.whatsapp_url(normalize_phone(phone), receipt) if phone else None,
+            "telegram_auto": bool(receipt.get('customer_chat'))}
 
 
 @router.get("/sales-for-return")

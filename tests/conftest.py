@@ -43,6 +43,7 @@ class FakeTelegram:
         self.calls = []
         self.documents = []
         self.menu_buttons = {}
+        self.photos = []
 
     def _record(self, kind, chat_id, text=None, markup=None, **extra):
         if not self.online:
@@ -87,6 +88,10 @@ class FakeTelegram:
 
     def download_file(self, file_path):
         return self.files[file_path]
+
+    def send_photo(self, chat_id, photo, caption=None, reply_markup=None, **kw):
+        self.photos.append(SimpleNamespace(chat_id=chat_id, data=photo))
+        return self._record("photo", chat_id, caption, reply_markup)
 
     def send_document(self, chat_id, document, caption=None, reply_markup=None, **kw):
         f = getattr(document, 'file', document)
@@ -189,7 +194,8 @@ def _reset_db():
 def fake():
     tg = FakeTelegram()
     for name in ("send_message", "edit_message_text", "edit_message_reply_markup", "answer_callback_query",
-                 "send_chat_action", "delete_message", "send_document", "get_file", "download_file", "set_chat_menu_button", "get_me"):
+                 "send_chat_action", "delete_message", "send_document", "get_file", "download_file", "set_chat_menu_button", "get_me",
+                 "send_photo"):
         setattr(bot, name, getattr(tg, name))
     bot.threaded = False
     from database import init_pool
@@ -203,7 +209,7 @@ def fake():
 @pytest.fixture
 def tg(fake):
     """Чистые данные перед каждым тестом: пользователи трёх ролей и несколько товаров."""
-    for table in ("returns", "trade_ins", "buybacks", "cash_withdrawals", "sales", "receipts", "fiscal_receipts", "product_codes", "products", "users", "stores",
+    for table in ("returns", "trade_ins", "buybacks", "cash_withdrawals", "sales", "receipts", "customers", "fiscal_receipts", "product_codes", "products", "users", "stores",
                   "settings", "settings_log", "job_runs"):
         db_query(f"DELETE FROM `{table}`")
     db_query("INSERT INTO stores (id, name, sort_order) VALUES (1, 'ЦУМ', 0), (2, 'Отау Сауда', 1)")

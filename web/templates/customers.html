@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Клиенты{% endblock %}
+{% block content %}
+<h2>Клиенты <span class="muted">({{ rows|length }}{% if rows|length >= 200 %}+{% endif %})</span></h2>
+<p class="muted">Покупатели, согласившиеся на хранение номера: продавец отметил согласие на кассе или клиент сам
+  поделился номером в Telegram. Значок 📲 — чеки приходят клиенту в Telegram автоматически.</p>
+<form method="get" class="row-actions" style="margin-bottom:1rem">
+  <input type="search" name="q" value="{{ q }}" placeholder="Телефон или имя" style="max-width:22rem" autocomplete="off">
+  <button type="submit">Найти</button>
+</form>
+{% if rows %}
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Клиент</th><th>Телефон</th><th class="num">Покупок</th><th class="num">На сумму</th><th>Последняя</th></tr></thead>
+  <tbody>
+  {% for c in rows %}
+    <tr>
+      <td><a href="/customers/{{ c.id }}">{{ c.name or 'без имени' }}</a>{% if c.chat_id %} <span title="Чеки приходят в Telegram">📲</span>{% endif %}</td>
+      <td style="white-space:nowrap">{{ c.phone }}</td>
+      <td class="num">{{ c.receipts }}</td>
+      <td class="num">{{ c.spent|money }}</td>
+      <td>{{ c.last_at.strftime('%d.%m.%Y') if c.last_at else '—' }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="muted">{% if q %}Никого не нашли.{% else %}Пока нет клиентов. Номер клиента вводится на кассе при продаже, либо клиент
+  сканирует QR чека и сам подписывается в Telegram.{% endif %}</p>
+{% endif %}
+{% endblock %}
