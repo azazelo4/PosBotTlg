@@ -100,6 +100,21 @@ default POSBOT_MASTER_KEY "$(fernet_key)"
 default WEB_SECRET "$(random_secret)"
 default TZ Asia/Almaty
 
+# --- режим установки: server (облачный сервер с доменом) или local (ПК в магазине без белого IP)
+default POSBOT_MODE server
+case "$(get POSBOT_MODE)" in
+  local)
+    set_kv WEB_BIND 0.0.0.0
+    profiles="" ;;
+  *)
+    set_kv WEB_BIND 127.0.0.1
+    profiles="https" ;;
+esac
+if [ -n "$(get TUNNEL_TOKEN)" ]; then
+  profiles="${profiles:+$profiles,}tunnel"
+fi
+set_kv COMPOSE_PROFILES "$profiles"
+
 # Подключение приложения к БД — всегда из параметров контейнера MySQL
 if [ -z "$(get DB_HOST)" ] || [ "$(get DB_HOST)" = "db" ]; then
   set_kv DB_HOST db

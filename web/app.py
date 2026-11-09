@@ -3,6 +3,7 @@
 Запуск: uvicorn web.app:app --host 0.0.0.0 --port 8000 --proxy-headers
 """
 import logging
+import os
 import re
 import secrets
 import time
@@ -23,7 +24,7 @@ import config
 import demo_data
 import settings_store
 from buttons import PAYMENT_TYPES, ROLE_TITLES
-from database import (ensure_admin, get_connection, get_stores, get_store_counts, create_store, update_store, set_user_store, init_pool, get_user_by_id, get_user_by_chat_id, search_products, get_product_by_id,
+from database import (get_job_run, ensure_admin, get_connection, get_stores, get_store_counts, create_store, update_store, set_user_store, init_pool, get_user_by_id, get_user_by_chat_id, search_products, get_product_by_id,
                       get_product_by_article, get_products_by_articles, get_products_for_labels, add_product_to_db,
                       update_product, get_stock_report_data, get_low_stock_products, get_period_operations,
                       record_sale, get_today_sales_by_user, get_all_users, add_user_to_db, change_user_role_function,
@@ -221,7 +222,12 @@ def help_page(request: Request, slug: str):
 
 @app.get("/health")
 def health():
-    return {"ok": True, "configured": settings_store.is_configured(), "version": config.VERSION}
+    """Состояние для установщика, `posbot status` и мониторинга. telegram_seconds_ago — когда бот последний раз
+    достучался до Telegram (None — ещё ни разу или БД недоступна)."""
+    seen = get_job_run("telegram")
+    ago = int((now() - seen['last_run_at']).total_seconds()) if seen and seen.get('last_run_at') else None
+    return {"ok": True, "configured": settings_store.is_configured(), "version": config.VERSION,
+            "mode": config.INSTALL_MODE, "web_url": config.WEB_URL or "", "telegram_seconds_ago": ago}
 
 
 # ---------------------------------------------------------------- дашборд
@@ -649,7 +655,13 @@ def _setup_blocked(ip):
 
 
 def _suggest_web_url(request: Request):
-    host = (request.headers.get("host") or "").split(":")[0]
+    host_header = request.headers.get("host") or ""
+    host = host_header.split(":")[0]
+    if config.LOCAL_MODE:
+        # ПК в магазине: адрес в локальной сети. Открыли мастер на самом ПК (localhost) — адрес от установщика
+        if host in ("localhost", "127.0.0.1", "testserver") or not host:
+            return os.environ.get("POSBOT_LAN_URL", "")
+        return f"http://{host_header}"
     if not host or host in ("localhost", "testserver") or re.match(r"^[\d.]+$", host):
         return ""
     return f"https://{host}"

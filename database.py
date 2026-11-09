@@ -822,3 +822,21 @@ def get_period_operations(cursor, start_dt, end_dt, store_id=None):
         WHERE w.withdrawal_date >= %s AND w.withdrawal_date < %s{STORE_FILTER}
         ORDER BY w.withdrawal_date, w.id""", "w")
     return result
+
+
+# ---------------------------------------------------------------- отметки фоновых задач
+
+@with_connection
+def get_job_run(cursor, name):
+    cursor.execute("SELECT * FROM job_runs WHERE name = %s", (name,))
+    return cursor.fetchone()
+
+
+@with_transaction
+def mark_job_run(cursor, name, for_date=None):
+    """Отметить выполнение задачи. for_date — за какой день (для отчётов); None не затирает прежний."""
+    cursor.execute("""INSERT INTO job_runs (name, last_run_at, last_for_date) VALUES (%s, %s, %s)
+                      ON DUPLICATE KEY UPDATE last_run_at = VALUES(last_run_at),
+                                              last_for_date = COALESCE(VALUES(last_for_date), last_for_date)""",
+                   (name, now(), for_date))
+    return True, None

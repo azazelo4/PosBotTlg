@@ -13,6 +13,7 @@ import logging
 import os
 import sys
 import time
+from datetime import datetime, timedelta
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -30,6 +31,8 @@ logger = logging.getLogger("posbot")
 
 SETTINGS_POLL_SECONDS = 30
 TOKEN_WAIT_SECONDS = 10
+START_DELAY_SECONDS = 20       # досылка отчётов и проверка связи — вскоре после запуска, не задерживая его
+HEARTBEAT_MINUTES = 5
 
 
 def register_handlers():
@@ -116,18 +119,25 @@ def make_settings_watcher(restart=_restart_process):
 
 def start_scheduler():
     from utils.common import tz
-    from utils.scheduled_jobs import send_daily_report, send_low_stock_notification
+    from utils.scheduled_jobs import (scheduled_daily_report, send_low_stock_notification, catch_up_daily_reports,
+                                      telegram_heartbeat)
     scheduler = BackgroundScheduler(timezone=tz())
+    soon = datetime.now(tz()) + timedelta(seconds=START_DELAY_SECONDS)
     report_time = _parse_hhmm(config.DAILY_REPORT_TIME, "DAILY_REPORT_TIME")
     if report_time:
-        scheduler.add_job(send_daily_report, 'cron', hour=report_time[0], minute=report_time[1], id='daily_report',
+        scheduler.add_job(scheduled_daily_report, 'cron', hour=report_time[0], minute=report_time[1], id='daily_report',
                           misfire_grace_time=3600, coalesce=True)
+        # ПК мог быть выключен в момент отчёта: досылаем после запуска и потом каждые полчаса (если не было связи)
+        scheduler.add_job(catch_up_daily_reports, 'interval', args=[report_time], minutes=30, id='report_catch_up',
+                          next_run_time=soon, coalesce=True, max_instances=1)
         logger.info("Ежедневный отчёт: %02d:%02d (%s)", *report_time, config.TIMEZONE)
     stock_time = _parse_hhmm(config.LOW_STOCK_TIME, "LOW_STOCK_TIME")
     if stock_time:
         scheduler.add_job(send_low_stock_notification, 'cron', hour=stock_time[0], minute=stock_time[1], id='low_stock',
                           misfire_grace_time=3600, coalesce=True)
         logger.info("Уведомление о низком остатке: %02d:%02d (%s)", *stock_time, config.TIMEZONE)
+    scheduler.add_job(telegram_heartbeat, 'interval', minutes=HEARTBEAT_MINUTES, id='telegram_heartbeat',
+                      next_run_time=soon, coalesce=True, max_instances=1)
     scheduler.add_job(make_settings_watcher(), 'interval', seconds=SETTINGS_POLL_SECONDS, id='settings_watch',
                       coalesce=True, max_instances=1)
     scheduler.start()

@@ -45,6 +45,8 @@ class FakeTelegram:
         self.menu_buttons = {}
 
     def _record(self, kind, chat_id, text=None, markup=None, **extra):
+        if not self.online:
+            raise ConnectionError("нет связи с api.telegram.org")
         self.calls.append(SimpleNamespace(kind=kind, chat_id=chat_id, text=text, markup=markup, **extra))
         return SimpleNamespace(message_id=next(_ids), chat=SimpleNamespace(id=chat_id))
 
@@ -64,6 +66,13 @@ class FakeTelegram:
     def set_chat_menu_button(self, chat_id=None, menu_button=None, **kw):
         self.menu_buttons[chat_id] = menu_button
         return True
+
+    online = True       # False — «нет интернета»: вызовы Telegram падают
+
+    def get_me(self):
+        if not self.online:
+            raise ConnectionError("нет связи с api.telegram.org")
+        return SimpleNamespace(id=1, username="pos_test_bot")
 
     def send_chat_action(self, chat_id, action, **kw):
         return True
@@ -180,7 +189,7 @@ def _reset_db():
 def fake():
     tg = FakeTelegram()
     for name in ("send_message", "edit_message_text", "edit_message_reply_markup", "answer_callback_query",
-                 "send_chat_action", "delete_message", "send_document", "get_file", "download_file", "set_chat_menu_button"):
+                 "send_chat_action", "delete_message", "send_document", "get_file", "download_file", "set_chat_menu_button", "get_me"):
         setattr(bot, name, getattr(tg, name))
     bot.threaded = False
     from database import init_pool
@@ -195,7 +204,7 @@ def fake():
 def tg(fake):
     """Чистые данные перед каждым тестом: пользователи трёх ролей и несколько товаров."""
     for table in ("returns", "trade_ins", "buybacks", "cash_withdrawals", "sales", "receipts", "products", "users", "stores",
-                  "settings", "settings_log"):
+                  "settings", "settings_log", "job_runs"):
         db_query(f"DELETE FROM `{table}`")
     db_query("INSERT INTO stores (id, name, sort_order) VALUES (1, 'ЦУМ', 0), (2, 'Отау Сауда', 1)")
     user_data.clear()

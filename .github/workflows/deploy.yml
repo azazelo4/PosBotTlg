@@ -91,9 +91,77 @@ jobs:
         if: failure()
         run: sudo docker compose -f /opt/posbot/docker-compose.yml logs --tail=100 || true
 
+  install-local:
+    name: Установка на ПК без белого IP
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Сборка образа
+        run: docker build --build-arg POSBOT_VERSION=ci -t posbot-local:ci .
+
+      - name: Установка --local (без домена, Caddy и портов 80/443)
+        run: sudo bash deploy/install.sh --yes --skip-system --no-pull --image posbot-local --version ci --local | tee install.log
+
+      - name: Проверка результата
+        run: |
+          set -x
+          ip=$(ip -4 route get 1.1.1.1 | sed -n 's/.* src \([0-9.]*\).*/\1/p')
+          grep -q "http://$ip:8000/setup" install.log
+          grep -Eq "Код настройки: [A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}" install.log
+          grep -q "копия бэкапов вне ПК НЕ настроена" install.log
+          curl -fsS "http://$ip:8000/health" | grep -q '"mode":"local"'
+          curl -fsS "http://$ip:8000/setup" | grep -q "value=\"http://$ip:8000\""
+          sudo grep -qx "COMPOSE_PROFILES=" /opt/posbot/.env
+          [ -z "$(sudo docker ps -q --filter name=caddy)" ]
+          ! sudo ss -ltn | grep -Eq ':(80|443) '
+          sudo posbot status | tee status.txt
+          grep -q "Режим: local" status.txt
+          grep -q "Копия вне ПК: НЕ НАСТРОЕНА" status.txt
+          ! sudo posbot status --check >/dev/null
+
+      - name: Копия бэкапа вне ПК по SSH
+        run: |
+          set -x
+          sudo systemctl start ssh || sudo systemctl start sshd
+          sudo posbot offsite "ssh://$USER@127.0.0.1/tmp/offsite" | tee offsite.log
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          sudo cat /root/.ssh/posbot_backup.pub >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys
+          sudo posbot backup
+          ls /tmp/offsite/*.sql.gz
+          sudo posbot status | tee status.txt
+          grep -q "Копия вне ПК: ssh://$USER@127.0.0.1/tmp/offsite, последняя только что" status.txt
+          # Свежий бэкап есть — --if-stale ничего не делает
+          n=$(sudo ls /opt/pos-bot-backups/*.sql.gz | wc -l)
+          sudo APP_DIR=/opt/posbot /opt/posbot/deploy/backup.sh --if-stale 20
+          [ "$n" = "$(sudo ls /opt/pos-bot-backups/*.sql.gz | wc -l)" ]
+
+      - name: Туннель Cloudflare включается и выключается
+        run: |
+          set -x
+          sudo posbot tunnel cloudflare ci-fake-token
+          sudo grep -qx "COMPOSE_PROFILES=tunnel" /opt/posbot/.env
+          sudo docker compose -f /opt/posbot/docker-compose.yml config --services | grep -qx tunnel
+          sudo posbot tunnel off
+          sudo grep -qx "COMPOSE_PROFILES=" /opt/posbot/.env
+          [ -z "$(sudo docker ps -q --filter name=tunnel)" ]
+
+      - name: Повторная установка сохраняет режим и пароли
+        run: |
+          before=$(sudo grep -E '^(MYSQL_PASSWORD|POSBOT_MASTER_KEY)=' /opt/posbot/.env)
+          sudo bash deploy/install.sh --yes --skip-system --no-pull --image posbot-local --version ci
+          [ "$before" = "$(sudo grep -E '^(MYSQL_PASSWORD|POSBOT_MASTER_KEY)=' /opt/posbot/.env)" ]
+          curl -fsS http://127.0.0.1:8000/health | grep -q '"mode":"local"'
+          sudo POSBOT_NO_PULL=1 posbot update ci
+          sudo grep -qx "POSBOT_MODE=local" /opt/posbot/.env
+
+      - name: Логи при ошибке
+        if: failure()
+        run: sudo docker compose -f /opt/posbot/docker-compose.yml logs --tail=100 || true
+
   publish:
     name: Публикация образа
-    needs: [check, test, install]
+    needs: [check, test, install, install-local]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
