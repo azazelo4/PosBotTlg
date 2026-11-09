@@ -15,9 +15,10 @@ from contextlib import contextmanager
 from datetime import timedelta
 
 import config
-from database import with_connection, with_transaction, get_connection, BusinessError
+from database import with_connection, with_transaction, get_connection, BusinessError, get_job_run, mark_job_run
 from utils.common import now
 from utils.webkassa import (WebkassaClient, WebkassaError, WebkassaUnavailable, OPERATION_SALE, OPERATION_SALE_RETURN,
+                            CASHBOX_BLOCKING_CODES, NO_SHIFT_CODE, NOT_ENOUGH_CASH_CODE,
                             PAYMENT_CASH, PAYMENT_CARD, PAYMENT_MOBILE, ROUND_KOPECKS, MONEY_WITHDRAWAL, position,
                             return_basis, find_key)
 
@@ -27,6 +28,8 @@ KIND_TITLES = {'sale': "Продажа", 'return': "Возврат", 'withdrawal
 STATUS_TITLES = {'pending': "ожидает", 'done': "пробит", 'error': "ошибка", 'manual': "оформлен вручную"}
 BATCH = 20
 MAX_DELAY = timedelta(minutes=30)
+BLOCKED_RETRY = timedelta(minutes=10)     # касса без лицензии / неверный логин: проверяем раз в 10 минут
+ALERT_EVERY = timedelta(hours=1)          # и напоминаем об этом не чаще раза в час
 LOCK_SECONDS = 60
 
 _client = None
@@ -210,6 +213,24 @@ def process_queue(limit=BATCH, notify=None, on_error=None):
             logger.warning("Фискализация #%s (%s %s): %s — повторю", rec['id'], rec['kind'], rec['ref_id'], e)
             continue
         except WebkassaError as e:
+            if e.code in CASHBOX_BLOCKING_CODES:
+                # Беда кассы, а не чека: чеки ждут, пока исправят в кабинете Webkassa, и уйдут сами
+                blocked.add(rec['cashbox'])
+                _save_result(rec['id'], 'pending', error=f"{e} — исправьте в кабинете Webkassa, чеки уйдут сами",
+                             retry_in=BLOCKED_RETRY)
+                stats['retry'] += 1
+                logger.error("Фискализация: касса %s не принимает чеки: %s", rec['cashbox'], e)
+                if on_error and _alert_due(rec['cashbox']):
+                    try:
+                        on_error(rec, f"Касса {rec['cashbox']} не принимает чеки: {e.text}. Исправьте в кабинете "
+                                      "Webkassa — чеки уйдут сами.")
+                    except Exception as err:
+                        logger.warning("Фискализация: уведомление не отправлено: %s", err)
+                continue
+            if e.code == NOT_ENOUGH_CASH_CODE:
+                e = WebkassaError(e.code, e.text + ". В Webkassa наличных меньше, чем в учёте бота "
+                                  "(например, продажи до включения фискализации): оформите изъятие в кабинете "
+                                  "и отметьте «вручную»")
             _save_result(rec['id'], 'error', error=str(e))
             stats['error'] += 1
             logger.error("Фискализация #%s (%s %s) отклонена: %s", rec['id'], rec['kind'], rec['ref_id'], e)
@@ -326,9 +347,23 @@ def _report(store_id, kind):
         with cashbox_lock(store['cashbox']):
             api = client()
             data = api.x_report(store['cashbox']) if kind == 'x' else api.z_report(store['cashbox'])
-    except (WebkassaError, WebkassaUnavailable) as e:
+    except WebkassaError as e:
+        if e.code == NO_SHIFT_CODE:
+            return False, "Смена не открыта: она откроется сама с первым чеком."
+        return False, str(e)
+    except WebkassaUnavailable as e:
         return False, str(e)
     return True, data or {}
+
+
+def _alert_due(cashbox):
+    """Напоминание о неисправной кассе — не чаще ALERT_EVERY."""
+    name = f"fiscal_alert:{cashbox}"[:64]
+    last = get_job_run(name)
+    if last and last.get('last_run_at') and now() - last['last_run_at'] < ALERT_EVERY:
+        return False
+    mark_job_run(name)
+    return True
 
 
 def x_report(store_id):

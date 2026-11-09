@@ -28,6 +28,8 @@ class FakeWebkassa:
         self.reject = None             # (код, текст) — отклонить следующий чек
         self.expire_token_once = False
         self.check_number = 1000
+        self.no_license = False        # как на новой тестовой кассе devkkm: код 10
+        self.no_shift = False
 
     def __call__(self, req, timeout=None):
         path = req.full_url.split("webkassa.test", 1)[1]
@@ -40,6 +42,10 @@ class FakeWebkassa:
         if self.expire_token_once:
             self.expire_token_once = False
             return self._reply({"Errors": [{"Code": 2, "Text": "Срок действия сессии истек"}]})
+        if self.no_license and path in ("/api/v4/check", "/api/v4/MoneyOperation"):
+            return self._reply({"Errors": [{"Code": 10, "Text": "Касса не имеет активной лицензии"}]})
+        if self.no_shift and path in ("/api/v4/XReport", "/api/v4/ZReport"):
+            return self._reply({"Errors": [{"Code": 13, "Text": "На кассе отсутствуют смены"}]})
         if self.reject:
             code, text = self.reject
             self.reject = None
@@ -261,3 +267,34 @@ def test_admin_page(wk, tg):
     r = admin.post("/fiscal/cashbox", data={"csrf": csrf, "store_id": 2, "cashbox": "swk00030002"})
     assert "SWK00030002" in r.text
     assert db_query("SELECT cashbox FROM stores WHERE id = 2")[0]['cashbox'] == "SWK00030002"
+
+
+def test_cashbox_without_license_waits_and_alerts_once(wk, tg):
+    login(tg, ADMIN)
+    uid = _uid('admin')
+    record_receipt([(_pid("A100"), 150000)], uid, "Kaspi")
+    record_receipt([(_pid("A100"), 140000)], uid, "Kaspi")
+    wk.no_license = True
+    tg.calls.clear()
+    assert jobs.fiscal_tick() == {'done': 0, 'retry': 1, 'error': 0}      # второй чек кассы ждёт за первым
+    assert [q['status'] for q in _queue()] == ['pending', 'pending']
+    assert "лицензии" in _queue()[0]['error'] and "уйдут сами" in _queue()[0]['error']
+    _due_now()
+    jobs.fiscal_tick()
+    alerts = [c for c in tg.calls if c.text and "не принимает чеки" in c.text]
+    assert len(alerts) == 1                                                # напоминание — не чаще раза в час
+    wk.no_license = False                                                  # лицензию активировали в кабинете
+    _due_now()
+    assert fiscal.process_queue()['done'] == 2
+
+
+def test_known_errors_get_clear_messages(wk, tg):
+    wk.no_shift = True
+    ok, msg = fiscal.x_report(1)
+    assert not ok and "Смена не открыта" in msg
+    wk.no_shift = False
+    create_cash_withdrawal_record(50000, "инкассация", _uid('admin'), 1)
+    wk.reject = (8, "В кассе недостаточно наличности для проведения операции (В кассе: 0.000)")
+    fiscal.process_queue()
+    rec = _queue()[0]
+    assert rec['status'] == 'error' and "оформите изъятие в кабинете" in rec['error']

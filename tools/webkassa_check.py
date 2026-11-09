@@ -145,12 +145,8 @@ def main():
 
     money = {"CashboxUniqueNumber": cashbox, "OperationType": MONEY_WITHDRAWAL, "Sum": 500,
              "ExternalCheckNumber": f"pb-money-{stamp}"}
-    done = step("Изъятие 500 ₸ (" + MONEY_OPERATION_PATH + ")", MONEY_OPERATION_PATH, money,
+    step("Изъятие 500 ₸", MONEY_OPERATION_PATH, money,
                 lambda: api.money_operation(cashbox, MONEY_WITHDRAWAL, 500, money["ExternalCheckNumber"]))
-    if not done:
-        legacy = "/api/MoneyOperation"
-        step("Изъятие 500 ₸ (" + legacy + ")", legacy, money,
-             lambda: api.call(legacy, dict(money, ExternalCheckNumber=money["ExternalCheckNumber"] + "-l")))
 
     good_token = api.token
     api.token = "invalid-token-for-check"
@@ -170,6 +166,8 @@ def main():
                   indent=2, default=str)
     ok = sum(1 for s in steps if s.get("ok"))
     print(f"\nГотово: {ok} из {len(steps)} шагов без ошибок. Пришлите файл {out}")
+    if any(s.get("error_code") == 10 for s in steps):
+        print("Касса без активной лицензии: активируйте её в кабинете Webkassa (касса → лицензия) и запустите снова.")
 
 
 if __name__ == "__main__":
