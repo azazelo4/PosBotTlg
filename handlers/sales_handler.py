@@ -2,9 +2,10 @@
 import logging
 
 from buttons import (create_cancel_markup, create_confirmation_markup, _kb, PAYMENT_TYPES, BTN_CANCEL, BTN_CONFIRM)
-from database import get_product_by_article, record_receipt, MAX_RECEIPT_ITEMS
+from database import record_receipt, MAX_RECEIPT_ITEMS
 from handlers.common import (CASH_ROLES, in_state, is_button, user_ids, cash_menu, register_simple_cancel,
-                             product_line, ask_money, read_money)
+                             product_line, ask_money, read_money, resolve_for_sale)
+from utils import mark_codes
 from state import bot, user_state, get_op, start_op, end_op, cancel_current_operation
 from utils.common import money, h
 
@@ -20,7 +21,8 @@ def _cart(chat_id):
 
 
 def _cart_text(items):
-    lines = [f"{i}. {product_line(it['product'])} — <b>{money(it['price'])}</b>" for i, it in enumerate(items, 1)]
+    lines = [f"{i}. {product_line(it['product'])}" + (f" · код {h(mark_codes.short(it['code']))}" if it.get('code') else "")
+             + f" — <b>{money(it['price'])}</b>" for i, it in enumerate(items, 1)]
     total = sum(it['price'] for it in items)
     return "\n".join(lines) + f"\n\nИтого: <b>{money(total)}</b>" + (f" ({len(items)} поз.)" if len(items) > 1 else "")
 
@@ -47,11 +49,12 @@ def start(message):
 
 
 def on_article(message):
-    chat_id, article = message.chat.id, (message.text or '').strip()
-    product = get_product_by_article(article)
+    chat_id = message.chat.id
+    product, code = resolve_for_sale(chat_id, message.text)
     if not product:
-        bot.send_message(chat_id, f"Артикул <code>{h(article)}</code> не найден. Введите другой или нажмите «Отмена».",
-                         parse_mode='HTML', reply_markup=create_cancel_markup())
+        return
+    if code and any(it.get('code') and mark_codes.key(it['code']) == mark_codes.key(code) for it in _cart(chat_id)):
+        bot.send_message(chat_id, "Этот код уже в чеке. Отсканируйте другой.", reply_markup=create_cancel_markup())
         return
     in_cart = sum(1 for it in _cart(chat_id) if it['product']['id'] == product['id'])
     left = (product.get('quantity') or 0) - in_cart
@@ -62,6 +65,7 @@ def on_article(message):
         return
     op = get_op(chat_id)
     op['product'] = product
+    op['code'] = code
     user_state[chat_id] = PRICE
     ask_money(chat_id,
               f"{product_line(product)}\nМагазин: {h(product.get('Store'))}\n"
@@ -82,7 +86,7 @@ def on_price(message):
         bot.send_message(chat_id, f"Сумма {money(price)} ниже минимальной цены {money(min_price)}. Введите другую сумму.",
                          reply_markup=create_cancel_markup())
         return
-    _cart(chat_id).append({'product': op.pop('product'), 'price': price})
+    _cart(chat_id).append({'product': op.pop('product'), 'price': price, 'code': op.pop('code', None)})
     _ask_payment(chat_id)
 
 
@@ -120,7 +124,7 @@ def on_confirm(message):
     op = get_op(chat_id)
     items = _cart(chat_id)
     user_id, _ = user_ids(chat_id)
-    ok, result = record_receipt([(it['product']['id'], it['price']) for it in items], user_id, op['payment'])
+    ok, result = record_receipt([(it['product']['id'], it['price'], it.get('code')) for it in items], user_id, op['payment'])
     end_op(chat_id)
     if ok:
         logger.info("Chat %s: чек #%s, %s поз. на %s", chat_id, result['receipt_id'], len(items), result['total'])

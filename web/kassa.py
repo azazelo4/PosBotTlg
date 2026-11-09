@@ -20,10 +20,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 import config
 from buttons import PAYMENT_TYPES, ROLE_TITLES
-from database import (get_user_by_id, get_stores, get_product_by_article, record_receipt, MAX_RECEIPT_ITEMS, get_sales_for_return,
+from database import (get_user_by_id, get_stores, get_product_by_article, record_receipt, MAX_RECEIPT_ITEMS,
+                      find_by_mark_code, marking_required, SELLABLE_CODE, CODE_STATUS_TITLES, get_sales_for_return,
                       get_sale_details_by_id, create_return_record, create_buyback_record, create_trade_in_record,
                       create_cash_withdrawal_record, get_period_operations, create_kassa_login, consume_kassa_login)
 from schema import METAL_TYPES
+from utils import mark_codes
 from utils.common import now, today, day_bounds, parse_money, parse_float, money
 from utils.labels import details_line
 from utils.report_generator import build_summary
@@ -181,10 +183,32 @@ def do_logout(request: Request, _=Depends(same_origin)):
 
 # ---------------------------------------------------------------- данные кассы
 
-def product_json(p):
-    return {"id": p['id'], "article": p['article_number'], "model": p['model'], "type": p['product_type'],
+def product_json(p, code=None):
+    data = {"id": p['id'], "article": p['article_number'], "model": p['model'], "type": p['product_type'],
             "details": details_line(p), "inserts": p.get('inserts'), "store": p['Store'],
-            "price": int(p['price'] or 0), "min_price": int(p['min_price'] or 0), "quantity": p['quantity']}
+            "price": int(p['price'] or 0), "min_price": int(p['min_price'] or 0), "quantity": p['quantity'],
+            "marked": marking_required(p)}
+    if code:
+        data["code"] = code['code']
+        data["code_short"] = mark_codes.short(code['code'])
+    return data
+
+
+def lookup(text, for_sale=False):
+    """Артикул, «#id» или код маркировки → (товар, строка кода | None)."""
+    text = str(text or "").strip()
+    if mark_codes.looks_like_code(text):
+        found = find_by_mark_code(text)
+        if found:
+            code = found['code']
+            if for_sale and code['status'] not in SELLABLE_CODE:
+                raise HTTPException(400, f"Код {mark_codes.short(text)} уже {CODE_STATUS_TITLES[code['status']]}.")
+            return found['product'], code
+        p = get_product_by_article(text)
+        if p:
+            return p, None
+        raise HTTPException(404, f"Код {mark_codes.short(text)} не найден: его не приняли на склад (раздел «Маркировка» в админке).")
+    return get_product_by_article(text), None
 
 
 @router.get("/me")
@@ -213,11 +237,12 @@ async def choose_store(request: Request, user=Depends(kassa_user), _=Depends(sam
 
 
 @router.get("/product")
-def product(article: str, user=Depends(kassa_user)):
-    p = get_product_by_article(article.strip())
+def product(article: str, sale: int = 0, user=Depends(kassa_user)):
+    """sale=1 — товар для продажи: код маркировки должен быть доступен для продажи."""
+    p, code = lookup(article, for_sale=bool(sale))
     if not p:
         raise HTTPException(404, f"Артикул {article.strip()} не найден.")
-    return product_json(p)
+    return product_json(p, code)
 
 
 # ---------------------------------------------------------------- проверки ввода
@@ -238,7 +263,7 @@ def _payment(value, what="способ оплаты"):
 
 
 def _for_sale(article):
-    p = get_product_by_article(str(article or "").strip())
+    p, _ = lookup(article, for_sale=True)
     if not p:
         raise HTTPException(404, "Товар не найден.")
     if (p['quantity'] or 0) <= 0:
@@ -256,7 +281,7 @@ def _item(data):
     data = data or {}
     article = str(data.get("article") or "").strip()
     if article:
-        p = get_product_by_article(article)
+        p, _ = lookup(article)
         if not p:
             raise HTTPException(404, f"Артикул {article} не найден. Если изделие не наше — выберите «Без артикула».")
         return {"article": p['article_number'], "description": p.get('model'), "metal_type": p.get('metal_type'),
@@ -297,7 +322,8 @@ async def sale(request: Request, user=Depends(kassa_user), _=Depends(same_origin
         p = _for_sale(row.get("article"))
         price = _money(row.get("price"), f"сумму для {p['article_number']}")
         _check_min(p, price)
-        items.append((p['id'], price))
+        code = str(row.get("code") or "").strip() or None
+        items.append((p['id'], price, code))
         names.append(p['model'] or p['article_number'])
     payment = _payment(body.get("payment"))
     result = _result(*record_receipt(items, user['id'], payment, kassa_store_id(request, user)), "Продажа не оформлена")
@@ -368,7 +394,8 @@ async def tradein(request: Request, user=Depends(kassa_user), _=Depends(same_ori
         new_product_article=p['article_number'], new_sale_price=new_price, old_item_value=old_value,
         price_difference=diff, payment_type_difference=payment, user_id=user['id'],
         store_id=kassa_store_id(request, user), old_product_article=item['article'],
-        old_item_description=item['description'], old_metal_type=item['metal_type'], old_weight=item['weight']),
+        old_item_description=item['description'], old_metal_type=item['metal_type'], old_weight=item['weight'],
+        new_mark_code=str(body.get("new_code") or "").strip() or None),
         "Trade-In не оформлен")
     logger.info("Касса ПК: trade-in #%s, доплата %s (%s)", tradein_id, diff, user['id'])
     if diff > 0:

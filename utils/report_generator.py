@@ -199,10 +199,10 @@ def build_excel(ops, summary, start, end, store_name=None, breakdown=None):
 
     _sheet(wb, "Продажи",
            ["№", "Чек", "Дата", "Артикул", "Тип", "Модель", "Размер", "Металл", "Вес, г", "Цена по прайсу",
-            "Сумма продажи", "Оплата", "Магазин", "Продавец", "Возврат"],
+            "Сумма продажи", "Оплата", "Магазин", "Продавец", "Возврат", "Код маркировки"],
            [(s['id'], s.get('receipt_id') or "", s['sale_date'], s['article_number'], s['product_type'], s['model'], s['size'], s['metal_type'],
              s['weight'], s['list_price'], s['sold_price'], s['payment_type'], s['store'], s['user_name'],
-             f"№{s['return_id']}" if s['return_id'] else "") for s in ops['sales']])
+             f"№{s['return_id']}" if s['return_id'] else "", (s.get('mark_code') or '').replace('\x1d', '')) for s in ops['sales']])
     _sheet(wb, "Возвраты",
            ["№", "Дата", "Продажа №", "Дата продажи", "Артикул", "Модель", "Сумма продажи", "Сумма возврата", "Выплата",
             "Магазин", "Сотрудник"],

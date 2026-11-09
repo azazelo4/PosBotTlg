@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Маркировка{% endblock %}
+{% block content %}
+<h2>Маркировка</h2>
+<p class="muted">Поштучный учёт кодов DataMatrix. Маркируемый товар продаётся только по скану кода: на кассе ПК и в боте.
+  Передача кодов в ОФД появится вместе с фискализацией; сейчас это внутренний учёт и подготовка к обязательной маркировке.
+  {% if not marking_enabled() %}<br><strong>Учёт выключен</strong> — включите его в «Настройках», чтобы касса требовала код.{% endif %}</p>
+
+<div class="grid">
+<article>
+  <header><strong>Приёмка кодов</strong></header>
+  <form method="post" action="/marking/accept">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Артикул товара<input name="article" required value="{{ (accept_form or {}).get('article', '') }}" placeholder="A100" autocomplete="off"></label>
+    <label>Коды — сканируйте подряд, по одному в строке
+      <textarea name="codes" rows="6" required placeholder="0104600000000001215abcdef…" autocomplete="off" spellcheck="false"
+                style="font-family:ui-monospace,monospace;font-size:.85rem">{{ (accept_form or {}).get('codes', '') }}</textarea></label>
+    <label><input type="checkbox" name="add_to_stock" role="switch" checked>
+      Поступление: увеличить остаток на число новых кодов</label>
+    <small class="muted" style="display:block;margin:-.4rem 0 .8rem">Снимите галочку, если коды наклеены на изделия, которые уже есть в остатке.</small>
+    <button type="submit">Принять коды</button>
+  </form>
+</article>
+
+<article>
+  <header><strong>Сверка витрины</strong></header>
+  <form method="post" action="/marking/reconcile">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Магазин
+      <select name="store">
+        <option value="">Все магазины</option>
+        {% for st in stores %}<option value="{{ st.id }}" {% if store == st.id %}selected{% endif %}>{{ st.name }}</option>{% endfor %}
+      </select></label>
+    <label>Отсканируйте все изделия на витрине и в сейфе
+      <textarea name="codes" rows="6" required autocomplete="off" spellcheck="false"
+                style="font-family:ui-monospace,monospace;font-size:.85rem"></textarea></label>
+    <button type="submit" class="secondary">Сверить</button>
+  </form>
+</article>
+</div>
+
+{% if reconcile %}
+<article id="reconcile">
+  <header><strong>Результат сверки</strong> · отсканировано {{ scanned }}</header>
+  <div class="grid-cards" style="margin-bottom:1.5rem">
+    <div><div class="muted">Совпало</div><div class="stat">{{ reconcile.ok|length }}</div></div>
+    <div><div class="muted">Нет на витрине</div><div class="stat">{{ reconcile.missing|length }}</div></div>
+    <div><div class="muted">Уже проданы / списаны</div><div class="stat">{{ reconcile.not_sellable|length }}</div></div>
+    <div><div class="muted">Неизвестные коды</div><div class="stat">{{ reconcile.unknown|length }}</div></div>
+  </div>
+  {% macro rows(items, extra) %}
+  <div class="table-wrap"><table class="striped"><tbody>
+  {% for it in items %}<tr><td><code>{{ it.short }}</code></td><td>{{ it.article or '' }}</td><td>{{ it.model or it.why or '' }}</td>
+    <td>{{ it.store or '' }}</td><td>{{ it[extra] if extra else '' }}</td></tr>{% endfor %}
+  </tbody></table></div>
+  {% endmacro %}
+  {% if reconcile.missing %}<h4>Нет на витрине — числятся на складе</h4>
+    <p class="muted">Найдите изделие или спишите код в карточке товара (утеря, брак).</p>{{ rows(reconcile.missing, None) }}{% endif %}
+  {% if reconcile.not_sellable %}<h4>Отсканированы, но уже проданы или списаны</h4>{{ rows(reconcile.not_sellable, 'status') }}{% endif %}
+  {% if reconcile.other_store %}<h4>Числятся в другом магазине</h4>{{ rows(reconcile.other_store, None) }}{% endif %}
+  {% if reconcile.unknown %}<h4>Неизвестные коды</h4><p class="muted">Не приняты на склад — примите их к нужному товару.</p>{{ rows(reconcile.unknown, None) }}{% endif %}
+  {% if not (reconcile.missing or reconcile.not_sellable or reconcile.other_store or reconcile.unknown) %}
+    <p class="flash ok">✅ Всё сошлось: каждый код на складе найден на витрине.</p>{% endif %}
+</article>
+{% endif %}
+
+<h3>Маркируемые товары</h3>
+<form method="get" class="row-actions" style="margin-bottom:.5rem">
+  <select name="store" onchange="this.form.submit()" aria-label="Магазин" style="max-width:20rem">
+    <option value="">Все магазины</option>
+    {% for st in stores %}<option value="{{ st.id }}" {% if store == st.id %}selected{% endif %}>{{ st.name }}</option>{% endfor %}
+  </select>
+</form>
+{% if products %}
+<div class="table-wrap"><table class="striped">
+  <thead><tr><th>Артикул</th><th>Товар</th><th>Магазин</th><th class="num">Остаток</th><th class="num">Кодов на складе</th>
+    <th class="num">Расхождение</th><th class="num">Продано</th><th class="num">Списано</th></tr></thead>
+  <tbody>
+  {% for p in products %}
+    <tr><td><a href="/marking/product/{{ p.id }}">{{ p.article_number }}</a></td><td>{{ p.model }}</td><td>{{ p.store or '—' }}</td>
+      <td class="num">{{ p.quantity }}</td><td class="num">{{ p.in_stock }}</td>
+      <td class="num">{% if p.without_code %}<span class="badge zero" title="остаток больше, чем кодов">{{ p.without_code }} без кода</span>
+        {% elif p.extra_codes %}<span class="badge zero" title="кодов больше, чем остаток">{{ p.extra_codes }} лишн. код.</span>{% else %}—{% endif %}</td>
+      <td class="num">{{ p.sold }}</td><td class="num">{{ p.written_off }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+<p class="muted"><small>«Без кода» — остаток больше, чем кодов на складе: эти штуки не продать, пока к ним не приняты коды.
+  «Лишние коды» — кодов больше, чем остаток: проверьте остаток или спишите коды сверкой витрины.</small></p>
+{% else %}
+<p class="muted">Маркируемых товаров пока нет. Примите коды к товару выше — он станет маркируемым — или включите отметку в карточке товара.</p>
+{% endif %}
+{% endblock %}

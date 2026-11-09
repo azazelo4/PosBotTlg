@@ -47,9 +47,13 @@
   <label>Комментарий<input name="commentaries" value="{{ product.commentaries or '' }}" maxlength="500"></label>
   <label><input type="checkbox" name="track_stock" role="switch" {% if product.track_stock %}checked{% endif %}>
     Уведомлять, когда остаток станет низким</label>
+  <label><input type="checkbox" name="is_marked" role="switch" {% if product.is_marked %}checked{% endif %}>
+    Маркируемый товар — продаётся по коду маркировки DataMatrix
+    {% if not marking_enabled() %}<small class="muted">(учёт маркировки выключен в «Настройках»)</small>{% endif %}</label>
   <div class="row-actions" style="margin-top:1rem">
     <button type="submit">Сохранить</button>
     <a href="/products" role="button" class="secondary outline">К списку</a>
+    {% if product.id and (product.is_marked or marking_enabled()) %}<a href="/marking/product/{{ product.id }}" role="button" class="secondary outline">Коды маркировки</a>{% endif %}
   </div>
 </form>
 {% endblock %}
