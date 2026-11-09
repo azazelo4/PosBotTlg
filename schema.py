@@ -232,6 +232,33 @@ TABLES = {
           `last_for_date` date DEFAULT NULL,
           PRIMARY KEY (`name`)
         ) {CHARSET}""",
+    # Фискализация (Webkassa): очередь чеков. Операция сохраняется сразу, чек уходит в ОФД из очереди с повторами
+    "fiscal_receipts": f"""
+        CREATE TABLE IF NOT EXISTS `fiscal_receipts` (
+          `id` int NOT NULL AUTO_INCREMENT,
+          `kind` enum('sale','return','withdrawal','z_report') NOT NULL,
+          `ref_id` int DEFAULT NULL,
+          `store_id` int DEFAULT NULL,
+          `cashbox` varchar(32) NOT NULL,
+          `total` decimal(12,2) DEFAULT NULL,
+          `user_id` int DEFAULT NULL,
+          `status` enum('pending','done','error','manual') NOT NULL DEFAULT 'pending',
+          `attempts` int NOT NULL DEFAULT 0,
+          `next_try_at` datetime NOT NULL,
+          `external_number` varchar(64) NOT NULL,
+          `check_number` varchar(64) DEFAULT NULL,
+          `ticket_url` varchar(512) DEFAULT NULL,
+          `fiscal_at` datetime DEFAULT NULL,
+          `offline` tinyint(1) NOT NULL DEFAULT 0,
+          `response` mediumtext DEFAULT NULL,
+          `error` text DEFAULT NULL,
+          `created_at` datetime NOT NULL,
+          `updated_at` datetime NOT NULL,
+          PRIMARY KEY (`id`),
+          UNIQUE KEY `uq_fiscal_external` (`external_number`),
+          KEY `idx_fiscal_queue` (`status`, `next_try_at`),
+          KEY `idx_fiscal_ref` (`kind`, `ref_id`)
+        ) {CHARSET}""",
     "cash_withdrawals": f"""
         CREATE TABLE IF NOT EXISTS `cash_withdrawals` (
           `id` int NOT NULL AUTO_INCREMENT,
@@ -275,6 +302,8 @@ COLUMNS = [
     ("products", "is_marked", "tinyint(1) NOT NULL DEFAULT 0"),
     ("sales", "mark_code_id", "int DEFAULT NULL"),
     ("trade_ins", "new_mark_code_id", "int DEFAULT NULL"),
+    # фискализация: заводской номер кассы Webkassa (ЗНК) у магазина
+    ("stores", "cashbox", "varchar(32) DEFAULT NULL"),
 ]
 
 # Колонки, которые раньше были NOT NULL без значения по умолчанию,

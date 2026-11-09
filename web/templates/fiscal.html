@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Фискализация{% endblock %}
+{% block content %}
+<h2>Фискализация (Webkassa)</h2>
+<p class="muted">Продажи, возвраты и изъятия из бота, кассы ПК и кассы-приложения сохраняются сразу, а чек уходит в Webkassa
+  из очереди: бот отправляет его в течение нескольких секунд, а без связи повторяет с нарастающей паузой.
+  Скупка и Trade-In пока не фискализируются — оформляйте их в кабинете Webkassa.
+  {% if not fiscal_enabled() %}<br><strong>Фискализация выключена</strong> — включите её в «Настройках» и укажите кассы магазинов.{% endif %}</p>
+
+{% if report %}
+<article>
+  <header><strong>{{ report.kind }}-отчёт</strong></header>
+  <table><tbody>{% for k, v in report.lines %}<tr><td>{{ k }}</td><td>{{ v }}</td></tr>{% endfor %}</tbody></table>
+  <button class="secondary outline" onclick="window.print()">Печать</button>
+</article>
+{% endif %}
+
+<h3>Кассы магазинов</h3>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Магазин</th><th>Касса Webkassa (ЗНК)</th><th>Непробитые</th><th>Смена</th></tr></thead>
+  <tbody>
+  {% for b in boxes if b.is_active or b.cashbox %}
+    <tr>
+      <td>{{ b.name }}</td>
+      <td>
+        {% if user.role == 'admin' %}
+        <form method="post" action="/fiscal/cashbox" class="inline" style="display:flex;gap:.4rem;margin:0">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="store_id" value="{{ b.id }}">
+          <input name="cashbox" value="{{ b.cashbox or '' }}" placeholder="не указана" style="margin:0;max-width:12rem" autocomplete="off">
+          <button type="submit" class="secondary outline" style="margin:0;padding:.3rem .7rem;width:auto">Сохранить</button>
+        </form>
+        {% else %}{{ b.cashbox or '—' }}{% endif %}
+      </td>
+      <td>{% if b.pending or b.errors %}<span class="badge warn">ожидают {{ b.pending }}, ошибки {{ b.errors }}</span>{% elif b.cashbox %}нет{% endif %}</td>
+      <td>
+        {% if b.cashbox and fiscal_enabled() %}
+        <form method="post" action="/fiscal/report" class="inline" style="display:inline;margin:0">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="store_id" value="{{ b.id }}">
+          <button name="kind" value="x" class="secondary outline" style="margin:0;padding:.3rem .7rem">X-отчёт</button>
+          <button name="kind" value="z" class="outline" style="margin:0;padding:.3rem .7rem"
+                  onclick="return confirm('Закрыть смену кассы {{ b.cashbox }} ({{ b.name }})?')">Закрыть смену (Z)</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<small class="muted">ЗНК — заводской номер кассы в кабинете Webkassa. Магазин без кассы работает как раньше: его операции не фискализируются.
+  Смена открывается сама с первым чеком; закрывайте её в конце дня. Закрыть смену нельзя, пока есть непробитые чеки.</small>
+
+<h3 style="margin-top:2rem">Чеки</h3>
+<nav>
+  <ul>{% for key, title in filters %}
+    <li><a href="/fiscal?status={{ key }}" {% if status == key %}aria-current="page"{% endif %}>{{ title }}
+      {% if key == 'problem' and (counts.get('pending', 0) + counts.get('error', 0)) %}({{ counts.get('pending', 0) + counts.get('error', 0) }}){% endif %}</a></li>
+  {% endfor %}</ul>
+</nav>
+{% if rows %}
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Создан</th><th>Операция</th><th>Магазин</th><th>Сумма</th><th>Статус</th><th>Чек ОФД</th><th></th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr>
+      <td>{{ r.created_at.strftime('%d.%m %H:%M') }}</td>
+      <td>{{ r.kind_title }}{% if r.ref_id %} №{{ r.ref_id }}{% endif %}<br><small class="muted">{{ r.user_name or '' }}</small></td>
+      <td>{{ r.store or '—' }}<br><small class="muted">{{ r.cashbox }}</small></td>
+      <td style="white-space:nowrap">{% if r.total is not none %}{{ r.total|money }}{% endif %}</td>
+      <td><span class="badge {% if r.status == 'error' %}bad{% elif r.status == 'pending' %}warn{% endif %}">{{ r.status_title }}</span>
+        {% if r.offline %}<br><small class="muted">автономно</small>{% endif %}
+        {% if r.error and r.status != 'done' %}<br><small>{{ r.error }}</small>{% endif %}
+        {% if r.status == 'pending' and r.attempts %}<br><small class="muted">попыток: {{ r.attempts }}, следующая {{ r.next_try_at.strftime('%H:%M:%S') }}</small>{% endif %}</td>
+      <td>{% if r.ticket_url %}<a href="{{ r.ticket_url }}" target="_blank" rel="noopener">№{{ r.check_number }}</a>{% elif r.check_number %}№{{ r.check_number }}{% endif %}</td>
+      <td>
+        {% if r.status in ('error', 'pending') %}
+        <form method="post" action="/fiscal/retry" class="inline" style="margin:0 0 .3rem">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="rec_id" value="{{ r.id }}">
+          <button class="secondary outline" style="margin:0;padding:.2rem .6rem">Повторить</button>
+        </form>
+        <details style="margin:0"><summary style="font-size:.85rem">Оформлен вручную</summary>
+          <form method="post" action="/fiscal/manual" style="margin:0">
+            <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="rec_id" value="{{ r.id }}">
+            <input name="note" placeholder="№ чека в кабинете Webkassa" required minlength="3" style="margin:.3rem 0">
+            <button class="outline" style="margin:0;padding:.2rem .6rem">Отметить</button>
+          </form>
+        </details>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="muted">{% if status == 'problem' %}Все чеки пробиты.{% else %}Чеков пока нет.{% endif %}</p>
+{% endif %}
+{% endblock %}

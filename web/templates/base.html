@@ -28,7 +28,8 @@
     table td, table th { vertical-align: middle; }
     .badge { display: inline-block; padding: .05rem .45rem; border-radius: 1rem; font-size: .8rem;
              background: var(--pico-secondary-background); color: var(--pico-secondary-inverse); }
-    .badge.zero { background: #b42318; color: #fff; }
+    .badge.zero, .badge.bad { background: #b42318; color: #fff; }
+    .badge.warn { background: #b54708; color: #fff; }
     .table-wrap { overflow-x: auto; }
     form.inline { display: inline; }
     details.dropdown summary + ul { min-width: 12rem; }
@@ -46,6 +47,7 @@
       <li><a href="/import">Импорт</a></li>
       <li><a href="/reports">Отчёты</a></li>
       {% if marking_enabled() %}<li><a href="/marking">Маркировка</a></li>{% endif %}
+      {% if fiscal_enabled() %}<li><a href="/fiscal">Фискализация</a></li>{% endif %}
       <li><a href="/kassa" target="_blank">Касса</a></li>
       <li><a href="/help">Справка</a></li>
       {% if user.role == 'admin' %}<li><a href="/staff">Персонал</a></li><li><a href="/stores">Магазины</a></li><li><a href="/settings">Настройки</a></li>{% endif %}
