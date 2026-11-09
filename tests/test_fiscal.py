@@ -14,6 +14,7 @@ from conftest import ADMIN, CASHIER, MANAGER, login, db_query
 from database import record_receipt, create_return_record, create_cash_withdrawal_record
 from test_stores import _web, _csrf
 from utils import scheduled_jobs as jobs
+from utils.common import money
 from utils.webkassa import WebkassaClient
 
 REG_NUMBER = "600400012345"
@@ -30,6 +31,8 @@ class FakeWebkassa:
         self.check_number = 1000
         self.no_license = False        # как на новой тестовой кассе devkkm: код 10
         self.no_shift = False
+        self.done = {}                 # ExternalCheckNumber → ответ
+        self.lose_response = False     # чек пробит, но ответ не дошёл (тайм-аут)
 
     def __call__(self, req, timeout=None):
         path = req.full_url.split("webkassa.test", 1)[1]
@@ -50,14 +53,23 @@ class FakeWebkassa:
             code, text = self.reject
             self.reject = None
             return self._reply({"Errors": [{"Code": code, "Text": text}]})
+        if path == "/api/v4/check" and body["ExternalCheckNumber"] in self.done:
+            # как devkkm: код 14 и данные уже пробитого чека
+            return self._reply({"Data": self.done[body["ExternalCheckNumber"]],
+                                "Errors": [{"Code": 14, "Text": "Чек с внешним номером уже присутствует в системе"}]})
         if path == "/api/v4/check":
             self.check_number += 1
             total = sum(p["Sum"] for p in body["Payments"])
-            return self._reply({"Data": {
+            data = {
                 "CheckNumber": str(self.check_number), "DateTime": "09.11.2026 10:00:00", "OfflineMode": False,
                 "Cashbox": {"UniqueNumber": body["CashboxUniqueNumber"], "RegistrationNumber": REG_NUMBER},
                 "TicketUrl": f"https://devkkm.webkassa.kz/Ticket?chb={body['CashboxUniqueNumber']}&n={self.check_number}",
-                "Total": total, "ShiftNumber": 7}})
+                "Total": total, "ShiftNumber": 7}
+            self.done[body["ExternalCheckNumber"]] = data
+            if self.lose_response:
+                self.lose_response = False
+                raise urllib.error.URLError("timed out")
+            return self._reply({"Data": data})
         if path == "/api/v4/MoneyOperation":
             return self._reply({"Data": {"Sum": body["Sum"], "OfflineMode": False}})
         if path in ("/api/v4/XReport", "/api/v4/ZReport"):
@@ -298,3 +310,25 @@ def test_known_errors_get_clear_messages(wk, tg):
     fiscal.process_queue()
     rec = _queue()[0]
     assert rec['status'] == 'error' and "оформите изъятие в кабинете" in rec['error']
+
+
+def test_retry_after_lost_response_does_not_duplicate(wk, tg):
+    record_receipt([(_pid("A100"), 150000)], _uid('admin'), "Kaspi")
+    wk.lose_response = True                                   # Webkassa пробил чек, а ответ потерялся
+    assert fiscal.process_queue()['retry'] == 1
+    _due_now()
+    assert fiscal.process_queue()['done'] == 1               # повтор получил код 14 с данными того же чека
+    assert wk.check_number == 1001 and _queue()[0]['check_number'] == "1001"
+
+
+def test_report_lines_from_real_x_report():
+    data = {"ReportNumber": 3, "ShiftNumber": 1, "StartOn": "09.11.2026 17:14:34", "DocumentCount": 3,
+            "TakeMoneySum": 500.0, "SumInCashbox": 1500.0,
+            "Sell": {"PaymentsByTypesApiModel": [{"Sum": 3000.0, "Type": 0}], "Taken": 3000.0, "Count": 1},
+            "ReturnSell": {"PaymentsByTypesApiModel": [{"Sum": 1000.0, "Type": 0}], "Taken": 1000.0, "Count": 1},
+            "Buy": {"PaymentsByTypesApiModel": [], "Taken": 0.0, "Count": 0}}
+    lines = dict(fiscal.report_lines(data))
+    assert lines["Изъято"] == money(500) and lines["Наличных в кассе"] == money(1500)
+    assert lines["Продажи: наличные"] == money(3000) and lines["Возвраты продаж: сумма"] == money(1000)
+    assert lines["Документов"] == "3"
+    assert not any(k.startswith("Покупки") for k in lines)

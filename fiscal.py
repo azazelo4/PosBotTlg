@@ -16,7 +16,7 @@ from datetime import timedelta
 
 import config
 from database import with_connection, with_transaction, get_connection, BusinessError, get_job_run, mark_job_run
-from utils.common import now
+from utils.common import now, money
 from utils.webkassa import (WebkassaClient, WebkassaError, WebkassaUnavailable, OPERATION_SALE, OPERATION_SALE_RETURN,
                             CASHBOX_BLOCKING_CODES, NO_SHIFT_CODE, NOT_ENOUGH_CASH_CODE,
                             PAYMENT_CASH, PAYMENT_CARD, PAYMENT_MOBILE, ROUND_KOPECKS, MONEY_WITHDRAWAL, position,
@@ -24,6 +24,7 @@ from utils.webkassa import (WebkassaClient, WebkassaError, WebkassaUnavailable, 
 
 logger = logging.getLogger(__name__)
 
+PAYMENT_TITLES = {PAYMENT_CASH: "наличные", PAYMENT_CARD: "карта", PAYMENT_MOBILE: "мобильный платёж"}
 KIND_TITLES = {'sale': "Продажа", 'return': "Возврат", 'withdrawal': "Изъятие (инкассация)", 'z_report': "Закрытие смены"}
 STATUS_TITLES = {'pending': "ожидает", 'done': "пробит", 'error': "ошибка", 'manual': "оформлен вручную"}
 BATCH = 20
@@ -407,20 +408,23 @@ def receipt_status(cursor, kind, ref_id):
     return cursor.fetchone()
 
 
-REPORT_FIELDS = (("ShiftNumber", "Смена №"), ("StartOn", "Открыта"), ("ReportOn", "Отчёт"), ("CloseOn", "Закрыта"),
-                 ("CashierName", "Кассир"), ("SumInCashbox", "Наличных в кассе"), ("DocumentCount", "Документов"))
+REPORT_FIELDS = (("ReportNumber", "Отчёт №"), ("ShiftNumber", "Смена №"), ("StartOn", "Открыта"), ("ReportOn", "Сформирован"),
+                 ("CloseOn", "Закрыта"), ("CashierName", "Кассир"), ("DocumentCount", "Документов"),
+                 ("PutMoneySum", "Внесено"), ("TakeMoneySum", "Изъято"), ("SumInCashbox", "Наличных в кассе"))
 
 
 def report_lines(data):
     """Короткая сводка отчёта для экрана: известные поля и итоги продаж/возвратов, остальное — как есть."""
     data = data or {}
     lines = [(title, data[key]) for key, title in REPORT_FIELDS if data.get(key) not in (None, "")]
-    for key, title in (("Sell", "Продажи"), ("ReturnSell", "Возвраты продаж")):
+    for key, title in (("Sell", "Продажи"), ("ReturnSell", "Возвраты продаж"), ("Buy", "Покупки"),
+                       ("ReturnBuy", "Возвраты покупок")):
         block = find_key(data, key)
-        if isinstance(block, dict):
-            for sub, sub_title in (("Count", "кол-во"), ("Taken", "сумма"), ("Change", "сдача")):
-                if block.get(sub) not in (None, ""):
-                    lines.append((f"{title}, {sub_title}", block[sub]))
+        if isinstance(block, dict) and (block.get("Count") or block.get("Taken")):
+            lines.append((f"{title}: чеков", block.get("Count", 0)))
+            lines.append((f"{title}: сумма", block.get("Taken", 0)))
+            for pay in block.get("PaymentsByTypesApiModel") or []:
+                lines.append((f"{title}: {PAYMENT_TITLES.get(pay.get('Type'), pay.get('Type'))}", pay.get("Sum")))
     if not lines:
         lines = [(k, v) for k, v in data.items() if not isinstance(v, (dict, list))][:15]
-    return [[str(k), str(v)] for k, v in lines]
+    return [[str(k), money(v) if isinstance(v, float) else str(v)] for k, v in lines]

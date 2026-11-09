@@ -6,9 +6,10 @@
 - ответ: {"Data": {...}} при успехе или {"Errors": [{"Code": N, "Text": "..."}]};
 - запросы по одной кассе — строго последовательно (это обеспечивает вызывающий код, см. fiscal.cashbox_lock).
 
-Проверено на тестовой кассе devkkm: авторизация, код истёкшего токена (2), путь и поля изъятия
-(/api/v4/MoneyOperation принимает запрос), коды ошибок кассы (10 — нет лицензии, 8 — мало наличных,
-13 — нет смены). Чек, возврат и отчёты с открытой сменой — ещё нет (на кассе не была активна лицензия).
+Проверено на тестовой кассе devkkm (09.11.2026, tools/webkassa_check.py): авторизация; продажа с кодом
+маркировки в Mark (с разделителем GS); повтор с тем же ExternalCheckNumber — код 14 и Data исходного чека;
+возврат по returnBasisDetails (регистрационный номер — Cashbox.RegistrationNumber ответа на чек);
+изъятие через /api/v4/MoneyOperation; код 2 при неверном токене; X- и Z-отчёт; коды 8, 10, 13.
 """
 import json
 import logging
@@ -29,6 +30,8 @@ TOKEN_EXPIRED_CODES = {2}          # «Срок действия сессии и
 CASHBOX_BLOCKING_CODES = {1, 6, 10}  # неверный логин/пароль, касса не зарегистрирована, нет активной лицензии
 NOT_ENOUGH_CASH_CODE = 8           # «В кассе недостаточно наличности» (изъятие)
 NO_SHIFT_CODE = 13                 # «На кассе отсутствуют смены» (X/Z до первого чека)
+# «Чек с внешним номером … уже присутствует»: ответ содержит Data исходного чека — это успех повтора
+DUPLICATE_CODE = 14
 TIMEOUT = 30
 
 # Коды из документации
@@ -119,10 +122,16 @@ class WebkassaClient:
         except ValueError as e:
             raise WebkassaUnavailable("Webkassa вернул не JSON") from e
         errors = payload.get("Errors") or payload.get("errors")
+        data = payload.get("Data", payload.get("data"))
         if errors:
             first = errors[0]
-            raise WebkassaError(first.get("Code", first.get("code")), first.get("Text", first.get("text", "")))
-        return payload.get("Data", payload.get("data"))
+            code = first.get("Code", first.get("code"))
+            if code == DUPLICATE_CODE and isinstance(data, dict) and data.get("CheckNumber"):
+                # Повтор после тайм-аута: чек уже пробит, Webkassa вернул его — второго чека нет
+                logger.info("Webkassa: чек %s уже был пробит, беру его данные", data.get("ExternalCheckNumber"))
+                return data
+            raise WebkassaError(code, first.get("Text", first.get("text", "")))
+        return data
 
     def authorize(self):
         data = self._post(AUTHORIZE_PATH, {"Login": self.login, "Password": self.password})
