@@ -18,8 +18,8 @@ import config
 from database import with_connection, with_transaction, get_connection, BusinessError
 from utils.common import now
 from utils.webkassa import (WebkassaClient, WebkassaError, WebkassaUnavailable, OPERATION_SALE, OPERATION_SALE_RETURN,
-                            PAYMENT_CASH, PAYMENT_CARD, PAYMENT_MOBILE, TAX_NONE, TAX_VAT, POSITION_GOODS, UNIT_PIECE,
-                            ROUND_KOPECKS, MONEY_WITHDRAWAL)
+                            PAYMENT_CASH, PAYMENT_CARD, PAYMENT_MOBILE, ROUND_KOPECKS, MONEY_WITHDRAWAL, position,
+                            return_basis, find_key)
 
 logger = logging.getLogger(__name__)
 
@@ -78,21 +78,8 @@ def _money(value):
     return round(float(value or 0), 2)
 
 
-def _tax(amount):
-    """Поля налога позиции. Формула из документации: сумма × (ставка/100) / (1 + ставка/100)."""
-    rate = float(config.FISCAL_VAT_PERCENT or 0)
-    if rate <= 0:
-        return {"TaxType": TAX_NONE, "TaxPercent": 0, "Tax": 0}
-    return {"TaxType": TAX_VAT, "TaxPercent": rate, "Tax": round(amount * (rate / 100) / (1 + rate / 100), 2)}
-
-
 def _position(name, code, price, mark=None):
-    price = _money(price)
-    pos = {"Count": 1, "Price": price, **_tax(price), "PositionName": name[:255], "PositionCode": code,
-           "PositionType": POSITION_GOODS, "UnitCode": UNIT_PIECE, "Discount": 0, "Markup": 0}
-    if mark:
-        pos["Mark"] = mark
-    return pos
+    return position(name, code, price, mark, vat=float(config.FISCAL_VAT_PERCENT or 0))
 
 
 def _item_name(row):
@@ -141,28 +128,14 @@ def _return_body(cursor, rec):
     if not base or base['status'] != 'done' or not base.get('response'):
         raise WebkassaError(0, "исходная продажа не пробита через бота (была до включения фискализации или "
                                "оформлена вручную) — оформите возврат в кабинете Webkassa и отметьте «оформлен вручную»")
-    sale = json.loads(base['response'])
-    reg_number = _find_key(sale.get("Cashbox") or {}, "RegistrationNumber")
-    if not reg_number:
+    basis = return_basis(json.loads(base['response']), base['total'], base['check_number'], base['offline'])
+    if not basis["registrationNumber"]:
         raise WebkassaError(0, "в ответе на исходный чек нет регистрационного номера кассы — оформите возврат "
                                "в кабинете Webkassa и отметьте «оформлен вручную»")
-    position = _position(_item_name(ret), ret['article_number'], ret['return_price'], ret['mark'])
-    return {"CashboxUniqueNumber": rec['cashbox'], "OperationType": OPERATION_SALE_RETURN, "Positions": [position],
-            "Payments": [{"Sum": position["Price"], "PaymentType": payment_code(ret['payment_type'])}], "Change": 0,
-            "RoundType": ROUND_KOPECKS, "ExternalCheckNumber": rec['external_number'],
-            # Основание возврата (протокол 2.0.3+): исходный чек. Ключи — как в примере документации
-            "returnBasisDetails": {"dateTime": sale.get("DateTime"), "total": sale.get("Total", float(base['total'] or 0)),
-                                   "checkNumber": str(sale.get("CheckNumber") or base['check_number']),
-                                   "registrationNumber": str(reg_number),
-                                   "isOffline": bool(sale.get("OfflineMode", base['offline']))}}
-
-
-def _find_key(obj, name):
-    """Значение ключа без учёта регистра (Webkassa в разных ответах пишет PascalCase и camelCase)."""
-    for k, v in (obj or {}).items():
-        if k.lower() == name.lower():
-            return v
-    return None
+    pos = _position(_item_name(ret), ret['article_number'], ret['return_price'], ret['mark'])
+    return {"CashboxUniqueNumber": rec['cashbox'], "OperationType": OPERATION_SALE_RETURN, "Positions": [pos],
+            "Payments": [{"Sum": pos["Price"], "PaymentType": payment_code(ret['payment_type'])}], "Change": 0,
+            "RoundType": ROUND_KOPECKS, "ExternalCheckNumber": rec['external_number'], "returnBasisDetails": basis}
 
 
 def _send(rec):
@@ -408,7 +381,7 @@ def report_lines(data):
     data = data or {}
     lines = [(title, data[key]) for key, title in REPORT_FIELDS if data.get(key) not in (None, "")]
     for key, title in (("Sell", "Продажи"), ("ReturnSell", "Возвраты продаж")):
-        block = _find_key(data, key)
+        block = find_key(data, key)
         if isinstance(block, dict):
             for sub, sub_title in (("Count", "кол-во"), ("Taken", "сумма"), ("Change", "сдача")):
                 if block.get(sub) not in (None, ""):

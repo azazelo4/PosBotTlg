@@ -36,6 +36,41 @@ ROUND_KOPECKS = 0            # каждая позиция и итог — до 
 MONEY_DEPOSIT, MONEY_WITHDRAWAL = 0, 1
 
 
+def find_key(obj, name):
+    """Значение ключа без учёта регистра (Webkassa в разных ответах пишет PascalCase и camelCase)."""
+    for k, v in (obj or {}).items():
+        if k.lower() == name.lower():
+            return v
+    return None
+
+
+def position(name, code, price, mark=None, vat=0.0):
+    """Позиция чека: одна штука. Налог — по формуле документации: сумма × (ставка/100) / (1 + ставка/100)."""
+    price = round(float(price or 0), 2)
+    if vat and vat > 0:
+        tax = {"TaxType": TAX_VAT, "TaxPercent": vat, "Tax": round(price * (vat / 100) / (1 + vat / 100), 2)}
+    else:
+        tax = {"TaxType": TAX_NONE, "TaxPercent": 0, "Tax": 0}
+    pos = {"Count": 1, "Price": price, **tax, "PositionName": name[:255], "PositionCode": code,
+           "PositionType": POSITION_GOODS, "UnitCode": UNIT_PIECE, "Discount": 0, "Markup": 0}
+    if mark:
+        pos["Mark"] = mark
+    return pos
+
+
+def return_basis(sale, fallback_total=None, fallback_check=None, fallback_offline=False):
+    """Основание возврата (протокол 2.0.3+) из ответа Webkassa на исходный чек. Ключи — как в примере документации."""
+    cashbox = find_key(sale, "Cashbox") or {}
+    reg = find_key(cashbox, "RegistrationNumber")
+    total = find_key(sale, "Total")
+    offline = find_key(sale, "OfflineMode")
+    return {"dateTime": find_key(sale, "DateTime"),
+            "total": total if total is not None else float(fallback_total or 0),
+            "checkNumber": str(find_key(sale, "CheckNumber") or fallback_check or ""),
+            "registrationNumber": str(reg) if reg else None,
+            "isOffline": bool(fallback_offline if offline is None else offline)}
+
+
 class WebkassaError(Exception):
     """Ошибка, которую вернул Webkassa (повтор того же запроса не поможет)."""
 
