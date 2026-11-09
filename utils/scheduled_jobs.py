@@ -12,9 +12,9 @@ from telebot import types
 
 import config
 from database import (get_low_stock_products, get_chat_ids_by_roles, get_period_operations, get_job_run,
-                      mark_job_run)
+                      mark_job_run, get_user_by_id)
 from state import bot
-from utils.common import today, now, h, day_bounds
+from utils.common import today, now, h, day_bounds, money
 from utils.report_generator import generate_period_report
 
 DAILY_REPORT_JOB = "daily_report"
@@ -151,3 +151,35 @@ def send_low_stock_notification():
         for chunk in chunks:
             _send_safe(chat_id, chunk, parse_mode='HTML')
     logger.info("Уведомление о низком остатке (%s позиций) отправлено %s получателям", len(products), len(recipients))
+
+
+# ---------------------------------------------------------------- фискализация
+
+def _notify_fiscal_done(rec, data):
+    """Продавцу — ссылка на чек ОФД, чтобы переслать покупателю."""
+    url = data.get("TicketUrl")
+    if rec['kind'] not in ('sale', 'return') or not url or not rec.get('user_id'):
+        return
+    user = get_user_by_id(rec['user_id'])
+    if not user or not user.get('chat_id'):
+        return
+    what = f"чек №{rec['ref_id']}" if rec['kind'] == 'sale' else f"возврат №{rec['ref_id']}"
+    offline = " (касса в автономном режиме, в ОФД уйдёт позже)" if data.get("OfflineMode") else ""
+    _send_safe(user['chat_id'], f"🧾 Фискальный чек: {what}, {money(rec['total'])}{offline}\n{url}\n"
+                                "Ссылку можно переслать покупателю.", disable_web_page_preview=True)
+
+
+def _notify_fiscal_error(rec, error):
+    """Администраторам и менеджерам: Webkassa отклонил операцию — нужно вмешательство."""
+    from fiscal import KIND_TITLES
+    text = (f"⚠️ <b>Чек не пробит в Webkassa</b>\n{KIND_TITLES.get(rec['kind'], rec['kind'])} №{rec['ref_id']}, "
+            f"{money(rec['total']) if rec.get('total') is not None else ''}\n{h(error)}\n\n"
+            "Веб-админка → «Фискализация»: «Повторить» или «Оформлен вручную».")
+    for chat_id in get_chat_ids_by_roles(['admin', 'manager']) or []:
+        _send_safe(chat_id, text, parse_mode='HTML')
+
+
+def fiscal_tick():
+    """Задача планировщика: отправить очередь чеков в Webkassa."""
+    from fiscal import process_queue
+    return process_queue(notify=_notify_fiscal_done, on_error=_notify_fiscal_error)

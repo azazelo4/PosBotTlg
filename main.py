@@ -33,6 +33,7 @@ SETTINGS_POLL_SECONDS = 30
 TOKEN_WAIT_SECONDS = 10
 START_DELAY_SECONDS = 20       # досылка отчётов и проверка связи — вскоре после запуска, не задерживая его
 HEARTBEAT_MINUTES = 5
+FISCAL_POLL_SECONDS = 5
 
 
 def register_handlers():
@@ -120,7 +121,7 @@ def make_settings_watcher(restart=_restart_process):
 def start_scheduler():
     from utils.common import tz
     from utils.scheduled_jobs import (scheduled_daily_report, send_low_stock_notification, catch_up_daily_reports,
-                                      telegram_heartbeat)
+                                      telegram_heartbeat, fiscal_tick)
     scheduler = BackgroundScheduler(timezone=tz())
     soon = datetime.now(tz()) + timedelta(seconds=START_DELAY_SECONDS)
     report_time = _parse_hhmm(config.DAILY_REPORT_TIME, "DAILY_REPORT_TIME")
@@ -136,6 +137,9 @@ def start_scheduler():
         scheduler.add_job(send_low_stock_notification, 'cron', hour=stock_time[0], minute=stock_time[1], id='low_stock',
                           misfire_grace_time=3600, coalesce=True)
         logger.info("Уведомление о низком остатке: %02d:%02d (%s)", *stock_time, config.TIMEZONE)
+    # Очередь чеков Webkassa (при выключенной фискализации задача ничего не делает)
+    scheduler.add_job(fiscal_tick, 'interval', seconds=FISCAL_POLL_SECONDS, id='fiscal_queue', coalesce=True,
+                      max_instances=1)
     scheduler.add_job(telegram_heartbeat, 'interval', minutes=HEARTBEAT_MINUTES, id='telegram_heartbeat',
                       next_run_time=soon, coalesce=True, max_instances=1)
     scheduler.add_job(make_settings_watcher(), 'interval', seconds=SETTINGS_POLL_SECONDS, id='settings_watch',

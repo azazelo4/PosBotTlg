@@ -22,6 +22,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 import config
 import demo_data
+import fiscal
 import marking
 import settings_store
 from buttons import PAYMENT_TYPES, ROLE_TITLES
@@ -64,6 +65,7 @@ templates.env.globals['ROLE_TITLES'] = ROLE_TITLES
 templates.env.globals['TIMEZONES'] = config.TIMEZONES
 templates.env.globals['VERSION'] = config.VERSION
 templates.env.globals['marking_enabled'] = lambda: bool(config.MARKING_ENABLED)
+templates.env.globals['fiscal_enabled'] = lambda: bool(config.FISCAL_ENABLED)
 
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -384,6 +386,63 @@ def _marking_page(request, user, **ctx):
     store = ctx.pop("store", None)
     return render(request, "marking.html", user, stores=stores, store=store,
                   products=marking.marked_products(store) or [], **ctx)
+
+
+# ---------------------------------------------------------------- фискализация
+
+FISCAL_FILTERS = (("problem", "Непробитые"), ("", "Все"), ("done", "Пробиты"), ("manual", "Вручную"))
+
+
+@app.get("/fiscal", response_class=HTMLResponse)
+def fiscal_page(request: Request, status: str = "problem", store: int = 0, user=Depends(current_user)):
+    status = status if status in dict(FISCAL_FILTERS) else "problem"
+    return render(request, "fiscal.html", user, rows=fiscal.list_receipts(status or None, store or None) or [],
+                  counts=fiscal.counts() or {}, boxes=fiscal.cashboxes() or [], status=status, store=store or None,
+                  filters=FISCAL_FILTERS, report=request.session.pop("fiscal_report", None))
+
+
+@app.post("/fiscal/cashbox")
+def fiscal_cashbox(request: Request, store_id: int = Form(...), cashbox: str = Form(""), csrf: str = Form(""),
+                   user=Depends(admin_only)):
+    check_csrf(request, csrf)
+    ok, result = fiscal.set_cashbox(store_id, cashbox)
+    flash(request, (f"Касса магазина: {result}." if result else "Касса у магазина убрана: его операции не фискализируются.")
+          if ok else result, "ok" if ok else "error")
+    return RedirectResponse("/fiscal", status_code=303)
+
+
+@app.post("/fiscal/retry")
+def fiscal_retry(request: Request, rec_id: int = Form(...), csrf: str = Form(""), user=Depends(current_user)):
+    check_csrf(request, csrf)
+    ok, result = fiscal.retry(rec_id)
+    flash(request, "Чек снова в очереди: бот отправит его в течение минуты." if ok else result, "ok" if ok else "error")
+    return RedirectResponse("/fiscal", status_code=303)
+
+
+@app.post("/fiscal/manual")
+def fiscal_manual(request: Request, rec_id: int = Form(...), note: str = Form(""), csrf: str = Form(""),
+                  user=Depends(current_user)):
+    check_csrf(request, csrf)
+    ok, result = fiscal.mark_manual(rec_id, user['id'], note)
+    flash(request, "Отмечено: чек оформлен вручную." if ok else result, "ok" if ok else "error")
+    return RedirectResponse("/fiscal", status_code=303)
+
+
+@app.post("/fiscal/report")
+def fiscal_report(request: Request, store_id: int = Form(...), kind: str = Form(...), csrf: str = Form(""),
+                  user=Depends(current_user)):
+    check_csrf(request, csrf)
+    if kind == "z":
+        ok, data = fiscal.z_report(store_id, user['id'])
+    else:
+        ok, data = fiscal.x_report(store_id)
+    if not ok:
+        flash(request, data, "error")
+    else:
+        flash(request, "Смена закрыта (Z-отчёт)." if kind == "z" else "X-отчёт получен.", "ok")
+        request.session["fiscal_report"] = {"kind": kind.upper(), "store_id": store_id,
+                                            "lines": fiscal.report_lines(data)}
+    return RedirectResponse("/fiscal", status_code=303)
 
 
 @app.get("/marking", response_class=HTMLResponse)

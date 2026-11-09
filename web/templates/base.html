@@ -28,7 +28,8 @@
     table td, table th { vertical-align: middle; }
     .badge { display: inline-block; padding: .05rem .45rem; border-radius: 1rem; font-size: .8rem;
              background: var(--pico-secondary-background); color: var(--pico-secondary-inverse); }
-    .badge.zero { background: #b42318; color: #fff; }
+    .badge.zero, .badge.bad { background: #b42318; color: #fff; }
+    .badge.warn { background: #b54708; color: #fff; }
     .table-wrap { overflow-x: auto; }
     form.inline { display: inline; }
     details.dropdown summary + ul { min-width: 12rem; }
@@ -66,7 +67,7 @@
     <li><a href="{{ href }}"{% if new_tab %} target="_blank"{% endif %}{% if path == href or (href != '/' and path.startswith(href + '/')) %} aria-current="page"{% endif %}>{{ title }}</a></li>
   {%- endmacro %}
   {% set stock_paths = ['/products', '/labels', '/import', '/marking'] %}
-  {% set cash_paths = ['/reports'] %}
+  {% set cash_paths = ['/reports', '/fiscal'] %}
   {% set admin_paths = ['/staff', '/stores', '/settings'] %}
   {% macro group_class(paths) -%}{% for p in paths if path == p or path.startswith(p + '/') %}{% if loop.first %}active{% endif %}{% endfor %}{%- endmacro %}
   <nav class="top">
@@ -90,6 +91,7 @@
           <ul>
             {{ item('/kassa', 'Касса на компьютере ↗', new_tab=True) }}
             {{ item('/reports', 'Отчёты') }}
+            {% if fiscal_enabled() %}{{ item('/fiscal', 'Фискализация') }}{% endif %}
           </ul>
         </details>
       </li>

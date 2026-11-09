@@ -131,12 +131,19 @@ SETTINGS = (
     Setting("IMPORT_MIN_PRICE_PERCENT", "Минимальная цена при импорте, % от цены", "labels", kind="float",
             default=100.0, help="Если в файле каталога нет колонки минимальной цены."),
     Setting("FISCAL_ENABLED", "Фискализировать операции через Webkassa", "fiscal", kind="bool", default=False,
-            help="Выключено — чеки, как и раньше, пробиваются отдельно (ReKassa и т. п.)."),
+            help="Выключено — чеки, как и раньше, пробиваются отдельно (ReKassa и т. п.). "
+                 "Включено — продажи, возвраты и инкассации пробиваются сами; кассы магазинов (ЗНК) — "
+                 "в разделе «Фискализация»."),
     Setting("WEBKASSA_URL", "Адрес API Webkassa", "fiscal", kind="url", default="https://devkkm.webkassa.kz",
             help="Тестовый стенд: https://devkkm.webkassa.kz, рабочий: https://kkm.webkassa.kz"),
     Setting("WEBKASSA_LOGIN", "Логин кассира Webkassa", "fiscal"),
     Setting("WEBKASSA_PASSWORD", "Пароль кассира Webkassa", "fiscal", secret=True),
     Setting("WEBKASSA_API_KEY", "API-ключ интегратора (X-API-KEY)", "fiscal", secret=True),
+    Setting("FISCAL_VAT_PERCENT", "НДС в чеке, %", "fiscal", kind="float", default=0.0,
+            help="0 — без НДС (ИП на упрощённой декларации). Плательщикам НДС — ставка, например 12."),
+    Setting("FISCAL_KASPI_MOBILE", "Kaspi — «мобильный платёж»", "fiscal", kind="bool", default=True,
+            help="Включено — оплата Kaspi в чеке как мобильный платёж (Kaspi QR, перевод). "
+                 "Выключено — как оплата картой (терминал Kaspi POS)."),
     Setting("MARKING_ENABLED", "Учёт кодов маркировки", "marking", kind="bool", default=False,
             help="Товары с отметкой «Маркируемый» продаются только по скану кода DataMatrix; коды "
                  "принимаются и сверяются в разделе «Маркировка». Передача кодов в ОФД — вместе с фискализацией."),

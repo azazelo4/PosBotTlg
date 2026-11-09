@@ -623,6 +623,25 @@ def _take_code(cursor, raw, product, taken):
     return code
 
 
+def _enqueue_fiscal(cursor, kind, ref_id, store_id, total, user_id):
+    """Поставить операцию в очередь фискализации (в той же транзакции). Только если фискализация включена
+    и у магазина указана касса Webkassa. Возвращает id записи очереди или None."""
+    if not config.FISCAL_ENABLED or not store_id:
+        return None
+    cursor.execute("SELECT cashbox FROM stores WHERE id = %s", (store_id,))
+    row = cursor.fetchone()
+    if not row or not (row.get('cashbox') or '').strip():
+        return None
+    moment = now()
+    # Номер для Webkassa (ExternalCheckNumber): повтор с тем же номером не создаст второй чек
+    external = f"pb-{kind}-{ref_id}-{secrets.token_hex(4)}"
+    cursor.execute("""INSERT INTO fiscal_receipts (kind, ref_id, store_id, cashbox, total, user_id, status, next_try_at,
+                                                   external_number, created_at, updated_at)
+                      VALUES (%s, %s, %s, %s, %s, %s, 'pending', %s, %s, %s, %s)""",
+                   (kind, ref_id, store_id, row['cashbox'].strip(), total, user_id, moment, external, moment, moment))
+    return cursor.lastrowid
+
+
 def _record_receipt(cursor, items, user_id, payment_type, store_id=None):
     """Чек: позиции [(product_id, цена[, код маркировки]), ...] одним платежом. Позиция — строка sales (одна штука).
 
@@ -681,7 +700,8 @@ def _record_receipt(cursor, items, user_id, payment_type, store_id=None):
                            (cursor.lastrowid, moment, code['id']))
     for product_id, count in need.items():
         cursor.execute("UPDATE products SET quantity = quantity - %s WHERE id = %s", (count, product_id))
-    return {"receipt_id": receipt_id, "sale_ids": sale_ids, "total": total}
+    fiscal_id = _enqueue_fiscal(cursor, 'sale', receipt_id, receipt_store, total, user_id)
+    return {"receipt_id": receipt_id, "sale_ids": sale_ids, "total": total, "fiscal": bool(fiscal_id)}
 
 
 @with_transaction
@@ -764,6 +784,7 @@ def create_return_record(cursor, sale_id, product_article, return_price, payment
                       VALUES (%s, %s, %s, %s, %s, %s, %s)""",
                    (sale_id, product_article, return_price, payment_type, user_id, sale['store_id'] or store_id, now()))
     return_id = cursor.lastrowid
+    _enqueue_fiscal(cursor, 'return', return_id, sale['store_id'] or store_id, return_price, user_id)
     _change_quantity(cursor, product_article, 1)
     if sale['mark_code_id']:
         # код возвращается в оборот вместе с изделием
@@ -825,7 +846,9 @@ def create_trade_in_record(cursor, new_product_article, new_sale_price, old_item
 def create_cash_withdrawal_record(cursor, amount, comment, user_id, store_id):
     cursor.execute("INSERT INTO cash_withdrawals (amount, comment, user_id, store_id, withdrawal_date) VALUES (%s, %s, %s, %s, %s)",
                    (amount, comment, user_id, store_id, now()))
-    return True, cursor.lastrowid
+    withdrawal_id = cursor.lastrowid
+    _enqueue_fiscal(cursor, 'withdrawal', withdrawal_id, store_id, amount, user_id)
+    return True, withdrawal_id
 
 
 # ---------------------------------------------------------------- отчёты
