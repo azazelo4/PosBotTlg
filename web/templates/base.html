@@ -33,28 +33,93 @@
     .table-wrap { overflow-x: auto; }
     form.inline { display: inline; }
     details.dropdown summary + ul { min-width: 12rem; }
+    nav.top .brand { text-decoration: none; color: inherit; }
+    nav.top .menu { flex-wrap: wrap; justify-content: flex-end; }
+    nav.top .menu > li { padding-top: .5rem; padding-bottom: .5rem; }
+    /* разделы меню — как ссылки, а не поля выбора */
+    nav.top details.dropdown { margin: 0; }
+    nav.top details.dropdown > summary:not([role]) { border: 0; background: none; box-shadow: none; height: auto;
+      padding: .25rem 1.2rem .25rem .25rem; color: var(--pico-primary); }
+    nav.top details.dropdown > summary:not([role]):hover { color: var(--pico-primary-hover); }
+    nav.top details.dropdown > summary::after { width: .8rem; }
+    /* закрытие кликом мимо — скриптом, без прозрачного слоя Pico: иначе соседний раздел открывается со второго клика */
+    nav.top details.dropdown[open] > summary::before { display: none; }
+    nav.top summary.active, nav.top .menu > li > a[aria-current] { font-weight: 600; color: var(--pico-primary); }
+    nav.top details.dropdown ul a[aria-current] { font-weight: 600; }
+    nav.top ul[dir="rtl"] > li { direction: ltr; text-align: left; }
+    nav.top .menu-note { font-size: .8rem; padding: .4rem var(--pico-form-element-spacing-horizontal); }
+    nav.top .menu-button { width: 100%; margin: .25rem 0 0; padding: .3rem .7rem; text-align: left; }
+    nav.top .show-sm { display: none; }
+    /* телефон: меню в одну строку (иконки вместо длинных подписей), раскрытый раздел — на всю ширину */
+    @media (max-width: 576px) {
+      nav.top .hide-sm { display: none; }
+      nav.top .show-sm { display: inline; }
+      nav.top .menu > li { padding-left: .3rem; padding-right: .3rem; }
+      nav.top details.dropdown > summary + ul { position: fixed; inset: 3.6rem 1rem auto 1rem !important; width: auto; min-width: 0; }
+    }
   </style>
 </head>
 <body>
 <header class="container">
   {% if user %}
+  {% set path = request.url.path if request else '' %}
+  {% macro item(href, title, new_tab=False) -%}
+    <li><a href="{{ href }}"{% if new_tab %} target="_blank"{% endif %}{% if path == href or (href != '/' and path.startswith(href + '/')) %} aria-current="page"{% endif %}>{{ title }}</a></li>
+  {%- endmacro %}
+  {% set stock_paths = ['/products', '/labels', '/import', '/marking'] %}
+  {% set cash_paths = ['/reports', '/fiscal'] %}
+  {% set admin_paths = ['/staff', '/stores', '/settings'] %}
+  {% macro group_class(paths) -%}{% for p in paths if path == p or path.startswith(p + '/') %}{% if loop.first %}active{% endif %}{% endfor %}{%- endmacro %}
   <nav class="top">
-    <ul><li><strong>💍 POS</strong></li></ul>
-    <ul>
-      <li><a href="/">Сводка</a></li>
-      <li><a href="/products">Товары</a></li>
-      <li><a href="/labels">Ценники</a></li>
-      <li><a href="/import">Импорт</a></li>
-      <li><a href="/reports">Отчёты</a></li>
-      {% if marking_enabled() %}<li><a href="/marking">Маркировка</a></li>{% endif %}
-      {% if fiscal_enabled() %}<li><a href="/fiscal">Фискализация</a></li>{% endif %}
-      <li><a href="/kassa" target="_blank">Касса</a></li>
-      <li><a href="/help">Справка</a></li>
-      {% if user.role == 'admin' %}<li><a href="/staff">Персонал</a></li><li><a href="/stores">Магазины</a></li><li><a href="/settings">Настройки</a></li>{% endif %}
+    <ul><li><a href="/" class="brand"><strong>💍<span class="hide-sm"> POS</span></strong></a></li></ul>
+    <ul class="menu">
+      <li class="hide-sm"><a href="/"{% if path == '/' %} aria-current="page"{% endif %}>Сводка</a></li>
       <li>
-        <form method="post" action="/logout" class="inline">
-          <button class="secondary outline" style="padding:.3rem .7rem;margin:0">Выйти</button>
-        </form>
+        <details class="dropdown">
+          <summary class="{{ group_class(stock_paths) }}">Склад</summary>
+          <ul>
+            {{ item('/products', 'Товары') }}
+            {{ item('/labels', 'Ценники') }}
+            {{ item('/import', 'Импорт каталога') }}
+            {% if marking_enabled() %}{{ item('/marking', 'Маркировка') }}{% endif %}
+          </ul>
+        </details>
+      </li>
+      <li>
+        <details class="dropdown">
+          <summary class="{{ group_class(cash_paths) }}">Касса</summary>
+          <ul>
+            {{ item('/kassa', 'Касса на компьютере ↗', new_tab=True) }}
+            {{ item('/reports', 'Отчёты') }}
+            {% if fiscal_enabled() %}{{ item('/fiscal', 'Фискализация') }}{% endif %}
+          </ul>
+        </details>
+      </li>
+      {% if user.role == 'admin' %}
+      <li>
+        <details class="dropdown">
+          <summary class="{{ group_class(admin_paths) }}" aria-label="Управление"><span class="hide-sm">Управление</span><span class="show-sm">⚙️</span></summary>
+          <ul dir="rtl">
+            {{ item('/staff', 'Персонал') }}
+            {{ item('/stores', 'Магазины') }}
+            {{ item('/settings', 'Настройки') }}
+          </ul>
+        </details>
+      </li>
+      {% endif %}
+      <li>
+        <details class="dropdown">
+          <summary class="{{ group_class(['/help']) }}" aria-label="Профиль">👤 <span class="hide-sm">{{ user.name }}</span></summary>
+          <ul dir="rtl">
+            <li class="muted menu-note">{{ user.name }} · {{ ROLE_TITLES.get(user.role, user.role) }}</li>
+            {{ item('/help', 'Справка') }}
+            <li>
+              <form method="post" action="/logout" style="margin:0">
+                <button class="secondary outline menu-button">Выйти</button>
+              </form>
+            </li>
+          </ul>
+        </details>
       </li>
     </ul>
   </nav>
@@ -67,5 +132,22 @@
 <footer class="container muted" style="font-size:.8rem;margin-top:2rem">
   {% if user %}{{ user.name }} · {{ ROLE_TITLES.get(user.role, user.role) }} · {% endif %}версия {{ VERSION }}
 </footer>
+<script>
+  // Меню: открыт один раздел; клик мимо или Esc — закрыть
+  (function () {
+    var menus = document.querySelectorAll('nav.top details.dropdown');
+    menus.forEach(function (d) {
+      d.addEventListener('toggle', function () {
+        if (d.open) menus.forEach(function (o) { if (o !== d) o.open = false; });
+      });
+    });
+    document.addEventListener('click', function (e) {
+      menus.forEach(function (d) { if (d.open && !d.contains(e.target)) d.open = false; });
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') menus.forEach(function (d) { d.open = false; });
+    });
+  })();
+</script>
 </body>
 </html>
