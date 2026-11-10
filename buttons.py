@@ -63,7 +63,8 @@ def create_cash_operations_buttons():
 
 
 def create_stock_management_buttons():
-    return _kb(["Добавить товар", "Пополнить остатки"], ["Ценники", "Импорт каталога"], ["Отчет об остатках"], [BTN_BACK])
+    return _kb(["Добавить товар", "Пополнить остатки"], ["Фото к товару", "Ценники"], ["Импорт каталога", "Отчет об остатках"],
+               [BTN_BACK])
 
 
 def create_cancel_markup():

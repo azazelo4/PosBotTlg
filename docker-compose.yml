@@ -11,6 +11,8 @@ services:
       - .env
     environment:
       TZ: ${TZ:-Asia/Almaty}
+    volumes:
+      - app_data:/app/data          # фото товаров
     logging: &logging
       driver: json-file
       options:
@@ -34,6 +36,8 @@ services:
       - .env
     environment:
       TZ: ${TZ:-Asia/Almaty}
+    volumes:
+      - app_data:/app/data
     logging: *logging
 
   # HTTPS для веб-админки. Домен и сертификат — автоматически после /setup (см. deploy/Caddyfile)
@@ -83,5 +87,6 @@ services:
 
 volumes:
   db_data:
+  app_data:
   caddy_data:
   caddy_config:

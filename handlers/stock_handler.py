@@ -1,4 +1,4 @@
-"""Склад: добавление товара, пополнение остатков, отчёт об остатках."""
+"""Склад: добавление товара, фото товара, пополнение остатков, отчёт об остатках."""
 import logging
 from decimal import Decimal
 
@@ -8,6 +8,7 @@ from buttons import (create_cancel_markup, create_confirmation_markup, create_ch
                      create_stock_management_buttons, BTN_CONFIRM)
 from database import add_product_to_db, get_stock_report_data, update_product_quantity, get_product_by_article, get_enum_or_distinct_values
 from handlers.common import store_names, store_id_by_name, store_name_by_id, STOCK_ROLES, in_state, is_button, register_simple_cancel, product_line, SKIP
+import photos
 from schema import METAL_TYPES, PRODUCT_TYPES
 from state import bot, user_state, get_op, start_op, end_op, cancel_current_operation
 from utils.stock_report import build_stock_excel, stock_totals
@@ -188,7 +189,89 @@ def on_add_confirm(message):
     data['arrival_date'] = now().date()
     ok, msg = add_product_to_db(data)
     end_op(chat_id)
-    stock_menu(chat_id, ("✅ " if ok else "❌ ") + msg)
+    created = get_product_by_article(data['article_number']) if ok else None
+    if not created:
+        stock_menu(chat_id, ("✅ " if ok else "❌ ") + msg)
+        return
+    _ask_photos(chat_id, created, f"✅ {msg}\n\n")
+
+
+# ------------------------------------------------------------ фото товара (необязательно)
+PHOTO_ARTICLE, PHOTO_WAIT = "STOCK_PHOTO_ARTICLE", "STOCK_PHOTO_WAIT"
+BTN_DONE = "Готово"
+
+
+def _ask_photos(chat_id, product, prefix=""):
+    start_op(chat_id, PHOTO_WAIT)
+    op = get_op(chat_id)
+    op['product'], op['added'] = product, 0
+    have = len(photos.for_product(product['id']) or [])
+    note = f" У товара уже {have} фото, можно ещё {photos.MAX_PER_PRODUCT - have}." if have else " Первое станет главным."
+    bot.send_message(chat_id, f"{prefix}📷 Пришлите фото {product_line(product)} — одно или несколько, или нажмите "
+                              f"«{BTN_DONE}», если фото не нужно.{note}\nФото увидит продавец на кассе.",
+                     parse_mode='HTML', reply_markup=create_choice_markup([BTN_DONE], 1))
+
+
+def start_photo(message):
+    chat_id = message.chat.id
+    cancel_current_operation(chat_id, notify=False)
+    start_op(chat_id, PHOTO_ARTICLE)
+    bot.send_message(chat_id, "Фото к товару. Введите артикул:", reply_markup=create_cancel_markup())
+
+
+def on_photo_article(message):
+    chat_id, article = message.chat.id, (message.text or '').strip()
+    product = get_product_by_article(article)
+    if not product:
+        bot.send_message(chat_id, f"Артикул <code>{h(article)}</code> не найден. Введите другой.", parse_mode='HTML',
+                         reply_markup=create_cancel_markup())
+        return
+    _ask_photos(chat_id, product)
+
+
+def on_photo(message):
+    chat_id = message.chat.id
+    op = get_op(chat_id)
+    if message.content_type == 'photo':
+        file_id = message.photo[-1].file_id
+    elif message.content_type == 'document' and (message.document.mime_type or '').startswith('image/'):
+        if (message.document.file_size or 0) > photos.MAX_BYTES:
+            bot.send_message(chat_id, "Файл больше 10 МБ — пришлите фото поменьше.")
+            return
+        file_id = message.document.file_id
+    else:
+        bot.send_message(chat_id, f"Пришлите фото или нажмите «{BTN_DONE}».",
+                         reply_markup=create_choice_markup([BTN_DONE], 1))
+        return
+    try:
+        data = bot.download_file(bot.get_file(file_id).file_path)
+    except Exception as e:  # noqa: BLE001 — сеть Telegram: сообщаем и ждём следующее фото
+        logger.warning("Chat %s: не удалось скачать фото: %s", chat_id, e)
+        bot.send_message(chat_id, "Не удалось получить фото из Telegram. Пришлите его ещё раз.")
+        return
+    ok, result = photos.add(op['product']['id'], data, _user_id(chat_id))
+    if not ok:
+        bot.send_message(chat_id, f"❌ {result}", reply_markup=create_choice_markup([BTN_DONE], 1))
+        return
+    op['added'] = op.get('added', 0) + 1
+    bot.send_message(chat_id, f"📷 Фото сохранено ({op['added']}). Пришлите ещё или нажмите «{BTN_DONE}».",
+                     reply_markup=create_choice_markup([BTN_DONE], 1))
+
+
+def on_photo_text(message):
+    chat_id = message.chat.id
+    if (message.text or '').strip() not in (BTN_DONE, SKIP):
+        bot.send_message(chat_id, f"Пришлите фото или нажмите «{BTN_DONE}».", reply_markup=create_choice_markup([BTN_DONE], 1))
+        return
+    added = get_op(chat_id).get('added', 0)
+    end_op(chat_id)
+    stock_menu(chat_id, f"Готово, добавлено фото: {added}." if added else "Готово, без фото.")
+
+
+def _user_id(chat_id):
+    from database import get_user_by_chat_id
+    user = get_user_by_chat_id(chat_id)
+    return user['id'] if user else None
 
 
 # ------------------------------------------------------------ пополнение
@@ -271,3 +354,7 @@ def register_stock_handlers():
     bot.register_message_handler(on_restock_article, func=in_state(RESTOCK_ARTICLE))
     bot.register_message_handler(on_restock_qty, func=in_state(RESTOCK_QTY))
     bot.register_message_handler(on_restock_confirm, func=in_state(RESTOCK_CONFIRM))
+    bot.register_message_handler(start_photo, func=is_button("Фото к товару", *STOCK_ROLES))
+    bot.register_message_handler(on_photo_article, func=in_state(PHOTO_ARTICLE))
+    bot.register_message_handler(on_photo, content_types=['photo', 'document'], func=in_state(PHOTO_WAIT))
+    bot.register_message_handler(on_photo_text, func=in_state(PHOTO_WAIT))
