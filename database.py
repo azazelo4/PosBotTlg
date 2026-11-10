@@ -593,6 +593,54 @@ def consume_kassa_login(cursor, token_hash):
 # ---------------------------------------------------------------- кассовые операции
 
 MAX_RECEIPT_ITEMS = 50
+MIXED_PAYMENT = "Смешанная"      # в receipts/sales.payment_type; суммы по способам — в receipt_payments
+
+
+def _split_payments(payment, total):
+    """Оплата чека → [(способ, сумма), …]. payment — способ строкой (вся сумма) или список пар для смешанной оплаты."""
+    if isinstance(payment, str):
+        return [(payment, total)]
+    parts = []
+    for row in payment or []:
+        kind, amount = (row.get('type'), row.get('amount')) if isinstance(row, dict) else row
+        if amount is None or amount <= 0:
+            raise BusinessError("Смешанная оплата: укажите сумму больше нуля для каждого способа.")
+        if any(kind == k for k, _ in parts):
+            raise BusinessError(f"Смешанная оплата: способ «{kind}» указан дважды.")
+        parts.append((kind, amount))
+    if not parts:
+        raise BusinessError("Выберите способ оплаты.")
+    paid = sum(a for _, a in parts)
+    if paid != total:
+        raise BusinessError(f"Смешанная оплата: суммы по способам ({int(paid)}) не равны итогу чека ({int(total)}).")
+    return parts
+
+
+def payments_label(payments):
+    """«Наличные 100 000 ₸ + Kaspi 50 000 ₸» или просто способ, если он один."""
+    from utils.common import money
+    if len(payments) == 1:
+        return payments[0][0]
+    return " + ".join(f"{kind} {money(amount)}" for kind, amount in payments)
+
+
+def _allocate(sales, payments):
+    """Раскладывает оплаты чека по его позициям «водопадом»: сумма по каждой позиции и по каждому способу точная.
+    Возвращает {id продажи: [(способ, сумма), …]} — для движения денег по способам и магазинам."""
+    queue = [[kind, float(amount)] for kind, amount in payments]
+    result = {}
+    for s in sales:
+        need, parts = float(s['sold_price']), []
+        while need > 0.004 and queue:
+            take = min(need, queue[0][1])
+            if take > 0:
+                parts.append((queue[0][0], take))
+            queue[0][1] -= take
+            need -= take
+            if queue[0][1] <= 0.004:
+                queue.pop(0)
+        result[s['id']] = parts
+    return result
 
 
 SELLABLE_CODE = ('in_stock', 'returned')
@@ -706,6 +754,8 @@ def _record_receipt(cursor, items, user_id, payment_type, store_id=None, custome
         raise BusinessError("В одном чеке — товары одного магазина.")
     receipt_store = stores.pop() or store_id
     total = sum(price for _, price, _ in items)
+    payments = _split_payments(payment_type, total)
+    payment_type = payments[0][0] if len(payments) == 1 else MIXED_PAYMENT
     moment = now()
     customer_id = None
     if customer and (customer.get('phone') or '').strip():
@@ -717,6 +767,9 @@ def _record_receipt(cursor, items, user_id, payment_type, store_id=None, custome
                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
                    (receipt_store, user_id, moment, total, len(items), payment_type, token, customer_id))
     receipt_id = cursor.lastrowid
+    for kind, amount in payments:
+        cursor.execute("INSERT INTO receipt_payments (receipt_id, payment_type, amount) VALUES (%s, %s, %s)",
+                       (receipt_id, kind, amount))
     sale_ids = []
     for (product_id, price, _), code in zip(items, codes):
         p = products[product_id]
@@ -733,7 +786,7 @@ def _record_receipt(cursor, items, user_id, payment_type, store_id=None, custome
         cursor.execute("UPDATE products SET quantity = quantity - %s WHERE id = %s", (count, product_id))
     fiscal_id = _enqueue_fiscal(cursor, 'sale', receipt_id, receipt_store, total, user_id)
     return {"receipt_id": receipt_id, "sale_ids": sale_ids, "total": total, "fiscal": bool(fiscal_id),
-            "customer_id": customer_id, "public_token": token}
+            "customer_id": customer_id, "public_token": token, "payment": payments_label(payments)}
 
 
 @with_transaction
@@ -773,6 +826,11 @@ def get_receipt(cursor, receipt_id=None, token=None):
         cursor.execute("""SELECT status, check_number, ticket_url FROM fiscal_receipts WHERE kind = 'sale' AND ref_id = %s
                           ORDER BY id DESC LIMIT 1""", (receipt['id'],))
         receipt['fiscal'] = cursor.fetchone()
+        cursor.execute("SELECT payment_type, amount FROM receipt_payments WHERE receipt_id = %s ORDER BY id", (receipt['id'],))
+        # чеки до смешанной оплаты: одна оплата на всю сумму
+        receipt['payments'] = ([(r['payment_type'], r['amount']) for r in cursor.fetchall()]
+                               or [(receipt['payment_type'], receipt['total'])])
+        receipt['payment_label'] = payments_label(receipt['payments'])
     return receipt
 
 
@@ -960,7 +1018,33 @@ def get_period_operations(cursor, start_dt, end_dt, store_id=None):
         LEFT JOIN users u ON w.user_id = u.id
         WHERE w.withdrawal_date >= %s AND w.withdrawal_date < %s{STORE_FILTER}
         ORDER BY w.withdrawal_date, w.id""", "w")
+    _attach_payment_parts(cursor, result['sales'])
     return result
+
+
+def _attach_payment_parts(cursor, sales):
+    """Позициям чеков со смешанной оплатой — payment_parts [(способ, сумма)] и payment_label всего чека."""
+    receipt_ids = sorted({s['receipt_id'] for s in sales if s['payment_type'] == MIXED_PAYMENT and s.get('receipt_id')})
+    for i in range(0, len(receipt_ids), 500):
+        chunk = receipt_ids[i:i + 500]
+        marks = ",".join(["%s"] * len(chunk))
+        cursor.execute(f"SELECT receipt_id, payment_type, amount FROM receipt_payments WHERE receipt_id IN ({marks}) "
+                       "ORDER BY id", chunk)
+        payments = {}
+        for r in cursor.fetchall():
+            payments.setdefault(r['receipt_id'], []).append((r['payment_type'], r['amount']))
+        # все позиции чека (в отчёт по магазину или дню могла попасть только часть — раскладываем по полному чеку)
+        cursor.execute(f"SELECT id, receipt_id, sold_price FROM sales WHERE receipt_id IN ({marks}) ORDER BY id", chunk)
+        rows = {}
+        for r in cursor.fetchall():
+            rows.setdefault(r['receipt_id'], []).append(r)
+        parts = {}
+        for rid, items in rows.items():
+            parts.update(_allocate(items, payments.get(rid, [])))
+        for s in sales:
+            if s.get('receipt_id') in payments and s['payment_type'] == MIXED_PAYMENT:
+                s['payment_parts'] = parts.get(s['id'], [])
+                s['payment_label'] = payments_label(payments[s['receipt_id']])
 
 
 # ---------------------------------------------------------------- отметки фоновых задач

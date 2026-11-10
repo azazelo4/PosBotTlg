@@ -210,6 +210,11 @@ def remove_demo(cursor):
             cursor.execute(f"""UPDATE receipts r JOIN (SELECT receipt_id, SUM(sold_price) AS total, COUNT(*) AS n
                                 FROM sales WHERE receipt_id IN ({rmarks}) GROUP BY receipt_id) x ON x.receipt_id = r.id
                                SET r.total = x.total, r.items_count = x.n""", receipts)
+            cursor.execute(f"""DELETE rp FROM receipt_payments rp LEFT JOIN receipts r ON r.id = rp.receipt_id
+                               WHERE rp.receipt_id IN ({rmarks}) AND r.id IS NULL""", receipts)
+            cursor.execute(f"""UPDATE receipt_payments rp JOIN receipts r ON r.id = rp.receipt_id
+                               SET rp.amount = r.total
+                               WHERE rp.receipt_id IN ({rmarks}) AND r.payment_type != 'Смешанная'""", receipts)
     cursor.execute("DELETE FROM trade_ins WHERE new_product_article LIKE %s OR old_product_article LIKE %s", (like, like))
     removed += cursor.rowcount
     cursor.execute("DELETE FROM buybacks WHERE product_article LIKE %s OR description LIKE %s", (like, MARK + "%"))

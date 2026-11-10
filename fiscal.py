@@ -94,6 +94,20 @@ def _item_name(row):
 
 # ------------------------------------------------------------------ данные операций
 
+def _payments(cursor, receipt, total):
+    """Оплаты чека для Webkassa. Каждый вид оплаты — не больше одного раза в чеке, поэтому способы с одним
+    кодом (Безналичные и Kaspi-картой) складываются."""
+    cursor.execute("SELECT payment_type, amount FROM receipt_payments WHERE receipt_id = %s ORDER BY id", (receipt['id'],))
+    rows = cursor.fetchall() or [{'payment_type': receipt['payment_type'], 'amount': total}]
+    by_code = {}
+    for r in rows:
+        code = payment_code(r['payment_type'])
+        by_code[code] = round(by_code.get(code, 0) + _money(r['amount']), 2)
+    if round(sum(by_code.values()), 2) != total:      # суммы оплат расходятся с позициями — чек одной оплатой
+        return [{"Sum": total, "PaymentType": payment_code(rows[0]['payment_type'])}]
+    return [{"Sum": amount, "PaymentType": code} for code, amount in by_code.items()]
+
+
 @with_connection
 def _sale_body(cursor, rec):
     cursor.execute("SELECT * FROM receipts WHERE id = %s", (rec['ref_id'],))
@@ -109,7 +123,7 @@ def _sale_body(cursor, rec):
     positions = [_position(_item_name(r), r['article_number'], r['sold_price'], r['mark']) for r in rows]
     total = round(sum(p["Price"] for p in positions), 2)
     return {"CashboxUniqueNumber": rec['cashbox'], "OperationType": OPERATION_SALE, "Positions": positions,
-            "Payments": [{"Sum": total, "PaymentType": payment_code(receipt['payment_type'])}], "Change": 0,
+            "Payments": _payments(cursor, receipt, total), "Change": 0,
             "RoundType": ROUND_KOPECKS, "ExternalCheckNumber": rec['external_number']}
 
 

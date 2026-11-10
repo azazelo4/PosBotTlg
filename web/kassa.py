@@ -326,15 +326,30 @@ async def sale(request: Request, user=Depends(kassa_user), _=Depends(same_origin
         code = str(row.get("code") or "").strip() or None
         items.append((p['id'], price, code))
         names.append(p['model'] or p['article_number'])
-    payment = _payment(body.get("payment"))
+    payment = _payments(body)
     customer = _customer(body.get("customer"))
     result = _result(*record_receipt(items, user['id'], payment, kassa_store_id(request, user), customer),
                      "Продажа не оформлена")
     logger.info("Касса ПК: чек #%s, %s поз. на %s (%s)", result['receipt_id'], len(items), result['total'], user['id'])
     what = names[0] if len(names) == 1 else f"{len(names)} поз."
     return {"id": result['receipt_id'], "sale_ids": result['sale_ids'],
-            "text": f"Чек №{result['receipt_id']}: {what}, {money(result['total'])}, {payment}",
+            "text": f"Чек №{result['receipt_id']}: {what}, {money(result['total'])}, {result['payment']}",
             "receipt": receipt_delivery(result['receipt_id'], customer)}
+
+
+def _payments(body):
+    """Оплата чека: {"payment": "Kaspi"} или смешанная {"payments": [{"type", "amount"}, …]} (суммы — равны итогу)."""
+    raw = body.get("payments")
+    if not raw:
+        return _payment(body.get("payment"))
+    if not isinstance(raw, list) or len(raw) > len(PAYMENT_TYPES):
+        raise HTTPException(400, "Смешанная оплата: укажите суммы по способам.")
+    parts = []
+    for row in raw:
+        row = row if isinstance(row, dict) else {}
+        kind = _payment(row.get("type"))
+        parts.append((kind, _money(row.get("amount"), f"сумму «{kind}»")))
+    return parts[0][0] if len(parts) == 1 else parts
 
 
 def _customer(raw):
@@ -467,7 +482,8 @@ def _journal(ops):
             f"{len(items)} поз.: " + ", ".join(i['model'] or i['article_number'] for i in items)
         if key > 0:
             what = f"чек №{key} · {what}"
-        rows.append((s['sale_date'], "Продажа", what, sum(int(i['sold_price']) for i in items), s['payment_type'], s['user_name']))
+        rows.append((s['sale_date'], "Продажа", what, sum(int(i['sold_price']) for i in items),
+                     s.get('payment_label') or s['payment_type'], s['user_name']))
     for r in ops['returns']:
         rows.append((r['return_date'], "Возврат", f"{r['model'] or ''} · {r['product_article']} (продажа №{r['original_sale_id']})",
                      -int(r['return_price']), r['payment_type'], r['user_name']))

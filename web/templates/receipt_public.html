@@ -46,7 +46,7 @@
       </div>
     {% endfor %}
     <div class="total"><span>Итого</span><span>{{ receipt.total|money }}</span></div>
-    <div class="muted">Оплата: {{ receipt.payment_type }}{% if receipt.user_name %} · продавец {{ receipt.user_name }}{% endif %}</div>
+    <div class="muted">Оплата: {{ receipt.payment_label or receipt.payment_type }}{% if receipt.user_name %} · продавец {{ receipt.user_name }}{% endif %}</div>
     {% if receipt.fiscal and receipt.fiscal.ticket_url %}
       <p style="margin-top:.75rem">Фискальный чек{% if receipt.fiscal.check_number %} №{{ receipt.fiscal.check_number }}{% endif %}:
         <a href="{{ receipt.fiscal.ticket_url }}" target="_blank" rel="noopener">открыть на сайте ОФД</a></p>
