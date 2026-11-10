@@ -36,7 +36,8 @@ from database import (get_receipt, get_job_run, marking_required, ensure_admin, 
 from schema import METAL_TYPES, PRODUCT_TYPES, ensure_schema
 from utils.catalog_import import build_plan, apply_plan, FIELD_TITLES
 from utils import mark_codes
-from utils.common import money, today, now, parse_money, parse_float, parse_int, parse_date, normalize_phone, day_bounds
+from utils.common import (money, today, now, parse_money, parse_float, parse_int, parse_date, normalize_phone,
+                          day_bounds, parse_birthday, format_birthday)
 from utils.labels import generate_labels_pdf, details_line
 from utils.report_generator import build_summary, build_excel, store_breakdown
 from utils.stock_report import build_stock_excel, stock_totals
@@ -48,6 +49,7 @@ logger = logging.getLogger("posbot.web")
 BASE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(BASE / "templates"))
 templates.env.filters['money'] = money
+templates.env.filters['birthday'] = format_birthday
 
 
 def _num(value):
@@ -258,7 +260,7 @@ def _dashboard(request: Request, user):
     low = get_low_stock_products(config.LOW_STOCK_THRESHOLD) or []
     items = get_stock_report_data() or []
     return render(request, "dashboard.html", user, periods=periods, low_stock=low[:10], low_count=len(low), breakdown=breakdown,
-                  demo=demo_data.has_demo(),
+                  demo=demo_data.has_demo(), birthdays=customers.upcoming_birthdays(7) or [],
                   totals=stock_totals(items), today=d, payment_types=PAYMENT_TYPES)
 
 
@@ -406,7 +408,8 @@ def public_receipt(request: Request, token: str):
 
 @app.get("/customers", response_class=HTMLResponse)
 def customers_page(request: Request, q: str = "", user=Depends(current_user)):
-    return render(request, "customers.html", user, rows=customers.search(q) or [], q=q)
+    return render(request, "customers.html", user, rows=customers.search(q) or [], q=q,
+                  birthdays=customers.upcoming_birthdays() or [] if not q else [])
 
 
 @app.get("/customers/{customer_id}", response_class=HTMLResponse)
@@ -421,9 +424,9 @@ def customer_page(request: Request, customer_id: int, user=Depends(current_user)
 def customer_save(request: Request, customer_id: int, name: str = Form(""), birthday: str = Form(""),
                   note: str = Form(""), csrf: str = Form(""), user=Depends(current_user)):
     check_csrf(request, csrf)
-    born = parse_date(birthday) if birthday.strip() else None
+    born = parse_birthday(birthday) if birthday.strip() else None
     if birthday.strip() and not born:
-        flash(request, "Дата рождения — в формате ДД.ММ.ГГГГ.", "error")
+        flash(request, "День рождения — ДД.ММ или ДД.ММ.ГГГГ, например 12.05 или 12.05.1995.", "error")
         return RedirectResponse(f"/customers/{customer_id}", status_code=303)
     ok, result = customers.update(customer_id, name, born, note)
     flash(request, "Сохранено." if ok else result, "ok" if ok else "error")

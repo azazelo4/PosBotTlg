@@ -146,7 +146,7 @@ def test_admin_customers(tg):
     csrf = _csrf(manager, f"/customers/{cid}")
     r = manager.post(f"/customers/{cid}", data={"csrf": csrf, "name": "Айгерим К.", "birthday": "12.05.1995", "note": "р. 17"})
     assert "Сохранено" in r.text and "12.05.1995" in r.text
-    assert "ДД.ММ.ГГГГ" in manager.post(f"/customers/{cid}", data={"csrf": csrf, "birthday": "май"}).text
+    assert "ДД.ММ или ДД.ММ.ГГГГ" in manager.post(f"/customers/{cid}", data={"csrf": csrf, "birthday": "май"}).text
     assert manager.post(f"/customers/{cid}/delete", data={"csrf": csrf}).status_code == 403
     admin = _web(tg, ADMIN)
     csrf = _csrf(admin, f"/customers/{cid}")
@@ -154,3 +154,35 @@ def test_admin_customers(tg):
     assert "Клиент удалён" in r.text
     assert db_query("SELECT COUNT(*) AS n FROM customers")[0]['n'] == 0
     assert db_query("SELECT customer_id FROM receipts")[0]['customer_id'] is None
+
+
+def test_birthday_on_kassa_card_and_upcoming(tg, client):  # noqa: F811
+    from datetime import timedelta
+    from utils.common import today, parse_birthday, format_birthday, days_to_birthday
+    assert format_birthday(parse_birthday("12.05")) == "12.05" and format_birthday(parse_birthday("12.05.1995")) == "12.05.1995"
+    assert format_birthday(parse_birthday("1/2/88")) == "01.02.1988" and parse_birthday("32.01") is None
+    assert parse_birthday("май") is None and parse_birthday("01.01.2999") is None
+    assert days_to_birthday(parse_birthday("29.02"), today().replace(month=2, day=28, year=2027)) == 1   # 1 марта
+    soon = today() + timedelta(days=3)
+    kassa_login(tg, client)
+    bad = post(client, "sale", {"items": [{"article": "A100", "price": 145000}], "payment": "Kaspi",
+                                "customer": {"phone": PHONE, "consent": True, "birthday": "скоро"}})
+    assert bad.status_code == 400 and "День рождения" in bad.json()["error"]
+    r = post(client, "sale", {"items": [{"article": "A100", "price": 145000}], "payment": "Kaspi",
+                              "customer": {"phone": PHONE, "name": "Айгерим", "consent": True,
+                                           "birthday": soon.strftime("%d.%m")}})
+    assert r.status_code == 200, r.text
+    cid = db_query("SELECT id FROM customers")[0]['id']
+    assert [c['days_left'] for c in customers.upcoming_birthdays()] == [3]
+    manager = _web(tg, MANAGER)
+    page = manager.get("/customers").text
+    assert "Дни рождения в ближайшие две недели" in page and "через 3 дн." in page and soon.strftime("%d.%m") in page
+    assert "Дни рождения клиентов на этой неделе" in manager.get("/").text
+    csrf = _csrf(manager, f"/customers/{cid}")
+    r = manager.post(f"/customers/{cid}", data={"csrf": csrf, "name": "Айгерим", "birthday": today().strftime("%d.%m") + ".1990"})
+    assert today().strftime("%d.%m") + ".1990" in r.text
+    assert customers.upcoming_birthdays()[0]['days_left'] == 0 and "сегодня" in manager.get("/customers").text
+    # день рождения, названный на кассе позже, не затирает сохранённый
+    post(client, "sale", {"items": [{"article": "A100", "price": 145000}], "payment": "Kaspi",
+                          "customer": {"phone": PHONE, "consent": True, "birthday": "01.01"}})
+    assert db_query("SELECT birthday FROM customers")[0]['birthday'].year == 1990
