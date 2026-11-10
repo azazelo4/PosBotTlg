@@ -7,8 +7,9 @@
 import logging
 from datetime import timedelta
 
+import analytics
 from database import with_connection, with_transaction, BusinessError, _upsert_customer
-from utils.common import now, normalize_phone, days_to_birthday
+from utils.common import now, today, normalize_phone, days_to_birthday
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +123,45 @@ def get(cursor, customer_id):
                           WHERE r.customer_id = %s ORDER BY r.id DESC""", (customer_id,))
         customer['history'] = cursor.fetchall()
         customer['spent'] = sum(float(r['total'] or 0) for r in customer['history'])
+        customer['profile'] = _profile(cursor, customer_id)
     return customer
+
+
+def _profile(cursor, customer_id):
+    """Что и сколько покупает клиент: без возвращённых позиций — сумма, средний чек, любимые типы, металл, магазин."""
+    cursor.execute("""SELECT s.receipt_id, s.sold_price, s.sale_date, p.product_type, p.metal_type, p.fineness, p.size,
+                             st.name AS store
+                      FROM sales s JOIN receipts r ON r.id = s.receipt_id JOIN products p ON p.id = s.product_id
+                      LEFT JOIN stores st ON st.id = s.store_id
+                      LEFT JOIN returns rt ON rt.original_sale_id = s.id
+                      WHERE r.customer_id = %s AND rt.id IS NULL""", (customer_id,))
+    rows = cursor.fetchall()
+    if not rows:
+        return None
+    total = sum(float(r['sold_price'] or 0) for r in rows)
+    receipts = len({r['receipt_id'] for r in rows})
+    first, last = min(r['sale_date'] for r in rows), max(r['sale_date'] for r in rows)
+
+    def top(key, n=3):
+        acc = {}
+        for r in rows:
+            k = key(r)
+            if k:
+                acc[k] = acc.get(k, 0) + 1
+        return sorted(acc.items(), key=lambda kv: (-kv[1], kv[0]))[:n]
+
+    days = (today() - first.date()).days
+    return {
+        "total": total, "receipts": receipts, "qty": len(rows), "avg_check": total / receipts,
+        "first": first, "last": last, "days_since": (today() - last.date()).days,
+        # как часто приходит: средний интервал между покупками
+        "interval": round(days / (receipts - 1)) if receipts > 1 and days else None,
+        "segment": analytics.segment_of(receipts, last, today()),
+        "types": top(lambda r: r['product_type']), "metals": top(lambda r: r['metal_type'] if not r['fineness']
+                                                                    else f"{r['metal_type']} {r['fineness']}"),
+        "stores": top(lambda r: r['store'], 2),
+        "ring_sizes": top(lambda r: r['size'] if r['product_type'] == 'кольцо' else None, 2),
+    }
 
 
 @with_transaction

@@ -11,17 +11,26 @@
   <button type="submit">Сохранить</button>
 </form>
 <h3 id="demo">Демо-данные</h3>
-{% if demo and (demo.products or demo.operations) %}
-<p>Сейчас в базе демо-данные: <strong>{{ demo.products }}</strong> товаров с артикулами <code>DEMO-…</code> и
-  <strong>{{ demo.operations }}</strong> операций. Удалятся и операции, которые сотрудники провели с демо-товарами.
-  Настоящие товары и операции не затрагиваются.</p>
-<form method="post" action="/settings/demo" onsubmit="return confirm('Удалить все демо-товары и операции с ними?')">
+{% if demo and (demo.products or demo.operations or demo.customers) %}
+<p>Сейчас в базе демо-данные: <strong>{{ demo.products }}</strong> товаров с артикулами <code>DEMO-…</code>,
+  <strong>{{ demo.operations }}</strong> операций и <strong>{{ demo.customers }}</strong> клиентов с номерами <code>+7 000 000 …</code>.
+  Удалятся и операции, которые сотрудники провели с демо-товарами. Настоящие товары, клиенты и операции не затрагиваются.</p>
+{% if demo.products and not demo.customers %}
+<p class="muted hint">Демо-клиентов пока нет: около 55 человек с покупками за год — постоянные, новые, уснувшие.
+  Нужны, чтобы посмотреть «Аналитика → Клиенты» и карточки клиентов.</p>
+<form method="post" action="/settings/demo" style="display:inline-block;margin-right:.5rem">
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="customers">
+  <button type="submit" class="secondary outline">Добавить демо-клиентов с покупками</button>
+</form>
+{% endif %}
+<form method="post" action="/settings/demo" style="display:inline-block" onsubmit="return confirm('Удалить все демо-товары, демо-клиентов и операции с ними?')">
   <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="remove">
   <button type="submit" class="secondary">Удалить демо-данные</button>
 </form>
 {% else %}
-<p class="muted">Пример каталога и продаж за две недели — чтобы показать систему или обучить сотрудников. Товары
-  получают артикулы <code>DEMO-…</code> и удаляются здесь же одной кнопкой.</p>
+<p class="muted">Пример каталога, продажи за две недели и база клиентов с покупками за год — чтобы показать систему
+  или обучить сотрудников. Товары получают артикулы <code>DEMO-…</code>, клиенты — номера <code>+7 000 000 …</code>;
+  всё удаляется здесь же одной кнопкой.</p>
 <form method="post" action="/settings/demo">
   <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="add">
   <button type="submit" class="secondary outline">Добавить демо-данные</button>

@@ -93,9 +93,9 @@
   <div class="an-two" style="margin-top:1rem">
     {% for title, rows in (("Пробы", d.structure.fineness), ("Магазины", d.structure.stores)) %}
     <div><h5>{{ title }}</h5>
-      <table><thead><tr><th></th><th class="num">Шт.</th><th class="num">Выручка</th><th class="num">Доля</th></tr></thead><tbody>
+      <div class="table-wrap"><table><thead><tr><th></th><th class="num">Шт.</th><th class="num">Выручка</th><th class="num">Доля</th></tr></thead><tbody>
       {% for g in rows %}<tr><td>{{ g.name }}</td><td class="num">{{ g.count }}</td><td class="num">{{ g.revenue | money }}</td><td class="num">{{ pct(g.share) }}</td></tr>
-      {% else %}<tr><td colspan="4" class="muted">Нет данных</td></tr>{% endfor %}</tbody></table>
+      {% else %}<tr><td colspan="4" class="muted">Нет данных</td></tr>{% endfor %}</tbody></table></div>
     </div>
     {% endfor %}
   </div>
@@ -138,6 +138,65 @@
   <p class="muted hint">Число чеков по дню недели и часу. Помогает ставить смены и время акций.</p>
 </section>
 
+<section class="an-section" id="clients">
+  <h3>Клиенты</h3>
+  {% set cl = d.clients %}
+  {% if not cl.in_base %}
+  <p class="muted">В базе пока нет клиентов. Номер клиента сохраняется на кассе (блок «Клиент», с его согласием) или когда
+    клиент сам подписывается на чеки в Telegram по QR-коду на чеке. Как только появятся покупки с номером — здесь будет видно,
+    кто, сколько и что покупает.</p>
+  {% else %}
+  <div class="grid-cards">
+    <article><div class="muted">Покупали в периоде</div><div class="stat">{{ cl.buyers }}</div>
+      <small class="muted">из {{ cl.in_base }} в базе · новых {{ cl.new }} · вернулись {{ cl.back }}</small></article>
+    <article><div class="muted">Выручка с клиентов из базы</div><div class="stat">{{ cl.revenue | money }}</div>
+      <small class="muted">{{ pct(cl.revenue_share) }} выручки · {{ pct(cl.receipts_share) }} чеков</small></article>
+    <article><div class="muted">Средний чек клиента</div><div class="stat">{{ cl.avg_check | money }}</div>
+      <small class="muted">без номера — {{ cl.anon_avg_check | money }}</small></article>
+    <article><div class="muted">На одного клиента</div><div class="stat">{{ cl.per_buyer | money }}</div>
+      <small class="muted">{{ '%.1f' | format(cl.visits) if cl.visits else '—' }} покупки за период · покупали больше одного раза {{ pct(cl.repeat_share) }}</small></article>
+  </div>
+
+  <div class="an-chart small" style="margin-top:1rem"><canvas id="ch-clients" aria-label="Выручка: новые, вернувшиеся, без номера"></canvas></div>
+  <p class="muted hint">Новые — первая покупка в этом периоде, вернулись — покупали и раньше, без номера — чеки без клиента.</p>
+
+  <h5 style="margin-top:1rem">Топ клиентов за период</h5>
+  <div class="table-wrap"><table class="striped">
+    <thead><tr><th>Клиент</th><th class="num">Выручка</th><th class="num">Покупок</th><th class="num">Шт.</th><th class="num">Средний чек</th>
+      <th>Чаще берёт</th><th>Последняя</th><th class="num">За всё время</th><th>Сегмент</th></tr></thead>
+    <tbody>{% for c in cl.top %}
+      <tr><td><a href="/customers/{{ c.id }}">{{ c.name or c.phone }}</a>{% if c.name %}<br><small class="muted">{{ c.phone }}</small>{% endif %}
+          {% if c.is_new %} <span class="badge">новый</span>{% endif %}</td>
+        <td class="num">{{ c.revenue | money }}</td><td class="num">{{ c.receipts }}</td><td class="num">{{ c.qty }}</td>
+        <td class="num">{{ c.avg_check | money }}</td><td>{{ c.favorite or '' }}</td><td>{{ c.last | ddmmyyyy }}</td>
+        <td class="num">{{ c.total | money }}<br><small class="muted">{{ c.total_receipts }} пок.</small></td><td>{{ c.segment or '' }}</td></tr>
+    {% else %}<tr><td colspan="9" class="muted">За период клиенты из базы не покупали</td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% if cl.buyers > 20 %}<p class="muted hint">Показаны 20 из {{ cl.buyers }}, все — в Excel.</p>{% endif %}
+
+  <h5 style="margin-top:1rem">Сегменты базы</h5>
+  <div class="table-wrap"><table class="striped">
+    <thead><tr><th>Сегмент</th><th class="num">Клиентов</th><th class="num">Покупок</th><th class="num">Сумма за всё время</th>
+      <th class="num">Средний чек</th><th>Что делать</th></tr></thead>
+    <tbody>{% for g in cl.segments %}
+      <tr><td><strong>{{ g.name }}</strong><br><small class="muted">{{ g.rule }}</small></td>
+        <td class="num">{{ g.count }}<br><small class="muted">{{ pct(g.share) }}</small></td><td class="num">{{ g.receipts }}</td>
+        <td class="num">{{ g.total | money }}</td><td class="num">{{ g.avg_check | money }}</td><td><small>{{ g.action }}</small></td></tr>
+    {% endfor %}</tbody>
+  </table></div>
+  <p class="muted hint">Сегменты — по всей истории покупок на конец периода (учитывается фильтр магазина, остальные фильтры — нет).
+    Список клиентов с сегментами, телефонами и днями рождения — в Excel.</p>
+
+  <h5 style="margin-top:1rem">Что берут клиенты из базы</h5>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Тип изделия</th><th class="num">Клиентов</th><th class="num">Шт.</th><th class="num">Выручка</th><th class="num">Доля</th></tr></thead>
+    <tbody>{% for t in cl.what %}
+      <tr><td>{{ t.name }}</td><td class="num">{{ t.people }}</td><td class="num">{{ t.count }}</td><td class="num">{{ t.revenue | money }}</td><td class="num">{{ pct(t.share) }}</td></tr>
+    {% else %}<tr><td colspan="5" class="muted">Нет покупок клиентов за период</td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% endif %}
+</section>
+
 <section class="an-section">
   <h3>Товары</h3>
   {% set abc = d.abc %}
@@ -154,10 +213,10 @@
     </div>
     <div>
       <h5>ABC-анализ</h5>
-      <table><thead><tr><th>Класс</th><th class="num">Артикулов</th><th class="num">Выручка</th><th class="num">Доля</th></tr></thead><tbody>
+      <div class="table-wrap"><table><thead><tr><th>Класс</th><th class="num">Артикулов</th><th class="num">Выручка</th><th class="num">Доля</th></tr></thead><tbody>
       {% for k in 'ABC' %}{% set x = abc.classes[k] %}
         <tr><td><span class="abc {{ k }}">{{ k }}</span></td><td class="num">{{ x.count }}</td><td class="num">{{ x.revenue | money }}</td><td class="num">{{ pct(x.share) }}</td></tr>
-      {% endfor %}</tbody></table>
+      {% endfor %}</tbody></table></div>
       <p class="muted hint">A — артикулы, которые дают 80% выручки: их держать в наличии всегда. B — следующие 15%. C — остальное, кандидаты на распродажу. Полный список — в Excel.</p>
     </div>
   </div>
@@ -279,6 +338,16 @@
   pie('ch-types', data.types);
   pie('ch-metals', data.metals);
   pie('ch-payments', data.payments);
+  const cl = document.getElementById('ch-clients');
+  if (cl) new Chart(cl, { type: 'bar',
+    data: { labels: data.clients.labels, datasets: [
+      { label: 'Новые клиенты', data: data.clients.new, backgroundColor: palette[2] },
+      { label: 'Вернулись', data: data.clients.back, backgroundColor: primary },
+      { label: 'Без номера', data: data.clients.anon, backgroundColor: '#9ca3af88' },
+    ] },
+    options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { callback: short } } },
+      plugins: { tooltip: { callbacks: { label: c => `${c.dataset.label}: ${tenge(c.parsed.y)}` } } } } });
 })();
 </script>
 {% endblock %}
