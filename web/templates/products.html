@@ -27,12 +27,14 @@
 <div class="table-wrap"><table class="striped">
   <thead><tr>
     <th><input type="checkbox" aria-label="Выбрать все" onclick="document.querySelectorAll('.pick').forEach(c=>c.checked=this.checked);sync()"></th>
-    <th>Артикул</th><th>Название</th><th>Детали</th><th>Магазин</th><th class="num">Цена</th><th class="num">Мин.</th><th class="num">Остаток</th>
+    {% if thumbs %}<th></th>{% endif %}<th>Артикул</th><th>Название</th><th>Детали</th><th>Магазин</th><th class="num">Цена</th><th class="num">Мин.</th><th class="num">Остаток</th>
   </tr></thead>
   <tbody>
   {% for p in rows %}
     <tr>
       <td><input type="checkbox" class="pick" value="{{ p.article_number }}" onchange="sync()" aria-label="Выбрать {{ p.article_number }}"></td>
+      {% if thumbs %}<td>{% if thumbs.get(p.id) %}<a href="/products/{{ p.id }}"><img src="{{ thumbs[p.id] }}" alt="" loading="lazy"
+        style="width:48px;height:48px;object-fit:cover;border-radius:6px;display:block"></a>{% endif %}</td>{% endif %}
       <td><a href="/products/{{ p.id }}">{{ p.article_number }}</a></td>
       <td>{{ p.model }}<br><small class="muted">{{ p.product_type }}{% if p.inserts %} · {{ p.inserts }}{% endif %}</small></td>
       <td><small>{{ details(p) }}</small></td>
@@ -42,7 +44,7 @@
       <td class="num"><span class="badge {% if p.quantity <= 0 %}zero{% endif %}">{{ p.quantity }}</span></td>
     </tr>
   {% else %}
-    <tr><td colspan="8" class="muted">Ничего не найдено.{% if not q %} <a href="/import">Загрузите каталог</a> или <a href="/products/new">добавьте товар</a>.{% endif %}</td></tr>
+    <tr><td colspan="9" class="muted">Ничего не найдено.{% if not q %} <a href="/import">Загрузите каталог</a> или <a href="/products/new">добавьте товар</a>.{% endif %}</td></tr>
   {% endfor %}
   </tbody>
 </table></div>

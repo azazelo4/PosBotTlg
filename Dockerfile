@@ -17,6 +17,8 @@ RUN pip install -r requirements.txt
 
 # Код приложения. deploy/ тоже внутри: установщик и `posbot update` берут оттуда compose-файл и скрипты
 COPY . /app
+# Том app_data (фото товаров) монтируется сюда
+RUN mkdir -p /app/data/photos
 
 # Версия (тег релиза или sha коммита) — проставляет CI при публикации образа
 ARG POSBOT_VERSION=dev

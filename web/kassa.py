@@ -29,6 +29,7 @@ from utils import mark_codes
 from utils.common import now, today, day_bounds, parse_money, parse_float, money, normalize_phone, parse_birthday
 from utils import receipt_text
 from utils.labels import details_line
+import photos
 from utils.report_generator import build_summary
 
 logger = logging.getLogger("posbot.kassa")
@@ -189,6 +190,9 @@ def product_json(p, code=None):
             "details": details_line(p), "inserts": p.get('inserts'), "store": p['Store'],
             "price": int(p['price'] or 0), "min_price": int(p['min_price'] or 0), "quantity": p['quantity'],
             "marked": marking_required(p)}
+    photo = (photos.main_photos([p['id']]) or {}).get(p['id'])
+    if photo:
+        data["photo"], data["photo_full"] = photos.signed_url(photo), photos.signed_url(photo, thumb=False)
     if code:
         data["code"] = code['code']
         data["code_short"] = mark_codes.short(code['code'])

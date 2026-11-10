@@ -25,6 +25,8 @@ os.environ["ADMIN_PHONE"] = "+77010000001"
 os.environ["ADMIN_NAME"] = "Админ"
 os.environ.setdefault("LOG_LEVEL", "WARNING")
 os.environ["WEB_URL"] = "https://pos.test"
+import tempfile  # noqa: E402
+os.environ["POSBOT_DATA_DIR"] = tempfile.mkdtemp(prefix="posbot-data-")
 
 from telebot import types  # noqa: E402
 
@@ -131,6 +133,17 @@ class FakeTelegram:
             "document": {"file_id": file_id, "file_unique_id": file_id, "file_name": file_name, "file_size": len(data)}}})
         return self.calls[start:]
 
+    def photo(self, chat_id, data):
+        """Фото из галереи Telegram (сжатое) — как message.photo."""
+        file_id = f"p{next(_ids)}"
+        self.files[file_id] = data
+        start = len(self.calls)
+        self._process({"update_id": next(_ids), "message": {
+            "message_id": next(_ids), "date": 0, "chat": {"id": chat_id, "type": "private"},
+            "from": {"id": chat_id, "is_bot": False, "first_name": "T"},
+            "photo": [{"file_id": file_id, "file_unique_id": file_id, "width": 640, "height": 480}]}})
+        return self.calls[start:]
+
     def press(self, chat_id, data, message_id=1):
         start = len(self.calls)
         self._process({"update_id": next(_ids), "callback_query": {
@@ -209,7 +222,7 @@ def fake():
 @pytest.fixture
 def tg(fake):
     """Чистые данные перед каждым тестом: пользователи трёх ролей и несколько товаров."""
-    for table in ("returns", "trade_ins", "buybacks", "cash_withdrawals", "sales", "receipt_payments", "receipts", "customers", "fiscal_receipts", "product_codes", "products", "users", "stores",
+    for table in ("returns", "trade_ins", "buybacks", "cash_withdrawals", "sales", "receipt_payments", "receipts", "customers", "fiscal_receipts", "product_codes", "product_photos", "products", "users", "stores",
                   "settings", "settings_log", "job_runs"):
         db_query(f"DELETE FROM `{table}`")
     db_query("INSERT INTO stores (id, name, sort_order) VALUES (1, 'ЦУМ', 0), (2, 'Отау Сауда', 1)")

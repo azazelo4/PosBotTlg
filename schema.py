@@ -242,6 +242,18 @@ TABLES = {
           PRIMARY KEY (`id`),
           KEY `idx_rp_receipt` (`receipt_id`)
         ) {CHARSET}""",
+    # Фото товаров: файлы в DATA_DIR/photos/<product_id>/, в БД — имя файла и порядок (0 — главное)
+    "product_photos": f"""
+        CREATE TABLE IF NOT EXISTS `product_photos` (
+          `id` int NOT NULL AUTO_INCREMENT,
+          `product_id` int NOT NULL,
+          `file` varchar(64) NOT NULL,
+          `sort_order` int NOT NULL DEFAULT 0,
+          `created_at` datetime NOT NULL,
+          `created_by` int DEFAULT NULL,
+          PRIMARY KEY (`id`),
+          KEY `idx_product_photos_product` (`product_id`, `sort_order`)
+        ) {CHARSET}""",
     # Покупатели: телефон с согласием на хранение; chat_id — если подписались на чеки в Telegram (/start r_…)
     "customers": f"""
         CREATE TABLE IF NOT EXISTS `customers` (

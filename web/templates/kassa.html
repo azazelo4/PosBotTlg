@@ -64,6 +64,9 @@
     input.line-price { width: 140px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
                        background: var(--panel); font-size: 18px; font-weight: 600; text-align: right; }
     #cart td { vertical-align: middle; }
+    #cart img.thumb { float: left; width: 48px; height: 48px; object-fit: cover; border-radius: 6px; margin-right: 10px; }
+    .product.with-photo { display: flex; gap: 16px; align-items: flex-start; }
+    .product img.photo { width: 120px; height: 120px; object-fit: cover; border-radius: 10px; flex: none; }
     .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
     .row > input[type=text] { flex: 1; min-width: 140px; }
     .btn { padding: 11px 18px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; }
@@ -363,15 +366,19 @@ function choices(container, values, selected, onChange, withKeys = true) {
   container.pick = i => { const b = container.querySelectorAll(".choice")[i]; if (b) b.click(); };
 }
 
+function photoThumb(p, cls = "thumb") {
+  return p.photo ? `<a href="${esc(p.photo_full)}" target="_blank" tabindex="-1" title="Фото крупно"><img class="${cls}" src="${esc(p.photo)}" alt=""></a>` : "";
+}
+
 function productCard(p) {
-  return `<div class="product">
+  return `<div class="product${p.photo ? " with-photo" : ""}">${photoThumb(p, "photo")}<div>
     <div class="title">${esc(p.model || p.type || "")}</div>
     <div class="muted">арт. ${esc(p.article)} · ${esc(p.details || "")}${p.inserts ? " · " + esc(p.inserts) : ""}</div>
     <div class="meta"><span class="price num">${fmt(p.price)}</span>
       <span>мин. <b class="num">${fmt(p.min_price)}</b></span>
       <span>остаток <b>${p.quantity}</b> шт.</span><span class="muted">${esc(p.store || "")}</span>${
       p.code ? `<span class="muted">🏷 код ${esc(p.code_short)}</span>` : ""}</div>
-  </div>`;
+  </div></div>`;
 }
 
 function confirmAndRun(title, lines, run, done) {
@@ -536,7 +543,7 @@ VIEWS.sale = root => {
     if (!cart.length) { $("#cart", root).innerHTML = ""; return; }
     $("#cart", root).innerHTML = `<h3>Чек</h3><table><tr><th>№</th><th>Товар</th><th class="amount">По ценнику</th><th class="amount">Сумма</th><th></th></tr>${
       cart.map((it, i) => `<tr><td>${i + 1}</td>
-        <td><b>${esc(it.product.model || it.product.type || "")}</b><br><span class="muted">арт. ${esc(it.product.article)} · ${esc(it.product.details || "")}${it.product.inserts ? " · " + esc(it.product.inserts) : ""}</span>${
+        <td>${photoThumb(it.product)}<b>${esc(it.product.model || it.product.type || "")}</b><br><span class="muted">арт. ${esc(it.product.article)} · ${esc(it.product.details || "")}${it.product.inserts ? " · " + esc(it.product.inserts) : ""}</span>${
           it.code ? `<br><span class="muted">🏷 код ${esc(it.product.code_short)}</span>` : ""}</td>
         <td class="amount num">${fmt(it.product.price)}<br><span class="muted">мин. ${fmt(it.product.min_price)}</span></td>
         <td class="amount"><input type="text" class="num line-price" data-i="${i}" inputmode="numeric" autocomplete="off" value="${esc(it.price)}"></td>

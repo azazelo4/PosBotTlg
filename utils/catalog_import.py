@@ -39,12 +39,14 @@ HEADERS = {
     'manufacturer': ["производитель", "поставщик", "бренд", "завод"],
     'commentaries': ["комментарий", "примечание", "описание"],
     'arrival_date': ["дата поступления", "дата прихода", "поступление", "дата"],
+    'photo': ["фото", "фотография", "фотографии", "изображение", "картинка", "photo", "image", "файл фото"],
 }
 FIELD_TITLES = {
     'article_number': "артикул", 'model': "название", 'product_type': "тип", 'metal_type': "металл",
     'fineness': "проба", 'weight': "вес", 'size': "размер", 'inserts': "вставки", 'price': "цена",
     'min_price': "мин. цена", 'price_per_gram': "цена за грамм", 'cost_price': "себестоимость", 'quantity': "остаток", 'Store': "магазин",
     'manufacturer': "производитель", 'commentaries': "комментарий", 'arrival_date': "дата поступления",
+    'photo': "фото",
 }
 
 TYPE_SYNONYMS = {
@@ -107,6 +109,8 @@ def read_table(data: bytes, filename: str):
         except csv.Error:
             delimiter = ';'
         rows = list(csv.reader(io.StringIO(text), delimiter=delimiter))
+    elif name.endswith('.zip'):
+        raise ValueError("Архив с фото загрузите в веб-админке: Склад → Импорт каталога. Здесь — файл .xlsx или .csv.")
     elif name.endswith('.xls'):
         raise ValueError("Формат .xls не поддерживается. Сохраните файл в Excel как .xlsx и загрузите снова.")
     else:
@@ -190,6 +194,8 @@ class ImportPlan:
     ignored: list = field(default_factory=list)    # нераспознанные заголовки
     new: int = 0
     existing: int = 0
+    photos: int = 0                                # фото из архива к загрузке
+    archive: object = None                         # PhotoArchive при импорте из .zip
 
     def summary(self):
         lines = [f"Распознаны колонки: {', '.join(FIELD_TITLES[c] for c in self.columns)}"]
@@ -201,12 +207,14 @@ class ImportPlan:
             lines += [f"  • строка {n}: {msg}" for n, msg in self.errors[:15]]
             if len(self.errors) > 15:
                 lines.append(f"  … и ещё {len(self.errors) - 15}")
+        if self.archive is not None:
+            lines.append(f"Фото из архива: {self.photos} (только товарам, у которых фото ещё нет)")
         lines += [f"⚠️ {w}" for w in self.warnings]
         return "\n".join(lines)
 
 
-def build_plan(data: bytes, filename: str, default_store=None) -> ImportPlan:
-    """default_store — id магазина для строк без колонки «Магазин»."""
+def build_plan(data: bytes, filename: str, default_store=None, archive=None) -> ImportPlan:
+    """default_store — id магазина для строк без колонки «Магазин»; archive — PhotoArchive с фото (.zip)."""
     headers, rows = read_table(data, filename)
     mapping = map_headers(headers)
     plan = ImportPlan(columns=list(dict.fromkeys(mapping.values())),
@@ -228,6 +236,8 @@ def build_plan(data: bytes, filename: str, default_store=None) -> ImportPlan:
         for p in get_products_by_articles(file_articles[i:i + 500]) or []:
             existing_products[p['article_number']] = p
     seen = {}
+    missing_photos = []
+    plan.archive = archive
     header_offset = 2  # номер строки в файле для сообщений (примерно, без учёта пустых)
     for idx, raw in enumerate(rows):
         line = idx + header_offset
@@ -289,7 +299,19 @@ def build_plan(data: bytes, filename: str, default_store=None) -> ImportPlan:
         elif not isinstance(arrival, date):
             arrival = parse_date(str(arrival)) if arrival else None
         given = {k for k, v in row.items() if v not in (None, '') and str(v).strip() != ''}
+        photo_files = []
+        if archive is not None:
+            names = [n.strip() for n in re.split(r"[,;\n]", str(row.get('photo') or '')) if n.strip()]
+            if names:
+                photo_files = [archive.find(n) for n in names]
+                missing = [n for n, f in zip(names, photo_files) if f is None]
+                if missing:
+                    missing_photos.append(f"{article}: {', '.join(missing[:3])}")
+                photo_files = [f for f in photo_files if f is not None]
+            else:
+                photo_files = archive.for_article(article)
         plan.rows.append({
+            '_photos': photo_files,
             '_given': given,
             'article_number': article, 'model': model or product_type, 'product_type': product_type,
             'metal_type': metal, 'fineness': fineness, 'weight': weight if weight is not None else 0,
@@ -312,6 +334,12 @@ def build_plan(data: bytes, filename: str, default_store=None) -> ImportPlan:
         plan.warnings.append("В файле нет колонки остатка: новые товары получат остаток 0, у существующих он не изменится.")
     if not has_min:
         plan.warnings.append(f"Нет колонки минимальной цены: минимальная = {config.IMPORT_MIN_PRICE_PERCENT:g}% от цены.")
+    plan.photos = sum(len(r['_photos']) for r in plan.rows)
+    if missing_photos:
+        plan.warnings.append(f"Нет в архиве фото, указанных в колонке «Фото» ({len(missing_photos)} товаров): "
+                             + "; ".join(missing_photos[:5]) + ("…" if len(missing_photos) > 5 else ""))
+    if 'photo' in plan.columns and archive is None:
+        plan.warnings.append("Колонка «Фото» есть, но самих фото нет: загрузите таблицу и фото одним архивом .zip.")
     if plan.rows and not any(r['_weight_given'] for r in plan.rows):
         plan.warnings.append("В файле нет веса: у новых товаров вес будет 0, на ценнике он не печатается.")
     return plan
@@ -320,7 +348,7 @@ def build_plan(data: bytes, filename: str, default_store=None) -> ImportPlan:
 def apply_plan(plan: ImportPlan, update_existing=True):
     columns = set(plan.columns)
     # Для существующих товаров обновляем только то, что было в файле
-    update_keys = {'article_number'} | (columns - {'arrival_date', 'Store'})
+    update_keys = {'article_number'} | (columns - {'arrival_date', 'Store', 'photo'})
     if 'metal_type' in columns:
         update_keys.add('fineness')
     if 'Store' in columns:
@@ -345,3 +373,29 @@ def apply_plan(plan: ImportPlan, update_existing=True):
                 row.pop('arrival_date')
         rows.append(row)
     return import_products(rows, update_existing=update_existing)
+
+
+def attach_photos(plan: ImportPlan, user_id=None):
+    """Фото из архива — товарам, у которых фото ещё нет (повторный импорт не плодит дубли). → (добавлено, ошибки)."""
+    import photos
+    if plan.archive is None or not plan.photos:
+        return 0, []
+    rows = [r for r in plan.rows if r['_photos']]
+    products = {}
+    for i in range(0, len(rows), 500):
+        for p in get_products_by_articles([r['article_number'] for r in rows[i:i + 500]]) or []:
+            products[p['article_number']] = p['id']
+    have = photos.main_photos(products.values()) or {}
+    added, errors = 0, []
+    for r in rows:
+        product_id = products.get(r['article_number'])
+        if not product_id or product_id in have:
+            continue
+        for info in r['_photos'][:photos.MAX_PER_PRODUCT]:
+            data = plan.archive.read(info)
+            ok, result = photos.add(product_id, data, user_id) if data else (False, "файл больше 10 МБ")
+            if ok:
+                added += 1
+            else:
+                errors.append(f"{r['article_number']}, {info.filename}: {result}")
+    return added, errors

@@ -15,7 +15,7 @@ from urllib.parse import urlencode
 
 import jinja2
 from fastapi import FastAPI, Request, Form, UploadFile, File, HTTPException, Depends
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse, JSONResponse, Response, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
@@ -27,6 +27,7 @@ import demo_data
 import customers
 import fiscal
 import marking
+import photos
 import settings_store
 from buttons import PAYMENT_TYPES, ROLE_TITLES
 from utils import receipt_text
@@ -36,7 +37,8 @@ from database import (get_receipt, get_job_run, marking_required, ensure_admin, 
                       record_sale, get_today_sales_by_user, get_all_users, add_user_to_db, change_user_role_function,
                       deactivate_user_in_db, update_user_phone)
 from schema import METAL_TYPES, PRODUCT_TYPES, ensure_schema
-from utils.catalog_import import build_plan, apply_plan, FIELD_TITLES
+from utils.catalog_import import build_plan, apply_plan, attach_photos, FIELD_TITLES
+from utils.photo_archive import PhotoArchive, ArchiveError
 from utils import mark_codes
 from utils.common import (money, today, now, parse_money, parse_float, parse_int, parse_date, normalize_phone,
                           day_bounds, parse_birthday, format_birthday)
@@ -278,7 +280,9 @@ def products(request: Request, q: str = "", store: str = "", stock: str = "", pa
     page = max(page, 1)
     store_id = parse_int(store) if store else None
     rows, total = search_products(q.strip() or None, store_id, in_stock, PAGE_SIZE, (page - 1) * PAGE_SIZE) or ([], 0)
+    thumbs = {pid: photos.signed_url(ph) for pid, ph in (photos.main_photos([r['id'] for r in rows]) or {}).items()}
     return render(request, "products.html", user, rows=rows, total=total, q=q, store=store_id, stock=stock, page=page,
+                  thumbs=thumbs,
                   pages=max((total + PAGE_SIZE - 1) // PAGE_SIZE, 1), stores=get_stores() or [], details=details_line)
 
 
@@ -339,7 +343,27 @@ def _product_form_data(form):
 
 
 def _form_ctx(product=None):
-    return {"product": product or {}, "stores": get_stores() or [], "types": PRODUCT_TYPES, "metals": METAL_TYPES}
+    product = product or {}
+    gallery = [{**ph, "thumb": photos.signed_url(ph), "full": photos.signed_url(ph, thumb=False)}
+               for ph in (photos.for_product(product['id']) or [] if product.get('id') else [])]
+    return {"product": product, "stores": get_stores() or [], "types": PRODUCT_TYPES, "metals": METAL_TYPES,
+            "photos": gallery, "max_photos": photos.MAX_PER_PRODUCT}
+
+
+async def _save_photos(request, form, product_id, user):
+    """Фото из поля формы «photos» (необязательно). Ошибки — сообщением, товар при этом сохранён."""
+    added = 0
+    for upload in form.getlist("photos"):
+        if not hasattr(upload, "read") or not upload.filename:
+            continue
+        data = await upload.read(photos.MAX_BYTES + 1)
+        ok, result = await run_in_threadpool(photos.add, product_id, data, user['id'])
+        if ok:
+            added += 1
+        else:
+            flash(request, f"Фото «{upload.filename}»: {result}", "error")
+    if added:
+        flash(request, f"Добавлено фото: {added}.")
 
 
 @app.get("/products/new", response_class=HTMLResponse)
@@ -358,6 +382,7 @@ async def product_create(request: Request, user=Depends(current_user)):
         if ok:
             flash(request, msg)
             created = get_product_by_article(data['article_number'])
+            await _save_photos(request, form, created['id'], user)
             return RedirectResponse(f"/products/{created['id']}", status_code=303)
         errors.append(msg)
     return render(request, "product_form.html", user, errors=errors, **_form_ctx(data))
@@ -380,10 +405,40 @@ async def product_save(request: Request, product_id: int, user=Depends(current_u
         ok, msg = update_product(product_id, data)
         if ok:
             flash(request, msg)
+            await _save_photos(request, form, product_id, user)
             return RedirectResponse(f"/products/{product_id}", status_code=303)
         errors.append(msg)
     data['id'] = product_id
     return render(request, "product_form.html", user, errors=errors, **_form_ctx(data))
+
+
+@app.post("/products/{product_id}/photos/{photo_id}")
+def product_photo_action(request: Request, product_id: int, photo_id: int, action: str = Form(...), csrf: str = Form(""),
+                         user=Depends(current_user)):
+    check_csrf(request, csrf)
+    photo = photos.get(photo_id)
+    if not photo or photo['product_id'] != product_id:
+        raise HTTPException(404, "Фото не найдено.")
+    if action == "delete":
+        ok, _ = photos.delete(photo_id)
+        flash(request, "Фото удалено." if ok else "Не удалось удалить фото.", "ok" if ok else "error")
+    elif action == "main":
+        ok, _ = photos.make_main(photo_id)
+        flash(request, "Главное фото выбрано." if ok else "Не удалось.", "ok" if ok else "error")
+    return RedirectResponse(f"/products/{product_id}#photos", status_code=303)
+
+
+@app.get("/photos/{photo_id}/{size}")
+def photo_file(photo_id: int, size: str, e: int = 0, s: str = ""):
+    """Фото товара по ссылке с подписью (signed_url): админка, касса на ПК и Mini App."""
+    if not photos.check_signature(photo_id, size, e, s):
+        raise HTTPException(403, "Ссылка на фото устарела — обновите страницу.")
+    photo = photos.get(photo_id)
+    path = photos.file_path(photo['product_id'], photo['file'], size == "t") if photo else None
+    if not path or not path.is_file():
+        raise HTTPException(404, "Фото не найдено.")
+    return FileResponse(path, media_type="image/jpeg",
+                        headers={"Cache-Control": "private, max-age=43200", "X-Content-Type-Options": "nosniff"})
 
 
 # ---------------------------------------------------------------- маркировка
@@ -580,10 +635,39 @@ def stock_xlsx(user=Depends(current_user)):
 
 # ---------------------------------------------------------------- импорт
 
+def _drop_plan(plan):
+    """Закрыть и удалить временный архив с фото, если он был."""
+    archive = getattr(plan, "archive", None)
+    if archive is not None:
+        archive.close()
+        Path(archive.zf.filename).unlink(missing_ok=True)
+
+
 def _cleanup_plans():
     cutoff = time.time() - IMPORT_TTL
     for key in [k for k, (_, created, _) in _import_plans.items() if created < cutoff]:
-        _import_plans.pop(key, None)
+        _drop_plan(_import_plans.pop(key)[2])
+
+
+IMPORT_MAX = 10 * 1024 * 1024
+IMPORT_ZIP_MAX = 500 * 1024 * 1024
+
+
+async def _save_upload(upload, limit):
+    """Загруженный архив → временный файл в DATA_DIR/import. None, если больше limit."""
+    folder = Path(config.DATA_DIR) / "import"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{secrets.token_hex(8)}.zip"
+    size = 0
+    with path.open("wb") as out:
+        while chunk := await upload.read(1024 * 1024):
+            size += len(chunk)
+            if size > limit:
+                out.close()
+                path.unlink(missing_ok=True)
+                return None
+            out.write(chunk)
+    return path
 
 
 @app.get("/import", response_class=HTMLResponse)
@@ -595,12 +679,28 @@ def import_form(request: Request, user=Depends(current_user)):
 async def import_upload(request: Request, file: UploadFile = File(...), store: str = Form(""), csrf: str = Form(""),
                         user=Depends(current_user)):
     check_csrf(request, csrf)
-    data = await file.read(10 * 1024 * 1024 + 1)
-    if len(data) > 10 * 1024 * 1024:
-        return render(request, "import.html", user, stores=get_stores() or [], error="Файл больше 10 МБ.")
+    archive = None
+    default_store = parse_int(store) if store else None
     try:
-        plan = build_plan(data, file.filename or "", default_store=parse_int(store) if store else None)
+        if (file.filename or "").lower().endswith(".zip"):
+            path = await _save_upload(file, IMPORT_ZIP_MAX)
+            if not path:
+                raise ValueError(f"Архив больше {IMPORT_ZIP_MAX // 1024 // 1024} МБ — разделите его на части.")
+            try:
+                archive = PhotoArchive(path)
+            except ArchiveError:
+                path.unlink(missing_ok=True)
+                raise
+            data, name = archive.table()
+        else:
+            data, name = await file.read(IMPORT_MAX + 1), file.filename or ""
+            if len(data) > IMPORT_MAX:
+                raise ValueError("Файл больше 10 МБ.")
+        plan = await run_in_threadpool(build_plan, data, name, default_store, archive)
     except ValueError as e:
+        if archive is not None:
+            archive.close()
+            Path(archive.zf.filename).unlink(missing_ok=True)
         return render(request, "import.html", user, stores=get_stores() or [], error=str(e))
     _cleanup_plans()
     plan_id = secrets.token_urlsafe(12)
@@ -617,11 +717,20 @@ async def import_apply(request: Request, plan_id: str, mode: str = Form("all"), 
     if not entry or entry[0] != user['id']:
         flash(request, "Предпросмотр устарел, загрузите файл ещё раз.", "error")
         return RedirectResponse("/import", status_code=303)
-    ok, result = apply_plan(entry[2], update_existing=mode == "all")
-    if ok:
-        flash(request, f"Импорт завершён: добавлено {result['created']}, обновлено {result['updated']}"
-                       + (f", пропущено {result['skipped']}" if result['skipped'] else "") + ".")
-        return RedirectResponse("/products", status_code=303)
+    plan = entry[2]
+    try:
+        ok, result = apply_plan(plan, update_existing=mode == "all")
+        if ok:
+            flash(request, f"Импорт завершён: добавлено {result['created']}, обновлено {result['updated']}"
+                           + (f", пропущено {result['skipped']}" if result['skipped'] else "") + ".")
+            added, errors = await run_in_threadpool(attach_photos, plan, user['id'])
+            if added:
+                flash(request, f"Добавлено фото: {added}.")
+            if errors:
+                flash(request, f"Не загружено фото: {len(errors)} — " + "; ".join(errors[:5]), "error")
+            return RedirectResponse("/products", status_code=303)
+    finally:
+        _drop_plan(plan)
     flash(request, f"Импорт не выполнен, ничего не изменено: {result}", "error")
     return RedirectResponse("/import", status_code=303)
 
@@ -831,7 +940,13 @@ def app_user(request: Request):
 def _product_json(p):
     return {"id": p['id'], "article": p['article_number'], "model": p['model'], "type": p['product_type'],
             "details": details_line(p), "inserts": p.get('inserts'), "store": p['Store'],
-            "price": int(p['price']), "min_price": int(p['min_price']), "quantity": p['quantity']}
+            "price": int(p['price']), "min_price": int(p['min_price']), "quantity": p['quantity'],
+            **_photo_urls(p['id'])}
+
+
+def _photo_urls(product_id):
+    photo = (photos.main_photos([product_id]) or {}).get(product_id)
+    return {"photo": photos.signed_url(photo), "photo_full": photos.signed_url(photo, thumb=False)} if photo else {}
 
 
 # ---------------------------------------------------------------- касса для ПК (web/kassa.py)

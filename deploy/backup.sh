@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Бэкап БД POS-бота: mysqldump из контейнера → gzip в /opt/pos-bot-backups и копия вне сервера/ПК.
+# Фото товаров (том app_data) — зеркало в $BACKUP_DIR/photos: фото не меняются, копируются только новые,
+# удалённые в админке остаются в копии (их может знать старый бэкап БД).
 # Настройки: /etc/pos-bot-backup.env (KEEP_DAYS, BACKUP_OFFSITE, BACKUP_SSH_KEY; BACKUP_PAR_URL — старый вариант).
 #
 #   backup.sh                   бэкап сейчас (+ копия вне ПК, если настроена)
@@ -91,6 +93,51 @@ offsite_copy() {
   log "копия вне ПК: $(basename "$file") → ${OFFSITE%%\?*}"
 }
 
+photos_mirror() {
+  # Новые фото из тома app_data → $BACKUP_DIR/photos. Нет контейнера или фото — ничего не делаем
+  local cid src
+  cid="$(cd "$APP_DIR" && docker compose ps -q web 2>/dev/null | head -1)" || return 0
+  [ -n "$cid" ] || return 0
+  src="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Source}}{{end}}{{end}}' "$cid" 2>/dev/null)" || return 0
+  [ -n "$src" ] && [ -d "$src/photos" ] || return 0
+  mkdir -p "$BACKUP_DIR/photos"
+  cp -a -n "$src/photos/." "$BACKUP_DIR/photos/"
+  log "фото: $(find "$BACKUP_DIR/photos" -name '*.jpg' ! -name '*_t.jpg' | wc -l) шт., $(du -sh "$BACKUP_DIR/photos" | cut -f1)"
+}
+
+photos_offsite() {
+  # Копия фото вне ПК: только новые файлы (rsync/rclone), для https — архив photos.tar при изменениях
+  local dir="$BACKUP_DIR/photos" sig rest hostpart path port
+  [ -n "$OFFSITE" ] && [ -d "$dir" ] || return 0
+  sig="$(find "$dir" -type f | wc -l) $(du -sk "$dir" | cut -f1)"
+  [ "$(cat "$BACKUP_DIR/.photos-sent" 2>/dev/null)" != "$sig" ] || return 0
+  case "$OFFSITE" in
+    ssh://*)
+      rest="${OFFSITE#ssh://}"; hostpart="${rest%%/*}"; path="/${rest#*/}"; port=22
+      [ "$rest" != "$hostpart" ] || path="posbot-backups"
+      if [[ "$hostpart" == *:* ]]; then port="${hostpart##*:}"; hostpart="${hostpart%:*}"; fi
+      local opts=(-i "$BACKUP_SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
+      if command -v rsync >/dev/null && ssh "${opts[@]}" -p "$port" "$hostpart" "command -v rsync" >/dev/null 2>&1; then
+        rsync -a -e "ssh ${opts[*]} -p $port" "$dir/" "$hostpart:$path/photos/" || return 1
+      else
+        tar -C "$dir" -cf - . | ssh "${opts[@]}" -p "$port" "$hostpart" "mkdir -p '$path/photos' && tar -C '$path/photos' -xkf - 2>/dev/null; true" || return 1
+      fi
+      ;;
+    rclone:*)
+      command -v rclone >/dev/null || return 1
+      rclone copy "$dir" "${OFFSITE#rclone:}/photos" || return 1
+      ;;
+    https://*|http://*)
+      tar -C "$BACKUP_DIR" -cf "$BACKUP_DIR/photos.tar.tmp" photos || return 1
+      curl -fsS --max-time 1800 -X PUT --data-binary @"$BACKUP_DIR/photos.tar.tmp" "${OFFSITE}photos.tar" || { rm -f "$BACKUP_DIR/photos.tar.tmp"; return 1; }
+      rm -f "$BACKUP_DIR/photos.tar.tmp"
+      ;;
+    *) return 1 ;;
+  esac
+  echo "$sig" > "$BACKUP_DIR/.photos-sent"
+  log "фото скопированы вне ПК"
+}
+
 mkdir -p "$BACKUP_DIR"
 umask 077
 
@@ -131,4 +178,8 @@ log "бэкап: $file ($(du -h "$file" | cut -f1))"
 
 find "$BACKUP_DIR" -name "${DB_NAME}_*.sql.gz" -mtime +"$KEEP_DAYS" -delete
 
-offsite_copy "$file"
+photos_mirror || log "ОШИБКА: фото не скопированы" >&2
+status=0
+offsite_copy "$file" || status=$?
+photos_offsite || log "ОШИБКА: фото не скопированы вне ПК (повтор при следующем бэкапе)" >&2
+exit "$status"

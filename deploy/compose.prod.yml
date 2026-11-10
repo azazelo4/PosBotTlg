@@ -16,6 +16,8 @@ x-app: &app
     - .env
   environment:
     TZ: ${TZ:-Asia/Almaty}
+  volumes:
+    - app_data:/app/data          # фото товаров (в бэкапе: posbot backup)
   logging: &logging
     driver: json-file
     options:
@@ -81,5 +83,6 @@ services:
 
 volumes:
   db_data:
+  app_data:
   caddy_data:
   caddy_config:

@@ -7,7 +7,7 @@
 </div>
 {% for e in errors or [] %}<div class="flash error">{{ e }}</div>{% endfor %}
 
-<form method="post">
+<form method="post" enctype="multipart/form-data">
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <div class="grid">
     <label>Артикул *<input name="article_number" value="{{ product.article_number or '' }}" required maxlength="64"></label>
@@ -50,10 +50,40 @@
   <label><input type="checkbox" name="is_marked" role="switch" {% if product.is_marked %}checked{% endif %}>
     Маркируемый товар — продаётся по коду маркировки DataMatrix
     {% if not marking_enabled() %}<small class="muted">(учёт маркировки выключен в «Настройках»)</small>{% endif %}</label>
+  <label id="photos">Фото <small class="muted">— необязательно; JPEG, PNG или WebP до 10 МБ, на телефоне можно снять камерой.
+    {% if photos %}Ещё можно {{ max_photos - photos | length }}.{% else %}Первое станет главным.{% endif %}</small>
+    <input type="file" name="photos" accept="image/*" multiple {% if photos | length >= max_photos %}disabled{% endif %}></label>
   <div class="row-actions" style="margin-top:1rem">
     <button type="submit">Сохранить</button>
     <a href="/products" role="button" class="secondary outline">К списку</a>
     {% if product.id and (product.is_marked or marking_enabled()) %}<a href="/marking/product/{{ product.id }}" role="button" class="secondary outline">Коды маркировки</a>{% endif %}
   </div>
 </form>
+
+{% if photos %}
+<h4 style="margin-top:2rem">Фото товара</h4>
+<div class="photo-grid">
+  {% for ph in photos %}
+  <figure>
+    <a href="{{ ph.full }}" target="_blank"><img src="{{ ph.thumb }}" alt="Фото {{ loop.index }}" loading="lazy"></a>
+    <figcaption class="row-actions">
+      {% if loop.first %}<span class="badge">главное</span>{% else %}
+      <form method="post" action="/products/{{ product.id }}/photos/{{ ph.id }}" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="main">
+        <button class="secondary outline small">Сделать главным</button></form>{% endif %}
+      <form method="post" action="/products/{{ product.id }}/photos/{{ ph.id }}" class="inline" onsubmit="return confirm('Удалить фото?')">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="delete">
+        <button class="secondary outline small" title="Удалить фото">🗑</button></form>
+    </figcaption>
+  </figure>
+  {% endfor %}
+</div>
+<style>
+  .photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); gap: 1rem; }
+  .photo-grid figure { margin: 0; }
+  .photo-grid img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: var(--pico-border-radius); display: block; }
+  .photo-grid figcaption { margin-top: .4rem; }
+  .photo-grid button.small { padding: .2rem .55rem; font-size: .8rem; }
+</style>
+{% endif %}
 {% endblock %}

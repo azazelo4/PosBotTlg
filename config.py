@@ -51,6 +51,9 @@ LOG_LEVEL = _optional_str("LOG_LEVEL", "INFO")
 # Версия сборки (проставляется при публикации образа)
 VERSION = _optional_str("POSBOT_VERSION", "dev")
 
+# Файлы приложения (фото товаров): том Docker app_data → /app/data
+DATA_DIR = _optional_str("POSBOT_DATA_DIR", "/app/data")
+
 # Ключ подписи cookie веб-админки. Пусто — выводится из MASTER_KEY.
 WEB_SECRET = _optional_str("WEB_SECRET")
 WEB_SESSION_HOURS = _optional_int("WEB_SESSION_HOURS", 12)

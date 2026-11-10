@@ -4,8 +4,9 @@
 #   posbot status [--check]    контейнеры, версия, связь с Telegram, бэкапы и копия вне ПК
 #   posbot logs [bot|web|db]   логи (Ctrl+C — выход)
 #   posbot update [версия]     бэкап → новая версия образа → перезапуск (миграции БД автоматические)
-#   posbot backup              бэкап БД сейчас
+#   posbot backup              бэкап БД и фото товаров сейчас
 #   posbot restore ФАЙЛ        восстановить БД из бэкапа (перед этим делается бэкап текущей)
+#   posbot restore-photos [КАТАЛОГ]   вернуть фото товаров из копии (по умолчанию $BACKUP_DIR/photos)
 #   posbot setup-code          код мастера первоначальной настройки
 #   posbot web-url [АДРЕС]     адрес веб-админки (как в «Настройках»)
 #   posbot offsite [АДРЕС|test|off]   копия бэкапов вне ПК: ssh://user@host/путь, rclone:remote:путь, https://…/
@@ -290,8 +291,16 @@ case "$cmd" in
     compose start bot web
     wait_healthy >/dev/null && echo "Готово." || die "веб не поднялся: posbot logs web"
     ;;
+  restore-photos)
+    src="${1:-$BACKUP_DIR/photos}"
+    [ -d "$src" ] || die "нет каталога с фото: $src"
+    echo "==> Копирую фото из $src (существующие файлы не перезаписываются)"
+    compose exec -T web mkdir -p /app/data/photos
+    tar -C "$src" -cf - . | compose exec -T web tar -C /app/data/photos -xkf - 2>/dev/null || true
+    echo "Готово: $(compose exec -T web sh -c "find /app/data/photos -name '*.jpg' ! -name '*_t.jpg' | wc -l") фото в приложении."
+    ;;
   -h|--help|help)
-    sed -n '2,14p' "$0"
+    sed -n '2,15p' "$0"
     ;;
   *)
     die "неизвестная команда $cmd (posbot help)"

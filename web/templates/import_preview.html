@@ -6,6 +6,8 @@
   <article><div class="muted">Новых товаров</div><div class="stat">{{ plan.new }}</div></article>
   <article><div class="muted">Уже есть в базе</div><div class="stat">{{ plan.existing }}</div></article>
   <article><div class="muted">Строк с ошибками</div><div class="stat">{{ plan.errors | length }}</div></article>
+  {% if plan.archive is not none %}<article><div class="muted">Фото из архива</div><div class="stat">{{ plan.photos }}</div>
+    <small class="muted">добавятся товарам, у которых фото ещё нет</small></article>{% endif %}
 </div>
 <p style="margin-top:1rem"><strong>Распознаны колонки:</strong> {% for c in plan.columns %}{{ titles[c] }}{% if not loop.last %}, {% endif %}{% endfor %}
   {% if plan.ignored %}<br><span class="muted">Пропущены: {{ plan.ignored | join(', ') }}</span>{% endif %}</p>

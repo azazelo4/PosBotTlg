@@ -67,8 +67,9 @@ bash install.sh --key <ключ_доступа>
 | `posbot logs` | логи (`posbot logs bot`, `posbot logs web`) |
 | `posbot update` | обновить до последней версии (перед этим — бэкап) |
 | `posbot update 1.2.0` | перейти на конкретную версию |
-| `posbot backup` | бэкап БД сейчас (автоматически — каждую ночь в 03:30, хранятся 14 дней) |
+| `posbot backup` | бэкап БД и фото товаров сейчас (автоматически — каждую ночь в 03:30, дампы БД хранятся 14 дней, фото — зеркалом в `photos/`) |
 | `posbot restore /opt/pos-bot-backups/<файл>` | восстановить БД из бэкапа |
+| `posbot restore-photos [каталог]` | вернуть фото товаров из копии (по умолчанию `/opt/pos-bot-backups/photos`) |
 | `posbot setup-code` | код мастера настройки, если он ещё не пройден |
 | `posbot offsite <адрес>` | копия бэкапов вне сервера (`ssh://…`, `rclone:…`, `https://…`); `posbot offsite test` — проверить |
 | `posbot web-url <адрес>` | адрес веб-админки (то же, что в «Настройках») |
