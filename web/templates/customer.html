@@ -5,9 +5,29 @@
 <h2>{{ c.name or 'Клиент без имени' }} <span class="muted" style="font-size:1rem">{{ c.phone }}</span></h2>
 <p class="muted">
   Покупок: {{ c.history|length }} на {{ c.spent|money }}
-  · согласие {{ c.consent_at.strftime('%d.%m.%Y') }} ({{ 'в Telegram' if c.consent_source == 'telegram' else 'на кассе' }})
+  · согласие {{ c.consent_at.strftime('%d.%m.%Y') }} ({{ {'telegram': 'в Telegram', 'demo': 'демо-данные'}.get(c.consent_source, 'на кассе') }})
   · {% if c.chat_id %}📲 чеки приходят в Telegram{% else %}в Telegram не подписан{% endif %}
 </p>
+
+{% set pr = c.profile %}
+{% if pr %}
+<div class="grid-cards">
+  <article><div class="muted">Купил на</div><div class="stat">{{ pr.total | money }}</div>
+    <small class="muted">{{ pr.receipts }} покуп. · {{ pr.qty }} шт. · без возвратов</small></article>
+  <article><div class="muted">Средний чек</div><div class="stat">{{ pr.avg_check | money }}</div>
+    <small class="muted">{% if pr.interval %}приходит примерно раз в {{ pr.interval }} дн.{% else %}пока одна покупка{% endif %}</small></article>
+  <article><div class="muted">Последняя покупка</div><div class="stat">{{ pr.last | ddmmyyyy }}</div>
+    <small class="muted">{{ pr.days_since }} дн. назад · первая {{ pr.first | ddmmyyyy }}</small></article>
+  <article><div class="muted">Сегмент</div><div class="stat">{{ pr.segment or '—' }}</div>
+    <small class="muted"><a href="/analytics#clients">что это значит</a></small></article>
+</div>
+<p class="muted" style="margin-top:.75rem">
+  Чаще берёт: {% for name, n in pr.types %}{{ name }} ({{ n }}){{ ', ' if not loop.last }}{% endfor %}
+  · металл: {% for name, n in pr.metals %}{{ name }} ({{ n }}){{ ', ' if not loop.last }}{% endfor %}
+  {% if pr.ring_sizes %}· размер кольца: {% for name, n in pr.ring_sizes %}{{ name }}{{ ', ' if not loop.last }}{% endfor %}{% endif %}
+  {% if pr.stores %}· магазин: {% for name, n in pr.stores %}{{ name }}{{ ', ' if not loop.last }}{% endfor %}{% endif %}
+</p>
+{% endif %}
 
 <div class="grid">
 <article>

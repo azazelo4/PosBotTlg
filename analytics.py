@@ -1,4 +1,4 @@
-"""Аналитика продаж (#29): тренды, структура, скидки, продавцы, время покупок, склад, металл, маржа.
+"""Аналитика продаж (#29): тренды, структура, скидки, продавцы, время покупок, склад, металл, маржа, клиенты.
 
 Одна выборка продаж за период (с фильтрами) — дальше всё считается в Python. Для ювелирного магазина это
 тысячи строк в год: выборка занимает миллисекунды, а логику (ABC, раскладка смешанной оплаты, сравнения)
@@ -88,9 +88,11 @@ def sales_rows(cursor, f):
         SELECT s.id, s.receipt_id, s.sale_date, s.sold_price, COALESCE(s.list_price, p.price) AS list_price,
                s.payment_type, s.store_id, st.name AS store, s.user_id, u.name AS user_name,
                p.id AS product_id, p.article_number, p.model, p.product_type, p.metal_type, p.fineness, p.weight,
-               p.cost_price, r.id AS return_id
+               p.cost_price, r.id AS return_id, rc.customer_id, cu.name AS customer_name, cu.phone AS customer_phone
         FROM sales s
         JOIN products p ON p.id = s.product_id
+        LEFT JOIN receipts rc ON rc.id = s.receipt_id
+        LEFT JOIN customers cu ON cu.id = rc.customer_id
         LEFT JOIN stores st ON st.id = s.store_id
         LEFT JOIN users u ON u.id = s.user_id
         LEFT JOIN returns r ON r.original_sale_id = s.id
@@ -136,6 +138,28 @@ def stock_rows(cursor, f):
         WHERE {" AND ".join(sql)}
         ORDER BY p.arrival_date, p.id""", params)
     return cursor.fetchall()
+
+
+@with_connection
+def customer_history(cursor, f):
+    """Вся история покупок клиентов из базы до конца периода (фильтр — только магазин): первая и последняя покупка,
+    число чеков и сумма без возвращённых позиций. Плюс сколько клиентов в базе на конец периода."""
+    end = day_bounds(f.start, f.end)[1]
+    store = " AND s.store_id = %s" if f.store_id else ""
+    cursor.execute(f"""
+        SELECT rc.customer_id AS id, cu.name, cu.phone, cu.birthday, cu.created_at,
+               MIN(s.sale_date) AS first_at, MAX(s.sale_date) AS last_at,
+               COUNT(DISTINCT s.receipt_id) AS receipts, COUNT(*) AS qty, SUM(s.sold_price) AS total
+        FROM sales s
+        JOIN receipts rc ON rc.id = s.receipt_id
+        JOIN customers cu ON cu.id = rc.customer_id
+        LEFT JOIN returns r ON r.original_sale_id = s.id
+        WHERE r.id IS NULL AND s.sale_date < %s{store}
+        GROUP BY rc.customer_id, cu.name, cu.phone, cu.birthday, cu.created_at""",
+                   [end] + ([f.store_id] if f.store_id else []))
+    history = {row['id']: row for row in cursor.fetchall()}
+    cursor.execute("SELECT COUNT(*) AS n FROM customers WHERE created_at < %s", (end,))
+    return {"customers": history, "in_base": cursor.fetchone()['n']}
 
 
 @with_connection
@@ -417,6 +441,137 @@ def margin(rows):
     return sorted(out, key=lambda x: -x['margin'])
 
 
+# ------------------------------------------------------------------ клиенты
+
+# Сегменты по истории покупок (RFM-упрощённо): давность последней покупки и число покупок.
+SEGMENTS = (
+    ("Постоянные", "3+ покупки, последняя — до 90 дней назад", "Беречь: персональные предложения, ранний доступ к новинкам"),
+    ("Растущие", "2 покупки, последняя — до 90 дней назад", "Пригласить ещё раз — до статуса постоянного"),
+    ("Новые", "Первая покупка — до 30 дней назад", "Поблагодарить, напомнить о себе через 2–3 недели"),
+    ("Разовые", "1 покупка, 31–180 дней назад", "Повод вернуться: чистка изделия, подарок к празднику"),
+    ("Под угрозой", "2+ покупки, последняя — 91–180 дней назад", "Позвонить или написать, пока не ушли к конкурентам"),
+    ("Уснувшие", "Последняя покупка — больше 180 дней назад", "Акция «вернитесь к нам», поздравление с днём рождения"),
+)
+
+
+def segment_of(receipts, last_at, moment):
+    """Сегмент клиента на дату moment по числу покупок и дате последней."""
+    if not receipts or not last_at:
+        return None
+    days = (moment - (last_at.date() if hasattr(last_at, 'date') else last_at)).days
+    if days > 180:
+        return "Уснувшие"
+    if days > 90:
+        return "Под угрозой" if receipts >= 2 else "Разовые"
+    if receipts >= 3:
+        return "Постоянные"
+    if receipts == 2:
+        return "Растущие"
+    return "Новые" if days <= 30 else "Разовые"
+
+
+def clients(f, rows, history, moment=None):
+    """Клиенты из базы: кто покупал в периоде, новые и вернувшиеся, топ по выручке, сегменты, что берут."""
+    day = min(moment or today(), f.end)
+    known = history['customers']
+    sold = [r for r in rows if not r.get('return_id')]
+    revenue_all = sum((_d(r['sold_price']) for r in sold), ZERO)
+    receipts_all = {_receipt_key(r) for r in sold}
+    by = {}
+    for r in sold:
+        cid = r.get('customer_id')
+        if not cid:
+            continue
+        c = by.setdefault(cid, {"id": cid, "name": r.get('customer_name'), "phone": r.get('customer_phone'),
+                                "revenue": ZERO, "receipts": set(), "qty": 0, "types": defaultdict(int), "last": None})
+        c['revenue'] += _d(r['sold_price'])
+        c['receipts'].add(_receipt_key(r))
+        c['qty'] += 1
+        c['types'][r['product_type'] or "—"] += 1
+        c['last'] = max(c['last'], r['sale_date']) if c['last'] else r['sale_date']
+
+    period_start = day_bounds(f.start, f.end)[0]
+    buyers = []
+    for c in by.values():
+        h = known.get(c['id'], {})
+        c['receipts'] = len(c['receipts'])
+        c['avg_check'] = c['revenue'] / c['receipts'] if c['receipts'] else ZERO
+        c['favorite'] = max(sorted(c['types']), key=lambda t: c['types'][t]) if c['types'] else None
+        c['types'] = dict(c['types'])
+        c['first_at'] = h.get('first_at')
+        c['is_new'] = bool(c['first_at'] and c['first_at'] >= period_start)
+        c['total'] = _d(h.get('total'))
+        c['total_receipts'] = h.get('receipts') or c['receipts']
+        c['segment'] = segment_of(h.get('receipts'), h.get('last_at'), day)
+        buyers.append(c)
+    buyers.sort(key=lambda c: (-c['revenue'], c['id']))
+
+    known_revenue = sum((c['revenue'] for c in buyers), ZERO)
+    known_receipts = sum(c['receipts'] for c in buyers)
+    new = [c for c in buyers if c['is_new']]
+    back = [c for c in buyers if not c['is_new']]
+
+    segments = {name: {"name": name, "rule": rule, "action": action, "count": 0, "total": ZERO, "receipts": 0}
+                for name, rule, action in SEGMENTS}
+    everyone = []
+    for h in known.values():
+        name = segment_of(h['receipts'], h['last_at'], day)
+        if not name:
+            continue
+        seg = segments[name]
+        seg['count'] += 1
+        seg['total'] += _d(h['total'])
+        seg['receipts'] += h['receipts']
+        everyone.append({**h, "segment": name, "total": _d(h['total']),
+                         "days_since": (day - h['last_at'].date()).days})
+    for seg in segments.values():
+        seg['avg_check'] = seg['total'] / seg['receipts'] if seg['receipts'] else ZERO
+        seg['share'] = _pct(seg['count'], len(everyone))
+    everyone.sort(key=lambda c: (-c['total'], c['id']))
+
+    # что берут клиенты из базы — по типам изделий
+    types = defaultdict(lambda: {"revenue": ZERO, "count": 0, "people": set()})
+    for r in sold:
+        if r.get('customer_id'):
+            t = types[r['product_type'] or "—"]
+            t['revenue'] += _d(r['sold_price'])
+            t['count'] += 1
+            t['people'].add(r['customer_id'])
+    what = [{"name": k, "revenue": v['revenue'], "count": v['count'], "people": len(v['people']),
+             "share": _pct(v['revenue'], known_revenue)}
+            for k, v in sorted(types.items(), key=lambda kv: (-kv[1]['revenue'], kv[0]))]
+
+    # выручка по периодам: новые клиенты, вернувшиеся, без номера
+    kind = _bucket(f)
+    buckets, d = [], _bucket_start(f.start, kind)
+    while d <= f.end:
+        buckets.append(d)
+        d = _next_bucket(d, kind)
+    series = {k: defaultdict(lambda: ZERO) for k in ("new", "back", "anon")}
+    status = {c['id']: ("new" if c['is_new'] else "back") for c in buyers}
+    for r in sold:
+        series[status.get(r.get('customer_id'), "anon")][_bucket_start(r['sale_date'].date(), kind)] += _d(r['sold_price'])
+
+    return {
+        "in_base": history['in_base'],
+        "buyers": len(buyers), "new": len(new), "back": len(back),
+        "new_revenue": sum((c['revenue'] for c in new), ZERO), "back_revenue": sum((c['revenue'] for c in back), ZERO),
+        "revenue": known_revenue, "revenue_share": _pct(known_revenue, revenue_all),
+        "receipts": known_receipts, "receipts_share": _pct(known_receipts, len(receipts_all)),
+        "avg_check": known_revenue / known_receipts if known_receipts else ZERO,
+        "anon_avg_check": ((revenue_all - known_revenue) / (len(receipts_all) - known_receipts)
+                           if len(receipts_all) > known_receipts else ZERO),
+        "per_buyer": known_revenue / len(buyers) if buyers else ZERO,
+        "visits": known_receipts / len(buyers) if buyers else None,
+        "repeat_share": _pct(sum(1 for c in buyers if c['total_receipts'] >= 2), len(buyers)),
+        "top": buyers[:20], "buyers_list": buyers,
+        "segments": list(segments.values()), "everyone": everyone,
+        "what": what,
+        "trend": {"labels": [_label(b, kind) for b in buckets],
+                  **{k: [v[b] for b in buckets] for k, v in series.items()}},
+    }
+
+
 def build(f, moment=None):
     """Все разделы страницы. None — ошибка базы."""
     rows = sales_rows(f)
@@ -425,7 +580,8 @@ def build(f, moment=None):
     other = metal_rows(f)
     stock_items = stock_rows(f)
     returned = returns_count(f)
-    if None in (rows, prev_rows, year_rows, other, stock_items, returned):
+    history = customer_history(f)
+    if None in (rows, prev_rows, year_rows, other, stock_items, returned, history):
         return None
     cur, prev, year = summary(rows), summary(prev_rows), summary(year_rows)
     compare = {key: {"previous": change(cur[key], prev[key]), "year": change(cur[key], year[key])}
@@ -442,6 +598,7 @@ def build(f, moment=None):
         "stock": stock(f, rows, stock_items, moment),
         "metal": metal(rows, other),
         "margin": margin(rows),
+        "clients": clients(f, rows, history, moment),
     }
 
 

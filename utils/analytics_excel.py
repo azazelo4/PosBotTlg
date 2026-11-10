@@ -91,6 +91,29 @@ def build_analytics_excel(data, filter_titles):
     _sheet(wb, "Маржа", ["Тип изделия", "Шт.", "Выручка", "Себестоимость", "Маржа", "Маржа, %"],
            [(x['name'], x['count'], x['revenue'], x['cost'], x['margin'], _r(x['margin_pct'])) for x in data['margin']])
 
+    cl = data['clients']
+    ws.append([])
+    for row in (("Клиенты", None), ("Клиентов в базе", cl['in_base']), ("Покупали в периоде", cl['buyers']),
+                ("Из них новых", cl['new']), ("Вернулись", cl['back']),
+                ("Выручка с клиентов из базы", cl['revenue']), ("Доля выручки, %", _r(cl['revenue_share'])),
+                ("Средний чек клиента", _money(cl['avg_check'])), ("Средний чек без номера", _money(cl['anon_avg_check'])),
+                ("Выручка на клиента", _money(cl['per_buyer']))):
+        ws.append([_cell(v) for v in row])
+        if row[0] == "Клиенты":
+            ws.cell(ws.max_row, 1).font = HEADER_FONT
+    _sheet(wb, "Клиенты за период", ["Имя", "Телефон", "Выручка", "Покупок", "Шт.", "Средний чек", "Чаще берёт",
+                                     "Последняя покупка", "Первая покупка", "Новый", "За всё время", "Покупок всего",
+                                     "Сегмент"],
+           [(c['name'], c['phone'], c['revenue'], c['receipts'], c['qty'], _money(c['avg_check']), c['favorite'],
+             c['last'], c['first_at'], "да" if c['is_new'] else "", c['total'], c['total_receipts'], c['segment'])
+            for c in cl['buyers_list']])
+    _sheet(wb, "Сегменты клиентов", ["Имя", "Телефон", "Сегмент", "Покупок", "Шт.", "Сумма", "Первая покупка",
+                                     "Последняя покупка", "Дней с последней", "День рождения"],
+           [(c['name'], c['phone'], c['segment'], c['receipts'], c['qty'], c['total'], c['first_at'], c['last_at'],
+             c['days_since'], c['birthday']) for c in cl['everyone']])
+    _sheet(wb, "Что берут клиенты", ["Тип изделия", "Клиентов", "Шт.", "Выручка", "Доля, %"],
+           [(t['name'], t['people'], t['count'], t['revenue'], _r(t['share'])) for t in cl['what']])
+
     for sheet in wb.worksheets[1:]:
         for row in sheet.iter_rows(min_row=2):
             for cell in row:

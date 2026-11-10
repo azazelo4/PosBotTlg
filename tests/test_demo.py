@@ -3,6 +3,8 @@ from conftest import ADMIN, MANAGER, db_query
 from test_setup import fresh, _setup_form  # noqa: F401  (фикстура)
 from test_stores import _web, _csrf
 
+from datetime import timedelta
+
 import demo_data
 from database import record_sale
 from utils.common import now
@@ -25,8 +27,11 @@ def test_setup_wizard_adds_demo(fresh):  # noqa: F811
     assert db_query("SELECT COUNT(*) AS n FROM buybacks WHERE description LIKE 'Демо: %'")[0]['n'] == 6
     assert db_query("SELECT COUNT(*) AS n FROM cash_withdrawals")[0]['n'] > 0
     # остаток = поступило − продано + возвращено (продажи не уводят его в минус)
+    # клиентские покупки старше двух недель — история, остаток они не трогают
+    border = now() - timedelta(days=14)
     for p in products[:5]:
-        sold = db_query("SELECT COUNT(*) AS n FROM sales WHERE product_id = %s", (p['id'],))[0]['n']
+        sold = db_query("SELECT COUNT(*) AS n FROM sales WHERE product_id = %s AND sale_date >= %s",
+                        (p['id'], border))[0]['n']
         returned = db_query("""SELECT COUNT(*) AS n FROM returns r JOIN sales s ON s.id = r.original_sale_id
                                WHERE s.product_id = %s""", (p['id'],))[0]['n']
         start = next(c[8] for c in demo_data.CATALOG if c[1] == p['model']) + 2
@@ -65,7 +70,7 @@ def test_settings_add_and_remove_demo(tg):
     assert counts['products'] == 2 * len(demo_data.CATALOG) and counts['operations'] > 20
     r = admin.post("/settings/demo", data={"action": "remove", "csrf": csrf})
     assert "Демо-данные удалены" in r.text and "Добавить демо-данные" in r.text
-    assert not _demo_products() and demo_data.demo_counts() == {"products": 0, "operations": 0}
+    assert not _demo_products() and demo_data.demo_counts() == {"products": 0, "operations": 0, "customers": 0}
     # настоящее не тронуто
     assert [s['product_id'] for s in db_query("SELECT product_id FROM sales")] == [real['id']]
     assert db_query("SELECT description FROM buybacks")[0]['description'] == "кольцо клиента"

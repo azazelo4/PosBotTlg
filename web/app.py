@@ -836,7 +836,9 @@ def _chart_data(data):
     return {"labels": t['labels'], "revenue": num(t['revenue']), "previous": num(t.get('previous', [])),
             "receipts": t['receipts'], "avg_check": num(t['avg_check']),
             "types": pie(st['types']), "metals": pie(st['metals']), "payments": pie(st['payments']),
-            "stores": pie(st['stores'])}
+            "stores": pie(st['stores']),
+            "clients": {"labels": data['clients']['trend']['labels'],
+                        **{k: num(data['clients']['trend'][k]) for k in ("new", "back", "anon")}}}
 
 
 @app.get("/analytics", response_class=HTMLResponse)
@@ -1164,11 +1166,16 @@ def settings_demo(request: Request, action: str = Form(...), csrf: str = Form(""
     check_csrf(request, csrf)
     if action == "add":
         ok, result = demo_data.seed_demo()
-        flash(request, f"Добавлены демо-данные: {result['products']} товаров, {result['sales']} продаж за две недели."
-              if ok else result, "ok" if ok else "error")
+        flash(request, f"Добавлены демо-данные: {result['products']} товаров, {result['sales']} продаж за две недели, "
+              f"{result['customers']} клиентов с историей покупок за год." if ok else result, "ok" if ok else "error")
+    elif action == "customers":
+        ok, result = demo_data.seed_demo_customers()
+        flash(request, f"Добавлены демо-клиенты: {result['customers']}, покупок {result['purchases']} за год. "
+              "Смотрите «Аналитика → Клиенты» и «Клиенты»." if ok else result, "ok" if ok else "error")
     elif action == "remove":
         ok, result = demo_data.remove_demo()
-        flash(request, f"Демо-данные удалены: {result['products']} товаров, {result['operations']} операций."
+        flash(request, f"Демо-данные удалены: {result['products']} товаров, {result['operations']} операций, "
+              f"{result['customers']} клиентов."
               if ok else result, "ok" if ok else "error")
     else:
         raise HTTPException(400, "Неизвестное действие.")
