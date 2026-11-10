@@ -8,7 +8,7 @@ import logging
 from datetime import timedelta
 
 from database import with_connection, with_transaction, BusinessError, _upsert_customer
-from utils.common import now, normalize_phone
+from utils.common import now, normalize_phone, days_to_birthday
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +90,22 @@ def search(cursor, query=None, limit=200):
                        {where}
                        GROUP BY c.id ORDER BY last_at IS NULL, last_at DESC, c.id DESC LIMIT %s""", (*params, limit))
     return cursor.fetchall()
+
+
+BIRTHDAY_DAYS = 14
+
+
+@with_connection
+def upcoming_birthdays(cursor, days=BIRTHDAY_DAYS):
+    """Клиенты, у которых день рождения в ближайшие дни (сегодня — первыми)."""
+    cursor.execute("SELECT id, name, phone, birthday, chat_id FROM customers WHERE birthday IS NOT NULL")
+    rows = []
+    for c in cursor.fetchall():
+        left = days_to_birthday(c['birthday'])
+        if left is not None and left <= days:
+            c['days_left'] = left
+            rows.append(c)
+    return sorted(rows, key=lambda c: (c['days_left'], c['id']))
 
 
 @with_connection

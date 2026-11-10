@@ -642,21 +642,27 @@ def _enqueue_fiscal(cursor, kind, ref_id, store_id, total, user_id):
     return cursor.lastrowid
 
 
-def _upsert_customer(cursor, phone, name=None, source='kassa', user_id=None):
-    """Клиент по телефону (с согласием на хранение номера). Возвращает id. Имя не затирается пустым."""
+def _upsert_customer(cursor, phone, name=None, source='kassa', user_id=None, birthday=None):
+    """Клиент по телефону (с согласием на хранение номера). Возвращает id. Имя и день рождения не затираются
+    пустыми; известный день рождения с кассы не меняется (правится в карточке клиента)."""
     norm = normalize_phone(phone)
     if not norm:
         raise BusinessError("Телефон клиента: введите номер вида +7 701 123 45 67.")
     name = (name or "").strip()[:100] or None
     moment = now()
-    cursor.execute("SELECT id, name FROM customers WHERE phone = %s FOR UPDATE", (norm,))
+    cursor.execute("SELECT id, name, birthday FROM customers WHERE phone = %s FOR UPDATE", (norm,))
     row = cursor.fetchone()
     if row:
         if name and not row['name']:
             cursor.execute("UPDATE customers SET name = %s, updated_at = %s WHERE id = %s", (name, moment, row['id']))
+        if birthday and not row['birthday']:
+            cursor.execute("UPDATE customers SET birthday = %s, updated_at = %s WHERE id = %s",
+                           (birthday, moment, row['id']))
         return row['id']
-    cursor.execute("""INSERT INTO customers (phone, name, consent_at, consent_source, consent_by, created_at, updated_at)
-                      VALUES (%s, %s, %s, %s, %s, %s, %s)""", (norm, name, moment, source, user_id, moment, moment))
+    cursor.execute("""INSERT INTO customers (phone, name, birthday, consent_at, consent_source, consent_by, created_at,
+                                             updated_at)
+                      VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                   (norm, name, birthday, moment, source, user_id, moment, moment))
     return cursor.lastrowid
 
 
@@ -703,7 +709,8 @@ def _record_receipt(cursor, items, user_id, payment_type, store_id=None, custome
     moment = now()
     customer_id = None
     if customer and (customer.get('phone') or '').strip():
-        customer_id = _upsert_customer(cursor, customer['phone'], customer.get('name'), 'kassa', user_id)
+        customer_id = _upsert_customer(cursor, customer['phone'], customer.get('name'), 'kassa', user_id,
+                                       customer.get('birthday'))
     token = secrets.token_hex(16)
     cursor.execute("""INSERT INTO receipts (store_id, user_id, created_at, total, items_count, payment_type, public_token,
                                             customer_id)

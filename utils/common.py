@@ -107,3 +107,43 @@ def money(value) -> str:
 def h(text) -> str:
     """Экранирование для parse_mode=HTML."""
     return escape(str(text if text is not None else ''))
+
+
+NO_YEAR = 1904   # день рождения без года (клиенты часто называют только день и месяц); високосный — для 29.02
+
+
+def parse_birthday(text):
+    """ДД.ММ.ГГГГ или ДД.ММ (год неизвестен → NO_YEAR). None, если не дата или дата в будущем."""
+    s = (text or '').strip().replace('/', '.').replace('-', '.')
+    m = re.fullmatch(r"(\d{1,2})\.(\d{1,2})(?:\.(\d{2}|\d{4}))?", s)
+    if not m:
+        return None
+    year = int(m.group(3)) if m.group(3) else NO_YEAR
+    if m.group(3) and len(m.group(3)) == 2:
+        year += 1900 if year > today().year % 100 else 2000
+    try:
+        born = date(year, int(m.group(2)), int(m.group(1)))
+    except ValueError:
+        return None
+    if born > today() or (year != NO_YEAR and year < 1900):
+        return None
+    return born
+
+
+def format_birthday(born):
+    if not born:
+        return ""
+    return f"{born:%d.%m}" if born.year == NO_YEAR else f"{born:%d.%m.%Y}"
+
+
+def days_to_birthday(born, day=None):
+    """Через сколько дней ближайший день рождения (0 — сегодня). 29 февраля в невисокосный год — 1 марта."""
+    day = day or today()
+    for year in (day.year, day.year + 1):
+        try:
+            nxt = date(year, born.month, born.day)
+        except ValueError:
+            nxt = date(year, 3, 1)
+        if nxt >= day:
+            return (nxt - day).days
+    return None

@@ -49,6 +49,15 @@
 </table></div>
 {% endif %}
 
+{% if birthdays %}
+<article style="margin-top:1.5rem">
+  <header><strong>🎂 Дни рождения клиентов на этой неделе</strong> <a href="/customers" style="float:right">Клиенты</a></header>
+  {% for c in birthdays %}
+    <div><a href="/customers/{{ c.id }}">{{ c.name or 'без имени' }}</a> <span class="muted">{{ c.phone }}</span> —
+      {% if c.days_left == 0 %}<strong>сегодня</strong>{% elif c.days_left == 1 %}завтра{% else %}{{ c.birthday.strftime('%d.%m') }}, через {{ c.days_left }} дн.{% endif %}</div>
+  {% endfor %}
+</article>
+{% endif %}
 <div class="grid" style="margin-top:1.5rem">
   <article>
     <header><strong>Склад</strong> <a href="/stock.xlsx" style="float:right">Excel</a></header>

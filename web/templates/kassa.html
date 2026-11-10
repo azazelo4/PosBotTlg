@@ -479,6 +479,7 @@ VIEWS.sale = root => {
         <div class="customer">
           <div><label for="cust-phone">Телефон</label><input type="text" id="cust-phone" inputmode="tel" autocomplete="off" placeholder="+7 701 123 45 67"></div>
           <div><label for="cust-name">Имя</label><input type="text" id="cust-name" data-osk="ru" autocomplete="off" placeholder="Айгерим"></div>
+          <div style="flex:0 1 150px"><label for="cust-bday">День рождения</label><input type="text" id="cust-bday" inputmode="numeric" autocomplete="off" placeholder="12.05"></div>
           <label class="consent hidden" id="cust-consent-row"><input type="checkbox" id="cust-consent">
             Клиент согласен, что магазин сохранит его номер и историю покупок</label>
         </div>
@@ -520,8 +521,9 @@ VIEWS.sale = root => {
   const phone = $("#cust-phone", root), consent = $("#cust-consent", root);
   phone.oninput = () => $("#cust-consent-row", root).classList.toggle("hidden", !phone.value.trim());
   const customer = () => phone.value.trim()
-    ? {phone: phone.value.trim(), name: $("#cust-name", root).value.trim(), consent: consent.checked} : null;
-  const reset = () => { cart = []; payment = null; article.value = ""; phone.value = ""; $("#cust-name", root).value = "";
+    ? {phone: phone.value.trim(), name: $("#cust-name", root).value.trim(), birthday: $("#cust-bday", root).value.trim(),
+       consent: consent.checked} : null;
+  const reset = () => { cart = []; payment = null; article.value = ""; phone.value = ""; $("#cust-name", root).value = ""; $("#cust-bday", root).value = "";
     consent.checked = false; $("#cust-consent-row", root).classList.add("hidden"); $("#cust-box", root).open = false; render(); choices($("#pay", root), me.payment_types, null, v => { payment = v; showErr(root, ""); }); showErr(root, ""); article.focus(); };
   const add = async () => {
     const a = article.value.trim(); if (!a) return;

@@ -26,7 +26,7 @@ from database import (get_user_by_id, get_stores, get_product_by_article, record
                       create_cash_withdrawal_record, get_period_operations, create_kassa_login, consume_kassa_login)
 from schema import METAL_TYPES
 from utils import mark_codes
-from utils.common import now, today, day_bounds, parse_money, parse_float, money, normalize_phone
+from utils.common import now, today, day_bounds, parse_money, parse_float, money, normalize_phone, parse_birthday
 from utils import receipt_text
 from utils.labels import details_line
 from utils.report_generator import build_summary
@@ -347,7 +347,11 @@ def _customer(raw):
         raise HTTPException(400, "Телефон клиента: введите номер вида +7 701 123 45 67 или уберите его.")
     if not raw.get("consent"):
         raise HTTPException(400, "Спросите у клиента согласие на хранение номера и отметьте его — или уберите номер.")
-    return {"phone": phone, "name": str(raw.get("name") or "").strip()[:100] or None}
+    birthday = str(raw.get("birthday") or "").strip()
+    born = parse_birthday(birthday) if birthday else None
+    if birthday and not born:
+        raise HTTPException(400, "День рождения клиента: ДД.ММ или ДД.ММ.ГГГГ, например 12.05 — или сотрите его.")
+    return {"phone": phone, "name": str(raw.get("name") or "").strip()[:100] or None, "birthday": born}
 
 
 def receipt_delivery(receipt_id, customer=None):

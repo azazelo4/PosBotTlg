@@ -8,15 +8,25 @@
   <input type="search" name="q" value="{{ q }}" placeholder="Телефон или имя" style="max-width:22rem" autocomplete="off">
   <button type="submit">Найти</button>
 </form>
+{% if birthdays %}
+<article>
+  <header><strong>🎂 Дни рождения в ближайшие две недели</strong></header>
+  {% for c in birthdays %}
+    <div><a href="/customers/{{ c.id }}">{{ c.name or 'без имени' }}</a> <span class="muted">{{ c.phone }}</span> —
+      {% if c.days_left == 0 %}<strong>сегодня</strong>{% elif c.days_left == 1 %}завтра{% else %}{{ c.birthday.strftime('%d.%m') }}, через {{ c.days_left }} дн.{% endif %}</div>
+  {% endfor %}
+</article>
+{% endif %}
 {% if rows %}
 <div class="table-wrap">
 <table>
-  <thead><tr><th>Клиент</th><th>Телефон</th><th class="num">Покупок</th><th class="num">На сумму</th><th>Последняя</th></tr></thead>
+  <thead><tr><th>Клиент</th><th>Телефон</th><th>День рождения</th><th class="num">Покупок</th><th class="num">На сумму</th><th>Последняя</th></tr></thead>
   <tbody>
   {% for c in rows %}
     <tr>
       <td><a href="/customers/{{ c.id }}">{{ c.name or 'без имени' }}</a>{% if c.chat_id %} <span title="Чеки приходят в Telegram">📲</span>{% endif %}</td>
       <td style="white-space:nowrap">{{ c.phone }}</td>
+      <td>{{ c.birthday|birthday or '—' }}</td>
       <td class="num">{{ c.receipts }}</td>
       <td class="num">{{ c.spent|money }}</td>
       <td>{{ c.last_at.strftime('%d.%m.%Y') if c.last_at else '—' }}</td>
