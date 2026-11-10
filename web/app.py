@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
+from urllib.parse import urlencode
 
 import jinja2
 from fastapi import FastAPI, Request, Form, UploadFile, File, HTTPException, Depends
@@ -20,6 +21,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
+import analytics
 import config
 import demo_data
 import customers
@@ -40,6 +42,7 @@ from utils.common import (money, today, now, parse_money, parse_float, parse_int
                           day_bounds, parse_birthday, format_birthday)
 from utils.labels import generate_labels_pdf, details_line
 from utils.report_generator import build_summary, build_excel, store_breakdown
+from utils.analytics_excel import build_analytics_excel
 from utils.stock_report import build_stock_excel, stock_totals
 from web import settings_form, kassa, manual
 from web.security import (session_secret, redeem_login_token, validate_init_data, new_csrf, ADMIN_ROLES, CASH_ROLES)
@@ -694,6 +697,61 @@ def reports_xlsx(start: str = "", end: str = "", store: str = "", user=Depends(c
                         breakdown=[] if store_id else store_breakdown(ops))
     return StreamingResponse(excel, media_type=XLSX,
                              headers={"Content-Disposition": f'attachment; filename="report_{start_d:%Y%m%d}_{end_d:%Y%m%d}.xlsx"'})
+
+
+# ---------------------------------------------------------------- аналитика
+
+def _analytics_filters(start, end, store, ptype, metal, seller):
+    d0, d1 = analytics.default_period()
+    store_id, _ = _store_filter(store)
+    users = {u['id']: u for u in get_all_users() or []}
+    seller_id = parse_int(seller) if seller else None
+    return analytics.Filters(parse_date(start) or d0, parse_date(end) or d1, store_id,
+                             ptype if ptype in PRODUCT_TYPES else None, metal if metal in METAL_TYPES else None,
+                             seller_id if seller_id in users else None), users
+
+
+def _filter_titles(f, users):
+    stores = {st['id']: st['name'] for st in get_stores(active_only=False) or []}
+    period = f"{f.start:%d.%m.%Y} — {f.end:%d.%m.%Y}"
+    return [("Период", period), ("Магазин", stores.get(f.store_id, "Все магазины")),
+            ("Тип изделия", f.product_type or "Все"), ("Металл", f.metal or "Все"),
+            ("Продавец", users[f.user_id]['name'] if f.user_id else "Все")]
+
+
+def _chart_data(data):
+    """Цифры для графиков (Decimal → float)."""
+    t, st = data['trend'], data['structure']
+    num = lambda xs: [round(float(x), 2) for x in xs]  # noqa: E731
+    pie = lambda gs: {"labels": [str(g['name']) for g in gs], "values": num(g['revenue'] for g in gs)}  # noqa: E731
+    return {"labels": t['labels'], "revenue": num(t['revenue']), "previous": num(t.get('previous', [])),
+            "receipts": t['receipts'], "avg_check": num(t['avg_check']),
+            "types": pie(st['types']), "metals": pie(st['metals']), "payments": pie(st['payments']),
+            "stores": pie(st['stores'])}
+
+
+@app.get("/analytics", response_class=HTMLResponse)
+def analytics_page(request: Request, start: str = "", end: str = "", store: str = "", type: str = "", metal: str = "",
+                   seller: str = "", user=Depends(current_user)):
+    f, users = _analytics_filters(start, end, store, type, metal, seller)
+    data = analytics.build(f)
+    if data is None:
+        raise HTTPException(500, "Ошибка базы данных.")
+    sellers = sorted((u for u in users.values() if u['role'] in CASH_ROLES), key=lambda u: u['name'])
+    return render(request, "analytics.html", user, d=data, f=f, chart=_chart_data(data), query=urlencode(f.query()),
+                  stores=get_stores() or [], types=PRODUCT_TYPES, metals=METAL_TYPES, sellers=sellers)
+
+
+@app.get("/analytics.xlsx")
+def analytics_xlsx(start: str = "", end: str = "", store: str = "", type: str = "", metal: str = "", seller: str = "",
+                   user=Depends(current_user)):
+    f, users = _analytics_filters(start, end, store, type, metal, seller)
+    data = analytics.build(f)
+    if data is None:
+        raise HTTPException(500, "Ошибка базы данных.")
+    excel = build_analytics_excel(data, _filter_titles(f, users))
+    return StreamingResponse(excel, media_type=XLSX, headers={
+        "Content-Disposition": f'attachment; filename="analytics_{f.start:%Y%m%d}_{f.end:%Y%m%d}.xlsx"'})
 
 
 # ---------------------------------------------------------------- магазины
