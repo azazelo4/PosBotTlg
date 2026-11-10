@@ -128,6 +128,11 @@
     @media (max-height: 820px) { #osk .k { height: 44px; font-size: 19px; } }
 
     /* ---------- подтверждение */
+    .split-grid { display: flex; gap: 10px; flex-wrap: wrap; margin: 4px 0; }
+    .split-grid > div { flex: 1 1 180px; }
+    .split-grid .row { gap: 6px; }
+    .split-grid input { min-width: 0; }
+    .btn.link { border: 0; background: none; padding: 6px 0; color: var(--accent, #1d6fe8); text-decoration: underline; }
     a.btn { text-decoration: none; display: inline-flex; align-items: center; }
     .receipt-qr { display: flex; gap: 16px; align-items: center; margin: 8px 0 12px; }
     .receipt-qr #receipt-qr svg { width: 180px; height: 180px; background: #fff; border-radius: 8px; flex: none; }
@@ -474,7 +479,15 @@ VIEWS.sale = root => {
     <div id="cart"></div>
     <div id="form" class="hidden">
       <div class="total-line" id="total"></div>
-      <label>Оплата <span class="muted">— клавиши 1–${me.payment_types.length}</span></label><div class="choices" id="pay"></div>
+      <label>Оплата <span class="muted" id="pay-hint">— клавиши 1–${me.payment_types.length}</span></label>
+      <div class="choices" id="pay"></div>
+      <div id="split" class="hidden">
+        <div class="split-grid">${me.payment_types.map(t => `<div><label>${esc(t)}</label>
+          <div class="row"><input type="text" class="num split-sum" data-pay="${esc(t)}" inputmode="numeric" autocomplete="off" placeholder="0">
+          <button class="btn" type="button" data-rest="${esc(t)}" title="Остаток — этим способом">остаток</button></div></div>`).join("")}</div>
+        <div class="muted" id="split-left"></div>
+      </div>
+      <button class="btn link" type="button" id="split-toggle">Разделить оплату</button>
       <details id="cust-box"><summary class="muted">Клиент — необязательно: чек в Telegram или WhatsApp и история покупок</summary>
         <div class="customer">
           <div><label for="cust-phone">Телефон</label><input type="text" id="cust-phone" inputmode="tel" autocomplete="off" placeholder="+7 701 123 45 67"></div>
@@ -491,10 +504,30 @@ VIEWS.sale = root => {
   const article = $("#article", root);
   const priceOf = i => parseMoney($(`#cart input[data-i="${i}"]`, root)?.value);
   const total = () => cart.reduce((sum, it, i) => sum + (priceOf(i) || 0), 0);
+  // смешанная оплата: суммы по способам, вместе — итог чека
+  let split = false;
+  const splitInputs = () => [...root.querySelectorAll(".split-sum")];
+  const splitParts = () => splitInputs().map(i => ({type: i.dataset.pay, amount: parseMoney(i.value) || 0})).filter(p => p.amount > 0);
+  const updateSplit = () => {
+    if (!split) return;
+    const left = total() - splitParts().reduce((sum, p) => sum + p.amount, 0);
+    if (left === 0) showErr(root, "");
+    $("#split-left", root).innerHTML = left === 0 ? "Суммы сходятся с итогом." :
+      left > 0 ? `Осталось распределить: <b class="num">${fmt(left)}</b>` : `<span class="neg">Больше итога на ${fmt(-left)}</span>`;
+  };
+  const setSplit = on => {
+    split = on;
+    $("#split", root).classList.toggle("hidden", !on);
+    $("#pay", root).classList.toggle("hidden", on);
+    $("#pay-hint", root).textContent = on ? "— суммы по способам, вместе — итог чека" : `— клавиши 1–${me.payment_types.length}`;
+    $("#split-toggle", root).textContent = on ? "Одним способом" : "Разделить оплату";
+    if (on) { splitInputs().forEach(i => { i.value = ""; }); updateSplit(); splitInputs()[0].focus(); }
+  };
   const updateTotal = () => {
     const t = total(), list = cart.reduce((sum, it) => sum + it.product.price, 0);
     $("#total", root).innerHTML = `Итого: <b class="num">${fmt(t)}</b> <span class="muted">· ${cart.length} поз.` +
       (list > t ? ` · скидка ${fmt(list - t)}` : "") + "</span>";
+    updateSplit();
   };
   const render = (focusIndex = null) => {
     // суммы, которые продавец уже исправил, сохраняются при перерисовке
@@ -523,7 +556,7 @@ VIEWS.sale = root => {
   const customer = () => phone.value.trim()
     ? {phone: phone.value.trim(), name: $("#cust-name", root).value.trim(), birthday: $("#cust-bday", root).value.trim(),
        consent: consent.checked} : null;
-  const reset = () => { cart = []; payment = null; article.value = ""; phone.value = ""; $("#cust-name", root).value = ""; $("#cust-bday", root).value = "";
+  const reset = () => { cart = []; payment = null; setSplit(false); article.value = ""; phone.value = ""; $("#cust-name", root).value = ""; $("#cust-bday", root).value = "";
     consent.checked = false; $("#cust-consent-row", root).classList.add("hidden"); $("#cust-box", root).open = false; render(); choices($("#pay", root), me.payment_types, null, v => { payment = v; showErr(root, ""); }); showErr(root, ""); article.focus(); };
   const add = async () => {
     const a = article.value.trim(); if (!a) return;
@@ -557,7 +590,14 @@ VIEWS.sale = root => {
       if (price < p.min_price) { render(i); return showErr(root, `${p.article}: сумма ниже минимальной цены ${fmt(p.min_price)}.`); }
       items.push({article: p.article, price, product: p, code: cart[i].code});
     }
-    if (!payment) {
+    const sum = items.reduce((s, it) => s + it.price, 0);
+    let parts = null;
+    if (split) {
+      parts = splitParts();
+      const paid = parts.reduce((s, p) => s + p.amount, 0);
+      if (parts.length < 2) return showErr(root, "Смешанная оплата: укажите суммы хотя бы по двум способам — или нажмите «Одним способом».");
+      if (paid !== sum) return showErr(root, `Смешанная оплата: по способам ${fmt(paid)}, а итог чека ${fmt(sum)}.`);
+    } else if (!payment) {
       showErr(root, "Выберите способ оплаты (клавиши 1–" + me.payment_types.length + ").");
       document.activeElement.blur(); return;
     }
@@ -567,14 +607,15 @@ VIEWS.sale = root => {
       return showErr(root, "Спросите у клиента согласие на хранение номера и отметьте его — или сотрите номер.");
     }
     showErr(root, "");
-    const sum = items.reduce((s, it) => s + it.price, 0);
+    const payLabel = parts ? parts.map(p => `${esc(p.type)} ${fmt(p.amount)}`).join(" + ") : esc(payment);
     confirmAndRun("Подтвердите продажу", [
       ...items.map((it, i) => `${i + 1}. ${esc(it.product.model || "")}, арт. ${esc(it.article)} — <b class="num">${fmt(it.price)}</b>` +
         (it.price < it.product.price ? ` <span class="muted">(скидка ${fmt(it.product.price - it.price)})</span>` : "")),
       `Итого: <b class="num">${fmt(sum)}</b>${items.length > 1 ? ` (${items.length} поз.)` : ""}`,
-      `Оплата: <b>${esc(payment)}</b>`,
+      `Оплата: <b>${payLabel}</b>`,
       cust ? `Клиент: <b>${esc(cust.phone)}</b>${cust.name ? " · " + esc(cust.name) : ""}` : "",
-    ], () => api("sale", {items: items.map(it => ({article: it.article, price: it.price, code: it.code})), payment, customer: cust}),
+    ], () => api("sale", {items: items.map(it => ({article: it.article, price: it.price, code: it.code})),
+                          payment: parts ? null : payment, payments: parts, customer: cust}),
     r => { reset(); showReceipt(r.receipt); });
   };
   $("#find", root).onclick = add;
@@ -584,11 +625,22 @@ VIEWS.sale = root => {
     if (article.value.trim()) add(); else if (cart.length) go();
   };
   $("#go", root).onclick = go;
+  $("#split-toggle", root).onclick = () => { setSplit(!split); showErr(root, ""); };
+  splitInputs().forEach((inp, i, all) => {
+    inp.oninput = updateSplit;
+    inp.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); (all[i + 1] || $("#go", root)).focus(); } };
+  });
+  root.querySelectorAll("[data-rest]").forEach(b => b.onclick = () => {
+    // остаток — этим способом: итог минус то, что уже введено в других полях
+    const inp = splitInputs().find(i => i.dataset.pay === b.dataset.rest);
+    const others = splitParts().filter(p => p.type !== b.dataset.rest).reduce((s, p) => s + p.amount, 0);
+    inp.value = Math.max(total() - others, 0) || ""; updateSplit();
+  });
   $("#reset", root).onclick = () => { if (cart.length < 2 || confirm("Очистить чек?")) reset(); };
   root.hotkey = e => {
     if (!cart.length) return false;
     const typing = document.activeElement && document.activeElement.tagName === "INPUT";
-    if (/^[1-9]$/.test(e.key) && !typing) { $("#pay", root).pick(Number(e.key) - 1); return true; }
+    if (/^[1-9]$/.test(e.key) && !typing && !split) { $("#pay", root).pick(Number(e.key) - 1); return true; }
     if (e.key === "Enter" && !typing) { go(); return true; }
     return false;
   };

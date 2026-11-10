@@ -232,6 +232,16 @@ TABLES = {
           `last_for_date` date DEFAULT NULL,
           PRIMARY KEY (`name`)
         ) {CHARSET}""",
+    # Оплаты чека: один способ — одна строка; смешанная оплата (часть наличными, часть Kaspi) — несколько
+    "receipt_payments": f"""
+        CREATE TABLE IF NOT EXISTS `receipt_payments` (
+          `id` int NOT NULL AUTO_INCREMENT,
+          `receipt_id` int NOT NULL,
+          `payment_type` varchar(32) NOT NULL,
+          `amount` decimal(12,0) NOT NULL,
+          PRIMARY KEY (`id`),
+          KEY `idx_rp_receipt` (`receipt_id`)
+        ) {CHARSET}""",
     # Покупатели: телефон с согласием на хранение; chat_id — если подписались на чеки в Telegram (/start r_…)
     "customers": f"""
         CREATE TABLE IF NOT EXISTS `customers` (

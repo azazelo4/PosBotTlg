@@ -44,7 +44,7 @@ def telegram_text(receipt):
         if it.get('return_id'):
             line += " — возвращено"
         lines.append(line)
-    lines += ["", f"Итого: <b>{money(receipt['total'])}</b>, {h(receipt['payment_type'])}"]
+    lines += ["", f"Итого: <b>{money(receipt['total'])}</b>, {h(receipt.get('payment_label') or receipt['payment_type'])}"]
     fiscal = receipt.get('fiscal') or {}
     if fiscal.get('ticket_url'):
         lines.append(f"Фискальный чек: {h(fiscal['ticket_url'])}")

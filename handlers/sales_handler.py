@@ -12,7 +12,9 @@ from utils.common import money, h
 logger = logging.getLogger(__name__)
 
 ARTICLE, PRICE, PAYMENT, CONFIRM = "SALES_ARTICLE", "SALES_PRICE", "SALES_PAYMENT", "SALES_CONFIRM"
+SPLIT_FIRST, SPLIT_AMOUNT, SPLIT_SECOND = "SALES_SPLIT_FIRST", "SALES_SPLIT_AMOUNT", "SALES_SPLIT_SECOND"
 BTN_MORE = "➕ Ещё товар"
+BTN_SPLIT = "➗ Разделить оплату"
 BTN_DROP_LAST = "↩️ Убрать последний"
 
 
@@ -31,7 +33,7 @@ def _payment_markup(items):
     rows = [PAYMENT_TYPES, [BTN_MORE]]
     if len(items) > 1:
         rows[1].append(BTN_DROP_LAST)
-    return _kb(*rows, [BTN_CANCEL])
+    return _kb(*rows, [BTN_SPLIT], [BTN_CANCEL])
 
 
 def _ask_payment(chat_id):
@@ -106,14 +108,63 @@ def on_payment(message):
         items.pop()
         _ask_payment(chat_id)
         return
+    if text == BTN_SPLIT:
+        user_state[chat_id] = SPLIT_FIRST
+        bot.send_message(chat_id, f"Смешанная оплата. Итог чека: <b>{money(_total(items))}</b>.\n"
+                                  "Первый способ оплаты:", parse_mode='HTML', reply_markup=_kb(PAYMENT_TYPES, [BTN_CANCEL]))
+        return
     if text not in PAYMENT_TYPES:
         bot.send_message(chat_id, "Выберите способ оплаты кнопкой.", reply_markup=_payment_markup(items))
         return
-    op = get_op(chat_id)
-    op['payment'] = text
+    get_op(chat_id)['payment'] = text
+    _ask_confirm(chat_id, text)
+
+
+def _total(items):
+    return sum(it['price'] for it in items)
+
+
+def _ask_confirm(chat_id, payment_label):
     user_state[chat_id] = CONFIRM
-    bot.send_message(chat_id, f"<b>Подтвердите продажу</b>\n{_cart_text(items)}\nОплата: {h(text)}",
+    bot.send_message(chat_id, f"<b>Подтвердите продажу</b>\n{_cart_text(_cart(chat_id))}\nОплата: {h(payment_label)}",
                      parse_mode='HTML', reply_markup=create_confirmation_markup())
+
+
+def on_split_first(message):
+    chat_id, text = message.chat.id, (message.text or '').strip()
+    if text not in PAYMENT_TYPES:
+        bot.send_message(chat_id, "Выберите первый способ оплаты кнопкой.", reply_markup=_kb(PAYMENT_TYPES, [BTN_CANCEL]))
+        return
+    get_op(chat_id)['split_first'] = text
+    user_state[chat_id] = SPLIT_AMOUNT
+    ask_money(chat_id, f"Сколько клиент платит способом «{h(text)}»? Итог чека: <b>{money(_total(_cart(chat_id)))}</b>. "
+                       "Остаток пойдёт вторым способом.")
+
+
+def on_split_amount(message):
+    chat_id = message.chat.id
+    op, total = get_op(chat_id), _total(_cart(chat_id))
+    amount = read_money(message)
+    if amount is None or amount <= 0 or amount >= total:
+        bot.send_message(chat_id, f"Введите сумму больше нуля и меньше итога чека {money(total)}.",
+                         reply_markup=create_cancel_markup())
+        return
+    op['split_amount'] = amount
+    user_state[chat_id] = SPLIT_SECOND
+    rest = [t for t in PAYMENT_TYPES if t != op['split_first']]
+    bot.send_message(chat_id, f"«{h(op['split_first'])}»: {money(amount)}. Остаток <b>{money(total - amount)}</b> — каким способом?",
+                     parse_mode='HTML', reply_markup=_kb(rest, [BTN_CANCEL]))
+
+
+def on_split_second(message):
+    chat_id, text = message.chat.id, (message.text or '').strip()
+    op, total = get_op(chat_id), _total(_cart(chat_id))
+    rest = [t for t in PAYMENT_TYPES if t != op['split_first']]
+    if text not in rest:
+        bot.send_message(chat_id, "Выберите второй способ оплаты кнопкой.", reply_markup=_kb(rest, [BTN_CANCEL]))
+        return
+    op['payment'] = [(op['split_first'], op['split_amount']), (text, total - op['split_amount'])]
+    _ask_confirm(chat_id, " + ".join(f"{kind} {money(amount)}" for kind, amount in op['payment']))
 
 
 def on_confirm(message):
@@ -129,7 +180,7 @@ def on_confirm(message):
     if ok:
         logger.info("Chat %s: чек #%s, %s поз. на %s", chat_id, result['receipt_id'], len(items), result['total'])
         what = f"{len(items)} поз., " if len(items) > 1 else ""
-        cash_menu(chat_id, f"✅ Продажа оформлена, чек №{result['receipt_id']}: {what}{money(result['total'])}, {op['payment']}.")
+        cash_menu(chat_id, f"✅ Продажа оформлена, чек №{result['receipt_id']}: {what}{money(result['total'])}, {result['payment']}.")
         from handlers.customer_handler import seller_qr_markup
         bot.send_message(chat_id, "Электронный чек — в Telegram клиента:", reply_markup=seller_qr_markup(result['receipt_id']))
     else:
@@ -142,4 +193,7 @@ def register_sales_handlers():
     bot.register_message_handler(on_article, func=in_state(ARTICLE))
     bot.register_message_handler(on_price, func=in_state(PRICE))
     bot.register_message_handler(on_payment, func=in_state(PAYMENT))
+    bot.register_message_handler(on_split_first, func=in_state(SPLIT_FIRST))
+    bot.register_message_handler(on_split_amount, func=in_state(SPLIT_AMOUNT))
+    bot.register_message_handler(on_split_second, func=in_state(SPLIT_SECOND))
     bot.register_message_handler(on_confirm, func=in_state(CONFIRM))

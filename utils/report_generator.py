@@ -29,9 +29,11 @@ def build_summary(ops):
     flow = defaultdict(lambda: D0)
     sales_by_payment = defaultdict(lambda: [0, D0])
     for s in sales:
-        flow[s['payment_type']] += _d(s['sold_price'])
-        sales_by_payment[s['payment_type']][0] += 1
-        sales_by_payment[s['payment_type']][1] += _d(s['sold_price'])
+        # смешанная оплата: позиция разложена по способам (database._attach_payment_parts)
+        for kind, amount in s.get('payment_parts') or [(s['payment_type'], s['sold_price'])]:
+            flow[kind] += _d(amount)
+            sales_by_payment[kind][0] += 1
+            sales_by_payment[kind][1] += _d(amount)
     for r in returns:
         flow[r['payment_type']] -= _d(r['return_price'])
     for b in buybacks:
@@ -201,7 +203,7 @@ def build_excel(ops, summary, start, end, store_name=None, breakdown=None):
            ["№", "Чек", "Дата", "Артикул", "Тип", "Модель", "Размер", "Металл", "Вес, г", "Цена по прайсу",
             "Сумма продажи", "Оплата", "Магазин", "Продавец", "Возврат", "Код маркировки"],
            [(s['id'], s.get('receipt_id') or "", s['sale_date'], s['article_number'], s['product_type'], s['model'], s['size'], s['metal_type'],
-             s['weight'], s['list_price'], s['sold_price'], s['payment_type'], s['store'], s['user_name'],
+             s['weight'], s['list_price'], s['sold_price'], s.get('payment_label') or s['payment_type'], s['store'], s['user_name'],
              f"№{s['return_id']}" if s['return_id'] else "", (s.get('mark_code') or '').replace('\x1d', '')) for s in ops['sales']])
     _sheet(wb, "Возвраты",
            ["№", "Дата", "Продажа №", "Дата продажи", "Артикул", "Модель", "Сумма продажи", "Сумма возврата", "Выплата",
