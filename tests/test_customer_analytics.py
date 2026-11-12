@@ -121,6 +121,11 @@ def test_demo_customers_add_and_remove(tg):
     # у товаров дата поступления раньше первой продажи
     assert not db_query("""SELECT p.id FROM products p JOIN sales s ON s.product_id = p.id
                            WHERE p.arrival_date > DATE(s.sale_date)""")
+    # у каждого демо-клиента есть покупка без возврата — иначе он выпадает из покупателей
+    assert not db_query("""SELECT c.id FROM customers c WHERE c.consent_source='demo' AND NOT EXISTS (
+                               SELECT 1 FROM receipts r JOIN sales s ON s.receipt_id = r.id
+                               LEFT JOIN returns rt ON rt.original_sale_id = s.id
+                               WHERE r.customer_id = c.id AND rt.id IS NULL)""")
     cl = analytics.build(analytics.Filters(today() - timedelta(days=364), today()))['clients']
     seg = {g['name']: g['count'] for g in cl['segments']}
     assert all(seg[name] for name in ("Постоянные", "Новые", "Уснувшие", "Под угрозой")), seg

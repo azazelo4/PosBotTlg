@@ -261,10 +261,13 @@ def _seed_customers(cursor, rnd, user_id, current):
     stores = sorted({p['store_id'] for p in products})
     by_store = {st: [p for p in products if p['store_id'] == st] for st in stores}
     types = sorted({p['product_type'] for p in products})
-    # демо-чеки без клиента: к ним «привязываются» недавние покупки
+    # демо-чеки без клиента и без возвратов: к ним «привязываются» недавние покупки
     cursor.execute("""SELECT DISTINCT r.id, r.store_id, r.created_at FROM receipts r JOIN sales s ON s.receipt_id = r.id
                       JOIN products p ON p.id = s.product_id
-                      WHERE p.article_number LIKE %s AND r.customer_id IS NULL ORDER BY r.created_at""", (PREFIX + "%",))
+                      WHERE p.article_number LIKE %s AND r.customer_id IS NULL
+                        AND NOT EXISTS (SELECT 1 FROM sales s2 JOIN returns rt ON rt.original_sale_id = s2.id
+                                        WHERE s2.receipt_id = r.id)
+                      ORDER BY r.created_at""", (PREFIX + "%",))
     free = cursor.fetchall()
     rnd.shuffle(free)
 
