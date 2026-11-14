@@ -1,9 +1,9 @@
-# state.py — общий экземпляр бота и состояние диалогов
+# core/state.py — общий экземпляр бота и состояние диалогов
 import logging
 
 from telebot import TeleBot
 
-import config
+from core import config
 
 logger = logging.getLogger(__name__)
 

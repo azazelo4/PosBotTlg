@@ -11,7 +11,7 @@ from collections import defaultdict
 from datetime import timedelta
 from decimal import Decimal
 
-from database import with_connection, _attach_payment_parts
+from core.database import with_connection, _attach_payment_parts
 from utils.common import day_bounds, today
 
 STALE_DAYS = 90

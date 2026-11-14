@@ -165,7 +165,7 @@ Push в ветку `POS-Bot` → GitHub Actions прогоняет провер�
 пересобирает и перезапускает контейнеры.
 
 - [`docs/INSTALL.md`](docs/INSTALL.md) — **установка для нового ИП** одной командой из готового образа, выпуск версий и ключи доступа для клиентов. Режим `--local` — **на ПК в магазине без белого IP и домена** (бот работает через исходящие соединения к Telegram), с обязательной копией бэкапа вне ПК и туннелем по желанию.
-- [`DEPLOY.md`](DEPLOY.md) — установка runner, первый деплой, мастер настройки.
+- [`docs/DEPLOY.md`](docs/DEPLOY.md) — установка runner, первый деплой, мастер настройки.
 - [`docs/DEPLOY_CLOUD.md`](docs/DEPLOY_CLOUD.md) — пошагово для **VPS is\*hosting (Казахстан)**: сервер, runner, бэкапы БД, перенос данных, обслуживание.
 - [`deploy/setup-server.sh`](deploy/setup-server.sh) — подготовка чистого Ubuntu-VPS одной командой (Docker, swap, firewall, бэкапы).
 - [`deploy/cloud-init.yaml`](deploy/cloud-init.yaml) — то же для провайдеров с cloud-init.
@@ -173,7 +173,7 @@ Push в ветку `POS-Bot` → GitHub Actions прогоняет провер�
 
 ## База данных
 
-Схема описана в [`schema.py`](schema.py) и применяется автоматически при каждом старте бота:
+Схема описана в [`core/schema.py`](core/schema.py) и применяется автоматически при каждом старте бота:
 на пустой базе создаются все таблицы, на существующей — добавляются недостающие колонки и индексы.
 Данные при этом не трогаются, повторный запуск ничего не меняет.
 
@@ -194,23 +194,31 @@ Push в ветку `POS-Bot` → GitHub Actions прогоняет провер�
 скупка и инкассация — магазин сотрудника; если сотрудник работает во всех магазинах, бот спросит.
 Отчёты строятся по всем магазинам с разбивкой или по одному.
 
-**Металлы и типы изделий** — списки `METAL_TYPES`, `PRODUCT_TYPES` в `schema.py` (на существующей базе
+**Металлы и типы изделий** — списки `METAL_TYPES`, `PRODUCT_TYPES` в `core/schema.py` (на существующей базе
 дополнительно `ALTER TABLE products MODIFY ...`).
 
 ## Структура проекта
 
 ```
 main.py                  точка входа: БД, ожидание настройки, хендлеры, расписание, polling
-config.py                переменные запуска и реестр настроек (окружение > БД > по умолчанию)
-settings_store.py        настройки в БД, шифрование секретов, код мастера /setup
 setup_code.py            python -m setup_code — показать код мастера настройки
-state.py                 экземпляр бота, сессии, состояния операций, отмена
-auth.py                  вход по номеру, восстановление и проверка сессий
-schema.py                схема БД и миграции
-database.py              пул соединений и все запросы
-buttons.py               клавиатуры и меню по ролям
-user_management.py       раздел «Персонал»
-handlers/
+core/                    ядро
+  config.py              переменные запуска и реестр настроек (окружение > БД > по умолчанию)
+  settings_store.py      настройки в БД, шифрование секретов, код мастера /setup
+  state.py               экземпляр бота, сессии, состояния операций, отмена
+  auth.py                вход по номеру, восстановление и проверка сессий
+  schema.py              схема БД и миграции
+  database.py            пул соединений и все запросы операций
+services/                бизнес-логика
+  analytics.py           аналитика продаж и клиентов
+  customers.py           база клиентов, электронный чек в Telegram
+  fiscal.py              фискализация через Webkassa
+  marking.py             учёт кодов маркировки
+  photos.py              фото товаров
+  demo_data.py           демо-данные
+handlers/                бот: разделы и шаги операций
+  buttons.py             клавиатуры и меню по ролям
+  navigation.py          отмена, назад, разделы меню
   common.py              общие шаги: приём изделия от клиента, ввод сумм
   start_handler.py       /start, авторизация
   help_handler.py        /help
@@ -221,10 +229,25 @@ handlers/
   cash_withdrawal_handler.py  Инкассация
   report_handler.py      Отчеты
   stock_handler.py       Склад
-utils/
+  customer_handler.py    клиенты: подписка на чеки в Telegram
+  labels_handler.py      «Ценники»
+  import_handler.py      «Импорт каталога»
+  web_handler.py         кнопки «Веб-админка» и Mini App
+  kassa_login.py         подтверждение входа на кассу ПК (/start k_…)
+  user_management.py     раздел «Персонал»
+utils/                   вспомогательное без состояния
   common.py              время магазина, разбор сумм/дат/телефонов, форматирование
   report_generator.py    сводка и Excel за период
+  analytics_excel.py     Excel аналитики
+  stock_report.py        Excel остатков
   scheduled_jobs.py      ежедневный отчёт, уведомление о низком остатке
+  labels.py              генерация ценников PDF с QR
+  qr.py                  QR-коды
+  catalog_import.py      разбор Excel/CSV и план импорта
+  photo_archive.py       импорт фото из .zip
+  receipt_text.py        текст чека
+  mark_codes.py          разбор кодов DataMatrix
+  webkassa.py            клиент API Webkassa
 web/
   app.py                 веб-админка и API Mini App (FastAPI)
   kassa.py               касса для ПК: вход по QR через бота и API операций
@@ -233,19 +256,12 @@ web/
   security.py            вход по ссылке из бота, проверка подписи Telegram initData
   settings_form.py       форма мастера /setup и страницы «Настройки»
   templates/             страницы админки и Mini App
-  static/                Pico CSS (локально, без CDN)
-handlers/labels_handler.py  «Ценники» в боте
-handlers/import_handler.py  «Импорт каталога» в боте
-handlers/web_handler.py     кнопки «Веб-админка» и Mini App
-handlers/kassa_login.py     подтверждение входа на кассу ПК (/start k_…)
-handlers/navigation.py      отмена, назад, разделы меню
-utils/labels.py          генерация ценников PDF с QR
-utils/catalog_import.py  разбор Excel/CSV и план импорта
-utils/stock_report.py    Excel остатков
+  static/                Pico CSS, Chart.js (локально, без CDN)
+tools/webkassa_check.py  проверка подключения к Webkassa
 tests/                   сценарные тесты на реальной БД
 deploy/                  install.sh и posbot (установка и обслуживание у клиента), compose.prod.yml,
                          подготовка сервера, bootstrap-env.sh (.env), Caddyfile, бэкап
-docs/                    инструкции по деплою
+docs/                    деплой, установка у клиента, схема логики бота
 ```
 
 ## Разработка
@@ -259,8 +275,8 @@ docs/                    инструкции по деплою
 1. Создать `handlers/<что-то>_handler.py` с функциями шагов.
 2. Вход по кнопке — `is_button("Текст", *роли)`, шаги — `in_state("ПРЕФИКС_ШАГ")`.
 3. Зарегистрировать отмену: `register_simple_cancel("ПРЕФИКС_", "Название")`.
-4. Запись в БД — функция с `@with_transaction` в `database.py`, она возвращает `(успех, результат)`.
-5. Подключить `register_*` в `main.register_handlers()` и добавить кнопку в `buttons.py`.
+4. Запись в БД — функция с `@with_transaction` в `core/database.py`, она возвращает `(успех, результат)`.
+5. Подключить `register_*` в `main.register_handlers()` и добавить кнопку в `handlers/buttons.py`.
 
 ### Тесты
 

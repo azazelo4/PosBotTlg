@@ -5,9 +5,9 @@ from decimal import Decimal
 
 import openpyxl
 
-import analytics
-import customers
-import demo_data
+from services import analytics
+from services import customers
+from services import demo_data
 from conftest import ADMIN, MANAGER, db_query
 from test_analytics import _pid, _at, _period, _sell
 from test_stores import _web, _csrf

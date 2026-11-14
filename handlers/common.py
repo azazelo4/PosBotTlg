@@ -1,14 +1,14 @@
 """Общие помощники для многошаговых операций."""
 import logging
 
-from auth import has_role
-from buttons import (create_cash_operations_buttons, create_choice_markup, create_skip_cancel_markup,
+from core.auth import has_role
+from handlers.buttons import (create_cash_operations_buttons, create_choice_markup, create_skip_cancel_markup,
                      create_cancel_markup, BTN_CANCEL)
-from database import (get_product_by_article, get_stores, find_by_mark_code, marking_required, SELLABLE_CODE,
+from core.database import (get_product_by_article, get_stores, find_by_mark_code, marking_required, SELLABLE_CODE,
                       CODE_STATUS_TITLES)
 from utils import mark_codes
-from schema import METAL_TYPES
-from state import bot, user_data, user_state, end_op, get_op, register_cancel
+from core.schema import METAL_TYPES
+from core.state import bot, user_data, user_state, end_op, get_op, register_cancel
 from utils.common import parse_float, parse_money, money, h
 
 logger = logging.getLogger(__name__)

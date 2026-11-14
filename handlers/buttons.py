@@ -1,7 +1,7 @@
 from telebot import types
 
-import config
-from state import user_data
+from core import config
+from core.state import user_data
 
 PAYMENT_TYPES = ["Наличные", "Безналичные", "Kaspi"]
 ROLE_TITLES = {'admin': 'администратор', 'manager': 'менеджер', 'cashier': 'кассир'}

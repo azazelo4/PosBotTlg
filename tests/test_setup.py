@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-import config
+from core import config
 import main
-import settings_store
+from core import settings_store
 from conftest import ADMIN, MANAGER, login, db_query
 from test_stores import _web, _csrf
 from web.app import app

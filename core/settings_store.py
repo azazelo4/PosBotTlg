@@ -12,8 +12,8 @@ import time
 
 from cryptography.fernet import Fernet, InvalidToken
 
-import config
-from database import with_connection, with_transaction
+from core import config
+from core.database import with_connection, with_transaction
 from utils.common import now
 
 logger = logging.getLogger(__name__)

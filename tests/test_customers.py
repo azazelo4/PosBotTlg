@@ -3,10 +3,10 @@ import re
 
 from fastapi.testclient import TestClient
 
-import config
-import customers
+from core import config
+from services import customers
 from conftest import ADMIN, CASHIER, MANAGER, STRANGER, login, db_query, inline_buttons, reply_buttons
-from database import record_receipt
+from core.database import record_receipt
 from test_kassa import client, kassa_login, post  # noqa: F401  (фикстура)
 from test_stores import _web, _csrf
 from utils import scheduled_jobs as jobs

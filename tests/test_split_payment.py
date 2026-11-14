@@ -3,10 +3,10 @@ from decimal import Decimal
 
 from fastapi.testclient import TestClient
 
-import config
-import fiscal
+from core import config
+from services import fiscal
 from conftest import CASHIER, login, db_query
-from database import record_receipt, get_receipt, get_period_operations, MIXED_PAYMENT
+from core.database import record_receipt, get_receipt, get_period_operations, MIXED_PAYMENT
 from test_fiscal import wk  # noqa: F401  (фикстура)
 from test_kassa import client, kassa_login, post  # noqa: F401  (фикстура)
 from utils.common import today, day_bounds, money

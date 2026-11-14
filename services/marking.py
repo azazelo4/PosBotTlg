@@ -1,11 +1,11 @@
 """Учёт кодов маркировки: приёмка, списание, сверка витрины.
 
-Продажа, возврат и Trade-In по коду — в database.py (в тех же транзакциях, что и сами операции).
+Продажа, возврат и Trade-In по коду — в core/database.py (в тех же транзакциях, что и сами операции).
 Передача кодов в ОФД/ИС МПТ будет вместе с фискализацией (#17); сейчас это внутренний поштучный учёт.
 """
 import logging
 
-from database import with_connection, with_transaction, BusinessError, SELLABLE_CODE, CODE_STATUS_TITLES
+from core.database import with_connection, with_transaction, BusinessError, SELLABLE_CODE, CODE_STATUS_TITLES
 from utils import mark_codes
 from utils.common import now
 

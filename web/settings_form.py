@@ -1,6 +1,6 @@
 """Форма настроек: общая для мастера /setup и страницы /settings."""
-import config
-import settings_store
+from core import config
+from core import settings_store
 
 SETUP_GROUPS = ("telegram", "org", "web", "schedule", "labels", "fiscal", "marking")
 # В мастере показываем самое нужное, остальное — на странице «Настройки»

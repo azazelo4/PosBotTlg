@@ -7,7 +7,7 @@ import re
 import zipfile
 from pathlib import PurePosixPath
 
-import photos
+from services import photos
 
 TABLE_EXT = (".xlsx", ".xlsm", ".csv")
 IMAGE_EXT = (".jpg", ".jpeg", ".png", ".webp")

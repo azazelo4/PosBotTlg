@@ -4,7 +4,7 @@ from decimal import Decimal
 import openpyxl
 
 from conftest import ADMIN, CASHIER, MANAGER, STRANGER, PHONES, login, reply_buttons, inline_buttons, db_query
-from state import user_data, user_state
+from core.state import user_data, user_state
 
 
 # ---------------------------------------------------------------- вход и сессии
@@ -362,7 +362,7 @@ def test_user_management(tg):
 
 def test_reads_see_fresh_data_on_every_pooled_connection(tg):
     """Регрессия: соединения из пула не должны держать старый снимок данных."""
-    from database import get_user_by_phone, change_user_role_function
+    from core.database import get_user_by_phone, change_user_role_function
     user = get_user_by_phone(PHONES[CASHIER])
     for _ in range(25):  # прогреть все соединения пула чтением
         assert get_user_by_phone(PHONES[CASHIER])['role'] == 'cashier'
@@ -374,7 +374,7 @@ def test_reads_see_fresh_data_on_every_pooled_connection(tg):
 
 def test_role_change_applies_right_after_server_boot(tg, monkeypatch):
     """Регрессия: сброс сессии должен работать и в первые минуты после загрузки системы."""
-    import auth
+    from core import auth
     monkeypatch.setattr(auth.time, "monotonic", lambda: 10.0)  # «система загрузилась 10 секунд назад»
     login(tg, CASHIER)
     user_id = user_data[CASHIER]['id']

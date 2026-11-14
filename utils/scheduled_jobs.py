@@ -10,10 +10,10 @@ from datetime import time as dtime, timedelta
 
 from telebot import types
 
-import config
-from database import (get_low_stock_products, get_chat_ids_by_roles, get_period_operations, get_job_run,
+from core import config
+from core.database import (get_low_stock_products, get_chat_ids_by_roles, get_period_operations, get_job_run,
                       mark_job_run, get_user_by_id)
-from state import bot
+from core.state import bot
 from utils.common import today, now, h, day_bounds, money
 from utils.report_generator import generate_period_report
 
@@ -171,7 +171,7 @@ def _notify_fiscal_done(rec, data):
 
 def _notify_fiscal_error(rec, error):
     """Администраторам и менеджерам: Webkassa отклонил операцию — нужно вмешательство."""
-    from fiscal import KIND_TITLES
+    from services.fiscal import KIND_TITLES
     text = (f"⚠️ <b>Чек не пробит в Webkassa</b>\n{KIND_TITLES.get(rec['kind'], rec['kind'])} №{rec['ref_id']}, "
             f"{money(rec['total']) if rec.get('total') is not None else ''}\n{h(error)}\n\n"
             "Веб-админка → «Фискализация»: «Повторить» или «Оформлен вручную».")
@@ -181,7 +181,7 @@ def _notify_fiscal_error(rec, error):
 
 def fiscal_tick():
     """Задача планировщика: отправить очередь чеков в Webkassa."""
-    from fiscal import process_queue
+    from services.fiscal import process_queue
     return process_queue(notify=_notify_fiscal_done, on_error=_notify_fiscal_error)
 
 
@@ -189,10 +189,10 @@ def fiscal_tick():
 
 def send_customer_receipts():
     """Чеки клиентам, подписанным в Telegram: по номеру, который продавец ввёл на кассе."""
-    import customers
+    from services import customers
     from telebot.apihelper import ApiTelegramException
     from handlers.customer_handler import send_receipt
-    from database import get_receipt
+    from core.database import get_receipt
     sent = 0
     for row in customers.pending_deliveries() or []:
         receipt = get_receipt(row['id'])

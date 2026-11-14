@@ -3,9 +3,9 @@ from conftest import CASHIER, MANAGER, login, db_query, reply_buttons
 from test_kassa import client, kassa_login, post  # noqa: F401  (фикстура)
 from test_stores import _web, _csrf
 
-from database import record_receipt, get_receipt
+from core.database import record_receipt, get_receipt
 from utils.common import now, today, day_bounds
-from database import get_period_operations
+from core.database import get_period_operations
 from utils.report_generator import build_summary
 
 

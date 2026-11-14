@@ -18,18 +18,18 @@ from io import StringIO
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-import config
-from buttons import PAYMENT_TYPES, ROLE_TITLES
-from database import (get_user_by_id, get_stores, get_product_by_article, record_receipt, MAX_RECEIPT_ITEMS, get_receipt,
+from core import config
+from handlers.buttons import PAYMENT_TYPES, ROLE_TITLES
+from core.database import (get_user_by_id, get_stores, get_product_by_article, record_receipt, MAX_RECEIPT_ITEMS, get_receipt,
                       find_by_mark_code, marking_required, SELLABLE_CODE, CODE_STATUS_TITLES, get_sales_for_return,
                       get_sale_details_by_id, create_return_record, create_buyback_record, create_trade_in_record,
                       create_cash_withdrawal_record, get_period_operations, create_kassa_login, consume_kassa_login)
-from schema import METAL_TYPES
+from core.schema import METAL_TYPES
 from utils import mark_codes
 from utils.common import now, today, day_bounds, parse_money, parse_float, money, normalize_phone, parse_birthday
 from utils import receipt_text
 from utils.labels import details_line
-import photos
+from services import photos
 from utils.report_generator import build_summary
 
 logger = logging.getLogger("posbot.kassa")

@@ -5,11 +5,11 @@
 """
 import logging
 
-from buttons import create_cancel_markup, create_confirmation_markup, create_payment_type_markup, PAYMENT_TYPES, BTN_CONFIRM
-from database import create_trade_in_record
+from handlers.buttons import create_cancel_markup, create_confirmation_markup, create_payment_type_markup, PAYMENT_TYPES, BTN_CONFIRM
+from core.database import create_trade_in_record
 from handlers.common import (CASH_ROLES, CustomerItemIntake, in_state, is_button, user_ids, cash_menu,
                              register_simple_cancel, product_line, ask_money, read_money, resolve_for_sale)
-from state import bot, user_state, get_op, start_op, end_op, cancel_current_operation
+from core.state import bot, user_state, get_op, start_op, end_op, cancel_current_operation
 from utils.common import money, h
 
 logger = logging.getLogger(__name__)

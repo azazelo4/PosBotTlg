@@ -17,10 +17,10 @@ from datetime import datetime, timedelta
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
-import config
-import settings_store
-from database import init_pool, get_connection, ensure_admin
-from schema import ensure_schema
+from core import config
+from core import settings_store
+from core.database import init_pool, get_connection, ensure_admin
+from core.schema import ensure_schema
 
 logging.basicConfig(
     level=getattr(logging, (config.LOG_LEVEL or "INFO").upper(), logging.INFO),
@@ -37,9 +37,9 @@ FISCAL_POLL_SECONDS = 5
 
 
 def register_handlers():
-    from auth import SessionMiddleware, has_role
-    from buttons import BTN_CASH, BTN_STOCK, BTN_STAFF, BTN_BACK, BTN_CANCEL
-    from state import bot
+    from core.auth import SessionMiddleware, has_role
+    from handlers.buttons import BTN_CASH, BTN_STOCK, BTN_STAFF, BTN_BACK, BTN_CANCEL
+    from core.state import bot
     from handlers.navigation import (on_cancel, on_back, on_cash_menu, on_stock_menu, on_staff_menu, on_fallback,
                                      on_stale_callback)
     from handlers.kassa_login import register_kassa_login_handlers
@@ -55,7 +55,7 @@ def register_handlers():
     from handlers.labels_handler import register_labels_handlers
     from handlers.import_handler import register_import_handlers
     from handlers.web_handler import register_web_handlers
-    from user_management import configure_user_management
+    from handlers.user_management import configure_user_management
 
     bot.setup_middleware(SessionMiddleware())
     from handlers.customer_handler import register_customer_handlers, register_customer_fallback
@@ -188,7 +188,7 @@ def main():
     logger.info("Запуск бота (версия %s)...", config.VERSION)
     prepare_database()
     wait_for_token()
-    from state import bot
+    from core.state import bot
     register_handlers()
     start_scheduler()
     logger.info("Бот запущен, начинаю опрос Telegram.")

@@ -8,8 +8,8 @@ from functools import wraps
 import mysql.connector
 from mysql.connector import pooling, Error
 
-import config
-from config import DB_HOST, DB_PORT, DB_USER, DB_PASS, DB_NAME
+from core import config
+from core.config import DB_HOST, DB_PORT, DB_USER, DB_PASS, DB_NAME
 from utils import mark_codes
 from utils.common import now, today, normalize_phone
 

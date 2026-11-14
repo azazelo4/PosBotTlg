@@ -31,8 +31,8 @@ os.environ["POSBOT_DATA_DIR"] = tempfile.mkdtemp(prefix="posbot-data-")
 from telebot import types  # noqa: E402
 
 import main  # noqa: E402
-from database import get_connection  # noqa: E402
-from state import bot, user_data, user_state  # noqa: E402
+from core.database import get_connection  # noqa: E402
+from core.state import bot, user_data, user_state  # noqa: E402
 
 ADMIN, CASHIER, MANAGER, STRANGER = 1001, 1002, 1003, 1004
 PHONES = {ADMIN: "77010000001", CASHIER: "+77010000002", MANAGER: "87010000003", STRANGER: "77019999999"}
@@ -211,7 +211,7 @@ def fake():
                  "send_photo"):
         setattr(bot, name, getattr(tg, name))
     bot.threaded = False
-    from database import init_pool
+    from core.database import init_pool
     init_pool()
     _reset_db()
     main.prepare_database()

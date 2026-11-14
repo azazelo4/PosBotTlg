@@ -2,9 +2,9 @@ import logging
 
 from telebot import types
 
-from auth import authorize_user, login, drop_session
-from buttons import main_menu_for_role, create_share_contact_markup, ROLE_TITLES
-from state import bot, cancel_current_operation
+from core.auth import authorize_user, login, drop_session
+from handlers.buttons import main_menu_for_role, create_share_contact_markup, ROLE_TITLES
+from core.state import bot, cancel_current_operation
 
 logger = logging.getLogger(__name__)
 

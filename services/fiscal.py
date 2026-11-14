@@ -14,8 +14,8 @@ import logging
 from contextlib import contextmanager
 from datetime import timedelta
 
-import config
-from database import with_connection, with_transaction, get_connection, BusinessError, get_job_run, mark_job_run
+from core import config
+from core.database import with_connection, with_transaction, get_connection, BusinessError, get_job_run, mark_job_run
 from utils.common import now, money
 from utils.webkassa import (WebkassaClient, WebkassaError, WebkassaUnavailable, OPERATION_SALE, OPERATION_SALE_RETURN,
                             CASHBOX_BLOCKING_CODES, NO_SHIFT_CODE, NOT_ENOUGH_CASH_CODE,
