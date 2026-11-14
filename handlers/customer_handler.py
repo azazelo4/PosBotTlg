@@ -11,11 +11,11 @@ import logging
 
 from telebot import types
 
-import customers
-from auth import has_role
-from buttons import get_keyboard_by_role
-from database import get_receipt
-from state import bot, user_state, get_op, start_op, end_op
+from services import customers
+from core.auth import has_role
+from handlers.buttons import get_keyboard_by_role
+from core.database import get_receipt
+from core.state import bot, user_state, get_op, start_op, end_op
 from utils import receipt_text
 from utils.qr import qr_png
 

@@ -11,8 +11,8 @@ import time
 from datetime import timedelta
 from urllib.parse import parse_qsl
 
-import config
-from database import create_login_token, consume_login_token
+from core import config
+from core.database import create_login_token, consume_login_token
 from utils.common import now
 
 LOGIN_TTL = timedelta(minutes=10)

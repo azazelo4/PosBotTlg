@@ -7,8 +7,8 @@
 import logging
 from datetime import timedelta
 
-import analytics
-from database import with_connection, with_transaction, BusinessError, _upsert_customer
+from services import analytics
+from core.database import with_connection, with_transaction, BusinessError, _upsert_customer
 from utils.common import now, today, normalize_phone, days_to_birthday
 
 logger = logging.getLogger(__name__)

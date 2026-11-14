@@ -11,7 +11,7 @@ import random
 import secrets
 from datetime import timedelta
 
-from database import with_connection, with_transaction, BusinessError
+from core.database import with_connection, with_transaction, BusinessError
 from utils.common import now
 
 logger = logging.getLogger(__name__)

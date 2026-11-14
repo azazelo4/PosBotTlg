@@ -1,7 +1,7 @@
 """Электронный чек: текст для Telegram и WhatsApp, ссылки на страницу чека и бота."""
 from urllib.parse import quote
 
-import config
+from core import config
 from utils.common import money, h
 
 

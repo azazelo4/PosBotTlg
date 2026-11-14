@@ -1,8 +1,8 @@
 from telebot import types
 
-import config
-from buttons import get_keyboard_by_role
-from state import bot, user_data
+from core import config
+from handlers.buttons import get_keyboard_by_role
+from core.state import bot, user_data
 
 HELP_TEXT = """<b>Команды</b>
 /start — вход по номеру телефона

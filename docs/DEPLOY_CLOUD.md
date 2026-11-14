@@ -1,7 +1,7 @@
 # Деплой на VPS (is*hosting, Казахстан)
 
 Бот и MySQL работают в Docker Compose на Ubuntu-VPS, деплой — GitHub Actions через self-hosted
-runner на этом же сервере. Общая часть — в [`DEPLOY.md`](../DEPLOY.md).
+runner на этом же сервере. Общая часть — в [`DEPLOY.md`](DEPLOY.md).
 
 Выбранный сервер: **is*hosting VPS Kazakhstan, тариф Start** — 2 vCPU, 2 GB RAM, 30 GB SSD.
 Сервер в Казахстане выбран и из-за требования закона РК о персональных данных хранить такие базы
@@ -83,7 +83,7 @@ ufw status       # OpenSSH, 80/tcp, 443/tcp — ALLOW
 ## 4. GitHub: runner
 
 Секреты и переменные в GitHub **не нужны** — всё задаётся в мастере `/setup` после деплоя
-(см. [`DEPLOY.md`, раздел 1](../DEPLOY.md#1-настройки-github--не-нужны)). Достаточно создать environment
+(см. [`DEPLOY.md`, раздел 1](DEPLOY.md#1-настройки-github--не-нужны)). Достаточно создать environment
 `production` и в **Deployment branches** ограничить его веткой `POS-Bot`.
 
 Если токен бота ещё не перевыпущен после утечки в истории git — сделать это сейчас: @BotFather → `/revoke`,

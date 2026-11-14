@@ -4,13 +4,13 @@ from decimal import Decimal
 
 from telebot import types
 
-from buttons import (create_cancel_markup, create_confirmation_markup, create_choice_markup, create_skip_cancel_markup,
+from handlers.buttons import (create_cancel_markup, create_confirmation_markup, create_choice_markup, create_skip_cancel_markup,
                      create_stock_management_buttons, BTN_CONFIRM)
-from database import add_product_to_db, get_stock_report_data, update_product_quantity, get_product_by_article, get_enum_or_distinct_values
+from core.database import add_product_to_db, get_stock_report_data, update_product_quantity, get_product_by_article, get_enum_or_distinct_values
 from handlers.common import store_names, store_id_by_name, store_name_by_id, STOCK_ROLES, in_state, is_button, register_simple_cancel, product_line, SKIP
-import photos
-from schema import METAL_TYPES, PRODUCT_TYPES
-from state import bot, user_state, get_op, start_op, end_op, cancel_current_operation
+from services import photos
+from core.schema import METAL_TYPES, PRODUCT_TYPES
+from core.state import bot, user_state, get_op, start_op, end_op, cancel_current_operation
 from utils.stock_report import build_stock_excel, stock_totals
 from utils.common import parse_float, parse_int, parse_money, money, h, now
 
@@ -269,7 +269,7 @@ def on_photo_text(message):
 
 
 def _user_id(chat_id):
-    from database import get_user_by_chat_id
+    from core.database import get_user_by_chat_id
     user = get_user_by_chat_id(chat_id)
     return user['id'] if user else None
 

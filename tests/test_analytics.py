@@ -5,11 +5,11 @@ from decimal import Decimal
 
 import openpyxl
 
-import analytics
+from services import analytics
 from fastapi.testclient import TestClient
 
 from conftest import ADMIN, MANAGER, db_query
-from database import record_receipt, create_return_record, create_buyback_record
+from core.database import record_receipt, create_return_record, create_buyback_record
 from test_stores import _web
 from utils.common import today
 from web.app import app

@@ -1,10 +1,10 @@
 """Навигация: отмена, назад, разделы меню и ответ «не понял». Регистрируются первыми/последними."""
 from telebot import types
 
-from auth import has_role
-from buttons import (create_cash_operations_buttons, create_stock_management_buttons, create_staff_management_buttons,
+from core.auth import has_role
+from handlers.buttons import (create_cash_operations_buttons, create_stock_management_buttons, create_staff_management_buttons,
                      get_keyboard_by_role, create_share_contact_markup)
-from state import bot, user_state, cancel_current_operation
+from core.state import bot, user_state, cancel_current_operation
 
 
 def on_cancel(message: types.Message):

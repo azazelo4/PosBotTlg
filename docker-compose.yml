@@ -66,7 +66,7 @@ services:
       TZ: ${TZ:-Asia/Almaty}
     volumes:
       - db_data:/var/lib/mysql
-    # Схему создаёт и обновляет сам бот при старте (schema.py), init.sql больше не нужен
+    # Схему создаёт и обновляет сам бот при старте (core/schema.py), init.sql больше не нужен
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_0900_ai_ci
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$$MYSQL_USER -p$$MYSQL_PASSWORD --silent"]

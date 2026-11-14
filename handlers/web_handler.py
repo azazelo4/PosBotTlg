@@ -3,10 +3,10 @@ import logging
 
 from telebot import types
 
-from buttons import BTN_WEB, get_keyboard_by_role
-import config
+from handlers.buttons import BTN_WEB, get_keyboard_by_role
+from core import config
 from handlers.common import is_button
-from state import bot, user_data, cancel_current_operation
+from core.state import bot, user_data, cancel_current_operation
 from web.security import issue_login_link
 
 logger = logging.getLogger(__name__)
@@ -81,6 +81,6 @@ def on_app(message):
 def register_web_handlers():
     if not config.WEB_URL:
         return
-    from auth import has_role
+    from core.auth import has_role
     bot.register_message_handler(on_web_admin, func=is_button(BTN_WEB, 'admin', 'manager'))
     bot.register_message_handler(on_app, commands=['app'], func=lambda m: has_role(m.chat.id))

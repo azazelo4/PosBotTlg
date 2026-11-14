@@ -10,8 +10,8 @@ import time
 
 from telebot.handler_backends import BaseMiddleware
 
-from database import get_user_by_phone, get_user_by_chat_id, get_user_by_id, set_user_chat_id
-from state import user_data, user_state
+from core.database import get_user_by_phone, get_user_by_chat_id, get_user_by_id, set_user_chat_id
+from core.state import user_data, user_state
 
 logger = logging.getLogger(__name__)
 

@@ -5,12 +5,12 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 from telebot import types
 
-import config
+from core import config
 import setup_code
 from conftest import ADMIN, CASHIER, login, db_query
-from database import record_sale, get_job_run, mark_job_run
+from core.database import record_sale, get_job_run, mark_job_run
 from handlers.web_handler import send_link
-from state import bot
+from core.state import bot
 from utils.common import now, today
 from utils import scheduled_jobs as jobs
 from web.app import app, _suggest_web_url

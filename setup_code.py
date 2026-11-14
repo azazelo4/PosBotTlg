@@ -5,10 +5,10 @@
 """
 import sys
 
-import config
-import settings_store
-from database import init_pool, get_connection
-from schema import ensure_schema
+from core import config
+from core import settings_store
+from core.database import init_pool, get_connection
+from core.schema import ensure_schema
 
 
 def set_web_url(url):

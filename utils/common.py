@@ -6,7 +6,7 @@ from html import escape
 from functools import lru_cache
 from zoneinfo import ZoneInfo
 
-import config
+from core import config
 
 
 @lru_cache(maxsize=8)

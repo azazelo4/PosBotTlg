@@ -4,10 +4,10 @@ import itertools
 import pytest
 from fastapi.testclient import TestClient
 
-import config
-import marking
+from core import config
+from services import marking
 from conftest import CASHIER, MANAGER, login, db_query
-from database import record_receipt, create_return_record, create_trade_in_record
+from core.database import record_receipt, create_return_record, create_trade_in_record
 from test_kassa import client, kassa_login, post  # noqa: F401  (фикстура)
 from test_stores import _web, _csrf
 from test_web import init_data

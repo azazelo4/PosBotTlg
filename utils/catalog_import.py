@@ -14,9 +14,9 @@ from decimal import Decimal
 
 import openpyxl
 
-import config
-from database import get_products_by_articles, import_products, get_stores
-from schema import PRODUCT_TYPES
+from core import config
+from core.database import get_products_by_articles, import_products, get_stores
+from core.schema import PRODUCT_TYPES
 from utils.common import parse_money, parse_float, parse_date
 
 MAX_ROWS = 20000
@@ -377,7 +377,7 @@ def apply_plan(plan: ImportPlan, update_existing=True):
 
 def attach_photos(plan: ImportPlan, user_id=None):
     """Фото из архива — товарам, у которых фото ещё нет (повторный импорт не плодит дубли). → (добавлено, ошибки)."""
-    import photos
+    from services import photos
     if plan.archive is None or not plan.photos:
         return 0, []
     rows = [r for r in plan.rows if r['_photos']]

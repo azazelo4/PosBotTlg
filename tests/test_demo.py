@@ -5,8 +5,8 @@ from test_stores import _web, _csrf
 
 from datetime import timedelta
 
-import demo_data
-from database import record_sale
+from services import demo_data
+from core.database import record_sale
 from utils.common import now
 
 

@@ -3,7 +3,7 @@ import os
 
 import mysql.connector
 
-from schema import ensure_schema
+from core.schema import ensure_schema
 
 LEGACY_DB = "bot_legacy_test"
 

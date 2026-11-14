@@ -6,11 +6,11 @@ from datetime import timedelta
 
 from telebot import types
 
-from buttons import create_cancel_markup, create_choice_markup, create_stock_management_buttons
-import config
-from database import get_products_by_articles, get_products_for_labels
+from handlers.buttons import create_cancel_markup, create_choice_markup, create_stock_management_buttons
+from core import config
+from core.database import get_products_by_articles, get_products_for_labels
 from handlers.common import store_names, store_id_by_name, STOCK_ROLES, in_state, is_button, register_simple_cancel
-from state import bot, user_state, get_op, start_op, end_op, cancel_current_operation
+from core.state import bot, user_state, get_op, start_op, end_op, cancel_current_operation
 from utils.common import today, now, h
 from utils.labels import generate_labels_pdf
 

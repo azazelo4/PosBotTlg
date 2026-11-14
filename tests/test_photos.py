@@ -8,7 +8,7 @@ import openpyxl
 import pytest
 from PIL import Image
 
-import photos
+from services import photos
 from conftest import MANAGER, CASHIER, login, db_query
 from test_kassa import client as kassa_client, kassa_login  # noqa: F401  (фикстура)
 from test_web import client, web_login, csrf  # noqa: F401  (фикстура)

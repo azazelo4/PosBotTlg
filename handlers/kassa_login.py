@@ -8,10 +8,10 @@ import logging
 
 from telebot import types
 
-from auth import ensure_session
-from buttons import ROLE_TITLES
-from database import get_kassa_login, decide_kassa_login
-from state import bot
+from core.auth import ensure_session
+from handlers.buttons import ROLE_TITLES
+from core.database import get_kassa_login, decide_kassa_login
+from core.state import bot
 from utils.common import h, now
 from web.kassa import START_PREFIX, CASH_ROLES, token_hash
 

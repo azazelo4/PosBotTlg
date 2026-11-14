@@ -1,12 +1,12 @@
 """Продажа чеком: артикул → сумма → (ещё товар…) → оплата → подтверждение."""
 import logging
 
-from buttons import (create_cancel_markup, create_confirmation_markup, _kb, PAYMENT_TYPES, BTN_CANCEL, BTN_CONFIRM)
-from database import record_receipt, MAX_RECEIPT_ITEMS
+from handlers.buttons import (create_cancel_markup, create_confirmation_markup, _kb, PAYMENT_TYPES, BTN_CANCEL, BTN_CONFIRM)
+from core.database import record_receipt, MAX_RECEIPT_ITEMS
 from handlers.common import (CASH_ROLES, in_state, is_button, user_ids, cash_menu, register_simple_cancel,
                              product_line, ask_money, read_money, resolve_for_sale)
 from utils import mark_codes
-from state import bot, user_state, get_op, start_op, end_op, cancel_current_operation
+from core.state import bot, user_state, get_op, start_op, end_op, cancel_current_operation
 from utils.common import money, h
 
 logger = logging.getLogger(__name__)

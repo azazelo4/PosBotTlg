@@ -3,12 +3,12 @@ import logging
 
 from telebot import types
 
-from auth import has_role, invalidate_user_sessions
-from buttons import create_cancel_markup, create_choice_markup, create_staff_management_buttons, ROLE_TITLES
-from database import (get_stores, set_user_store, add_user_to_db, get_all_users, get_user_by_id, change_user_role_function, update_user_phone,
+from core.auth import has_role, invalidate_user_sessions
+from handlers.buttons import create_cancel_markup, create_choice_markup, create_staff_management_buttons, ROLE_TITLES
+from core.database import (get_stores, set_user_store, add_user_to_db, get_all_users, get_user_by_id, change_user_role_function, update_user_phone,
                       deactivate_user_in_db)
 from handlers.common import in_state, is_button
-from state import bot, user_data, user_state, get_op, start_op, end_op, register_cancel, cancel_current_operation
+from core.state import bot, user_data, user_state, get_op, start_op, end_op, register_cancel, cancel_current_operation
 from utils.common import normalize_phone, h
 
 logger = logging.getLogger(__name__)

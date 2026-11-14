@@ -3,10 +3,10 @@ import logging
 
 from telebot import types
 
-from buttons import create_cancel_markup, create_confirmation_markup, create_payment_type_markup, PAYMENT_TYPES, BTN_CONFIRM
-from database import get_sales_for_return, get_sale_details_by_id, create_return_record
+from handlers.buttons import create_cancel_markup, create_confirmation_markup, create_payment_type_markup, PAYMENT_TYPES, BTN_CONFIRM
+from core.database import get_sales_for_return, get_sale_details_by_id, create_return_record
 from handlers.common import CASH_ROLES, in_state, is_button, user_ids, cash_menu, register_simple_cancel, ask_money, read_money
-from state import bot, user_state, get_op, start_op, end_op, cancel_current_operation
+from core.state import bot, user_state, get_op, start_op, end_op, cancel_current_operation
 from utils.common import money, h
 
 logger = logging.getLogger(__name__)

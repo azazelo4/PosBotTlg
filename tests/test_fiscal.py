@@ -7,11 +7,11 @@ import urllib.error
 
 import pytest
 
-import config
-import fiscal
-import marking
+from core import config
+from services import fiscal
+from services import marking
 from conftest import ADMIN, CASHIER, MANAGER, login, db_query
-from database import record_receipt, create_return_record, create_cash_withdrawal_record
+from core.database import record_receipt, create_return_record, create_cash_withdrawal_record
 from test_stores import _web, _csrf
 from utils import scheduled_jobs as jobs
 from utils.common import money

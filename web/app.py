@@ -21,22 +21,22 @@ from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-import analytics
-import config
-import demo_data
-import customers
-import fiscal
-import marking
-import photos
-import settings_store
-from buttons import PAYMENT_TYPES, ROLE_TITLES
+from services import analytics
+from core import config
+from services import demo_data
+from services import customers
+from services import fiscal
+from services import marking
+from services import photos
+from core import settings_store
+from handlers.buttons import PAYMENT_TYPES, ROLE_TITLES
 from utils import receipt_text
-from database import (get_receipt, get_job_run, marking_required, ensure_admin, get_connection, get_stores, get_store_counts, create_store, update_store, set_user_store, init_pool, get_user_by_id, get_user_by_chat_id, search_products, get_product_by_id,
+from core.database import (get_receipt, get_job_run, marking_required, ensure_admin, get_connection, get_stores, get_store_counts, create_store, update_store, set_user_store, init_pool, get_user_by_id, get_user_by_chat_id, search_products, get_product_by_id,
                       get_product_by_article, get_products_by_articles, get_products_for_labels, add_product_to_db,
                       update_product, get_stock_report_data, get_low_stock_products, get_period_operations,
                       record_sale, get_today_sales_by_user, get_all_users, add_user_to_db, change_user_role_function,
                       deactivate_user_in_db, update_user_phone)
-from schema import METAL_TYPES, PRODUCT_TYPES, ensure_schema
+from core.schema import METAL_TYPES, PRODUCT_TYPES, ensure_schema
 from utils.catalog_import import build_plan, apply_plan, attach_photos, FIELD_TITLES
 from utils.photo_archive import PhotoArchive, ArchiveError
 from utils import mark_codes
