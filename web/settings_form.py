@@ -60,6 +60,9 @@ def collect(form, keys):
                 except config.SettingError as e:
                     errors.append(str(e))
             continue
+        if s.kind == "time" and not raw and key in form and s.default is not None:
+            changes[key] = config.OFF                     # стёрли время — выключить, а не вернуть по умолчанию
+            continue
         try:
             changes[key] = config.parse_value(s, raw)
         except config.SettingError as e:

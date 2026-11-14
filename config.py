@@ -122,12 +122,13 @@ SETTINGS = (
             default=os.environ.get("TZ") or "Asia/Almaty", env="POSBOT_TIMEZONE",
             help="Даты операций, периоды отчётов и расписание уведомлений."),
     Setting("DAILY_REPORT_TIME", "Ежедневный отчёт, время", "schedule", kind="time",
-            default="20:00" if LOCAL_MODE else "23:00", restart=True,
+            default="20:00" if LOCAL_MODE else "23:00", restart=True, placeholder="не отправлять",
             help="ЧЧ:ММ. Пусто — не отправлять. Если бот в это время был выключен, отчёт придёт после включения."),
     Setting("REPORT_CHAT_ID", "Чат для ежедневного отчёта", "schedule", kind="int",
             help="ID чата/группы Telegram. Пусто — всем администраторам."),
     Setting("LOW_STOCK_TIME", "Уведомление о низком остатке, время", "schedule", kind="time",
-            default="11:00" if LOCAL_MODE else "09:00", restart=True, help="ЧЧ:ММ. Пусто — не отправлять."),
+            default="11:00" if LOCAL_MODE else "09:00", restart=True, placeholder="не отправлять",
+            help="ЧЧ:ММ. Пусто — не отправлять."),
     Setting("LOW_STOCK_THRESHOLD", "Порог низкого остатка, шт.", "schedule", kind="int", default=5),
     Setting("LABEL_WIDTH_MM", "Ширина ценника, мм", "labels", kind="float", default=30.0),
     Setting("LABEL_HEIGHT_MM", "Высота ценника, мм", "labels", kind="float", default=20.0),
@@ -164,6 +165,7 @@ class SettingError(ValueError):
     pass
 
 
+OFF = "off"          # время уведомления стёрли — «не отправлять» (иначе подставилось бы время по умолчанию)
 _HHMM = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 
 
@@ -191,6 +193,8 @@ def parse_value(setting: Setting, raw):
     except ValueError:
         raise SettingError(f"«{setting.title}»: нужно число.")
     if kind == "time":
+        if raw.lower() == OFF:
+            return OFF
         m = _HHMM.match(raw)
         if not m:
             raise SettingError(f"«{setting.title}»: формат ЧЧ:ММ, например 23:00.")
@@ -255,7 +259,7 @@ def apply(db_values=None):
             value = _db_values.get(s.key)
         if value is None:
             value = s.default
-        g[s.key] = value
+        g[s.key] = None if value == OFF else value
 
 
 def source(key):
