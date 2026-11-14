@@ -199,6 +199,34 @@ def test_settings_page(tg):
     assert "Изменений нет" in client.post("/settings", data=form).text
 
 
+def test_clearing_report_time_disables_report(tg, monkeypatch):
+    """Стёрли время отчёта или остатков — уведомление выключено, а не возвращается время по умолчанию."""
+    client = _web(tg, ADMIN)
+    form = {"csrf": _csrf(client, "/settings"), "LABEL_WIDTH_MM": "30", "LABEL_HEIGHT_MM": "20",
+            "TIMEZONE": "Asia/Almaty", "LOW_STOCK_THRESHOLD": "5", "WEBKASSA_URL": "https://devkkm.webkassa.kz",
+            "IMPORT_MIN_PRICE_PERCENT": "100", "DAILY_REPORT_TIME": "", "LOW_STOCK_TIME": ""}
+    assert config.DAILY_REPORT_TIME and config.LOW_STOCK_TIME                 # по умолчанию включены
+    page = client.post("/settings", data=form).text
+    assert "Сохранено" in page and "Бот перезапустится" in page
+    assert config.DAILY_REPORT_TIME is None and config.LOW_STOCK_TIME is None
+    assert {r['value'] for r in db_query("SELECT value FROM settings WHERE setting_key IN "
+                                         "('DAILY_REPORT_TIME', 'LOW_STOCK_TIME')")} == {"off"}
+    settings_store.reload()                                                  # после перезапуска — тоже выключено
+    assert config.DAILY_REPORT_TIME is None and config.LOW_STOCK_TIME is None
+    page = client.get("/settings").text
+    assert re.search(r'name="DAILY_REPORT_TIME" value="" placeholder="не отправлять"', page)  # поле пустое
+    assert main._parse_hhmm(config.DAILY_REPORT_TIME, "DAILY_REPORT_TIME") is None
+    assert "Изменений нет" in client.post("/settings", data=form).text
+    # включили снова
+    client.post("/settings", data={**form, "DAILY_REPORT_TIME": "21:00"})
+    assert config.DAILY_REPORT_TIME == "21:00" and config.LOW_STOCK_TIME is None
+    # в окружении тоже можно выключить
+    monkeypatch.setenv(config.BY_KEY["LOW_STOCK_TIME"].env_name, "off")
+    db_query("DELETE FROM settings WHERE setting_key='LOW_STOCK_TIME'")
+    settings_store.reload()
+    assert config.LOW_STOCK_TIME is None
+
+
 def test_watcher_restarts_bot_only_for_restart_settings(tg):
     restarts = []
     watch = main.make_settings_watcher(restart=lambda: restarts.append(1))
