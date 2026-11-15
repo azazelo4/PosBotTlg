@@ -979,9 +979,12 @@ def api_me(user=Depends(app_user)):
 
 @app.get("/api/app/product")
 def api_product(article: str, user=Depends(app_user)):
-    product = get_product_by_article(article.strip())
+    article = article.strip()
+    product = get_product_by_article(article)
+    if not product and article.isdigit() and article.lstrip("0") and article.lstrip("0") != article:
+        product = get_product_by_article(article.lstrip("0"))      # штрихкод дополнен нулями слева (EAN)
     if not product:
-        raise HTTPException(404, f"Артикул {article.strip()} не найден.")
+        raise HTTPException(404, f"Артикул {article} не найден.")
     if marking_required(product):
         raise HTTPException(400, "Маркируемый товар: продажа по коду маркировки — на кассе ПК со сканером или в боте.")
     return _product_json(product)

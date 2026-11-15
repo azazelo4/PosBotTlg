@@ -188,6 +188,14 @@ def test_mini_app_sale_flow(tg, client):
     p = client.get("/api/app/product", params={"article": "A100"}, headers=headers).json()
     assert p["price"] == 150000 and p["quantity"] == 3 and "585" not in p["details"]
     assert client.get("/api/app/product", params={"article": "NOPE"}, headers=headers).status_code == 404
+    # сканер камерой читает и штрихкоды старых ценников; EAN бывает дополнен нулями слева
+    page = client.get("/app").text
+    assert "/static/zxing.min.js" in page and "EAN_13" in page and "CODE_128" in page
+    assert client.get("/static/zxing.min.js").status_code == 200
+    db_query("UPDATE products SET article_number='12345' WHERE article_number='A200'")
+    p2 = client.get("/api/app/product", params={"article": "0000000012345"}, headers=headers).json()
+    assert p2["article"] == "12345"
+    assert client.get("/api/app/product", params={"article": "000"}, headers=headers).status_code == 404
     r = client.post("/api/app/sale", json={"article": "A100", "price": 100000, "payment": "Kaspi"}, headers=headers)
     assert r.status_code == 400 and "ниже минимальной" in r.json()["error"]
     r = client.post("/api/app/sale", json={"article": "A100", "price": 145000, "payment": "Bitcoin"}, headers=headers)

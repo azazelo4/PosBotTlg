@@ -256,7 +256,7 @@ web/
   security.py            вход по ссылке из бота, проверка подписи Telegram initData
   settings_form.py       форма мастера /setup и страницы «Настройки»
   templates/             страницы админки и Mini App
-  static/                Pico CSS, Chart.js (локально, без CDN)
+  static/                Pico CSS, Chart.js, ZXing — сканер штрихкодов (локально, без CDN)
 tools/webkassa_check.py  проверка подключения к Webkassa
 tests/                   сценарные тесты на реальной БД
 deploy/                  install.sh и posbot (установка и обслуживание у клиента), compose.prod.yml,
