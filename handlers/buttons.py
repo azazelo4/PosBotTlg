@@ -10,6 +10,7 @@ ROLE_TITLES = {'admin': 'администратор', 'manager': 'менедже
 BTN_CASH, BTN_STOCK, BTN_STAFF, BTN_BACK, BTN_CANCEL = "Касса", "Склад", "Персонал", "Назад", "Отмена"
 BTN_CONFIRM = "Подтвердить"
 BTN_WEB = "Веб-админка"
+BTN_PC_KASSA = "💻 Касса на ПК"
 MENU_BUTTONS = {BTN_CASH, BTN_STOCK, BTN_STAFF, BTN_BACK}
 
 
@@ -21,15 +22,16 @@ def _kb(*rows, one_time=False):
 
 
 def create_cashier_buttons():
-    return _kb([BTN_CASH])
+    return _kb([BTN_CASH] + ([BTN_PC_KASSA] if config.WEB_URL else []))
 
 
 def create_manager_buttons():
-    return _kb([BTN_CASH, BTN_STOCK], *([[BTN_WEB]] if config.WEB_URL else []))
+    return _kb([BTN_CASH, BTN_STOCK], *([[BTN_WEB, BTN_PC_KASSA]] if config.WEB_URL else []))
 
 
 def create_admin_buttons():
-    return _kb([BTN_CASH, BTN_STOCK], [BTN_STAFF] + ([BTN_WEB] if config.WEB_URL else []))
+    return _kb([BTN_CASH, BTN_STOCK], [BTN_STAFF] + ([BTN_WEB] if config.WEB_URL else []),
+               *([[BTN_PC_KASSA]] if config.WEB_URL else []))
 
 
 def create_share_contact_markup():

@@ -3,7 +3,7 @@ import logging
 
 from telebot import types
 
-from handlers.buttons import BTN_WEB, get_keyboard_by_role
+from handlers.buttons import BTN_WEB, BTN_PC_KASSA, get_keyboard_by_role
 from core import config
 from handlers.common import is_button
 from core.state import bot, user_data, cancel_current_operation
@@ -59,6 +59,22 @@ def on_web_admin(message):
     send_link(chat_id, text, "Открыть админку", link)
 
 
+def on_pc_kassa(message):
+    """Ссылка на кассу в браузере на компьютере магазина. Вход там — по QR-коду на экране кассы."""
+    chat_id = message.chat.id
+    cancel_current_operation(chat_id, notify=False)
+    url = f"{config.WEB_URL}/kassa"
+    text = (f"Касса на компьютере: {url}\n\n"
+            "1. Откройте этот адрес в браузере на компьютере магазина и добавьте в закладки "
+            "(или нажмите кнопку ниже в Telegram на этом компьютере).\n"
+            "2. На экране появится QR-код — наведите на него обычную камеру телефона.\n"
+            "3. Бот спросит о входе — нажмите «✅ Войти».\n\n"
+            "Уходя, нажмите на кассе «Выйти», чтобы следующий не работал под вашим именем.")
+    if _is_lan_url():
+        text += "\n\nАдрес в сети магазина: откроется только на компьютере, подключённом к этой сети."
+    send_link(chat_id, text, "Открыть кассу на ПК", url, disable_web_page_preview=True)
+
+
 def on_app(message):
     chat_id = message.chat.id
     if not config.WEB_URL:
@@ -83,4 +99,5 @@ def register_web_handlers():
         return
     from core.auth import has_role
     bot.register_message_handler(on_web_admin, func=is_button(BTN_WEB, 'admin', 'manager'))
+    bot.register_message_handler(on_pc_kassa, func=is_button(BTN_PC_KASSA, 'admin', 'manager', 'cashier'))
     bot.register_message_handler(on_app, commands=['app'], func=lambda m: has_role(m.chat.id))

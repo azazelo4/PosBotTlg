@@ -10,9 +10,9 @@ from core.state import user_data, user_state
 # ---------------------------------------------------------------- вход и сессии
 
 def test_login_menus_for_all_roles(tg):
-    assert reply_buttons(login(tg, ADMIN)[-1]) == ["Касса", "Склад", "Персонал", "Веб-админка"]
-    assert reply_buttons(login(tg, CASHIER)[-1]) == ["Касса"]
-    assert reply_buttons(login(tg, MANAGER)[-1]) == ["Касса", "Склад", "Веб-админка"]
+    assert reply_buttons(login(tg, ADMIN)[-1]) == ["Касса", "Склад", "Персонал", "Веб-админка", "💻 Касса на ПК"]
+    assert reply_buttons(login(tg, CASHIER)[-1]) == ["Касса", "💻 Касса на ПК"]
+    assert reply_buttons(login(tg, MANAGER)[-1]) == ["Касса", "Склад", "Веб-админка", "💻 Касса на ПК"]
     assert tg.menu_buttons[CASHIER].web_app.url == "https://pos.test/app"
 
 
@@ -342,7 +342,7 @@ def test_user_management(tg):
 
     # новый кассир входит, админ повышает его до менеджера
     tg.contact(2001, "77015554433")
-    assert reply_buttons(tg.last(2001)) == ["Касса"]
+    assert reply_buttons(tg.last(2001)) == ["Касса", "💻 Касса на ПК"]
     users = inline_buttons(tg.send(ADMIN, "Права"))
     me = next(d for t, d in users.items() if "Админ" in t)
     actions = inline_buttons(tg.press(ADMIN, me))
