@@ -277,7 +277,7 @@ TABLES = {
     "fiscal_receipts": f"""
         CREATE TABLE IF NOT EXISTS `fiscal_receipts` (
           `id` int NOT NULL AUTO_INCREMENT,
-          `kind` enum('sale','return','withdrawal','z_report') NOT NULL,
+          `kind` enum('sale','return','withdrawal','deposit','z_report') NOT NULL,
           `ref_id` int DEFAULT NULL,
           `store_id` int DEFAULT NULL,
           `cashbox` varchar(32) NOT NULL,
@@ -312,6 +312,20 @@ TABLES = {
           KEY `user_id` (`user_id`),
           KEY `idx_withdrawals_date` (`withdrawal_date`),
           CONSTRAINT `cash_withdrawals_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+        ) {CHARSET}""",
+    # Внесение наличных в кассу (размен на начало дня, возврат из банка) — обратная операция к инкассации
+    "cash_deposits": f"""
+        CREATE TABLE IF NOT EXISTS `cash_deposits` (
+          `id` int NOT NULL AUTO_INCREMENT,
+          `amount` decimal(12,2) NOT NULL,
+          `comment` text DEFAULT NULL,
+          `user_id` int NOT NULL,
+          `store_id` int DEFAULT NULL,
+          `deposit_date` datetime NOT NULL,
+          PRIMARY KEY (`id`),
+          KEY `user_id` (`user_id`),
+          KEY `idx_deposits_date` (`deposit_date`),
+          CONSTRAINT `cash_deposits_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
         ) {CHARSET}""",
 }
 
@@ -441,6 +455,20 @@ def _migrate_stores(cursor, default_stores):
                            "WHERE x.store_id IS NOT NULL AND s.id IS NULL")
 
 
+FISCAL_KINDS = "enum('sale','return','withdrawal','deposit','z_report')"
+
+
+def _migrate_fiscal_kinds(cursor):
+    """В очереди фискализации появился вид «внесение» (deposit) — расширяем enum на старых базах."""
+    cursor.execute("SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() "
+                   "AND TABLE_NAME = 'fiscal_receipts' AND COLUMN_NAME = 'kind'")
+    row = cursor.fetchone()
+    column_type = (row[0].decode() if isinstance(row[0], bytes) else row[0]) if row else None
+    if column_type and "'deposit'" not in column_type:
+        logger.info("Миграция: fiscal_receipts.kind — добавляю 'deposit'")
+        cursor.execute(f"ALTER TABLE `fiscal_receipts` MODIFY COLUMN `kind` {FISCAL_KINDS} NOT NULL")
+
+
 def ensure_schema(connection, default_stores=None):
     """Создаёт недостающие таблицы/колонки. Принимает открытое соединение.
 
@@ -467,6 +495,7 @@ def ensure_schema(connection, default_stores=None):
             if (wants_null and not nullable) or (column == 'payment_type' and data_type != 'varchar'):
                 logger.info("Миграция: изменяю колонку %s.%s", table, column)
                 cursor.execute(f"ALTER TABLE `{table}` MODIFY COLUMN `{column}` {definition}")
+        _migrate_fiscal_kinds(cursor)
         _migrate_stores(cursor, default_stores)
         for table, index, cols in INDEXES:
             if not _index_exists(cursor, table, index):

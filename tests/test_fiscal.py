@@ -11,7 +11,7 @@ from core import config
 from services import fiscal
 from services import marking
 from conftest import ADMIN, CASHIER, MANAGER, login, db_query
-from core.database import record_receipt, create_return_record, create_cash_withdrawal_record
+from core.database import record_receipt, create_return_record, create_cash_withdrawal_record, create_cash_deposit_record
 from test_stores import _web, _csrf
 from utils import scheduled_jobs as jobs
 from utils.common import money
@@ -259,6 +259,15 @@ def test_withdrawal_and_shift_close(wk, tg):
     assert ok and _queue()[-1]['kind'] == 'z_report' and _queue()[-1]['ref_id'] == 7
     assert ("Смена №", "7") in [tuple(x) for x in fiscal.report_lines(data)]
     assert not fiscal.z_report(2, uid)[0]                                      # у второго магазина кассы нет
+
+
+def test_deposit_is_fiscalized(wk, tg):
+    assert create_cash_deposit_record(25000, "размен", _uid('admin'), 1)[0]
+    assert [(q['kind'], q['total']) for q in _queue()] == [('deposit', 25000)]
+    assert fiscal.process_queue()['done'] == 1
+    money_op = [b for p, b, _ in wk.requests if p == "/api/v4/MoneyOperation"][0]
+    assert money_op["OperationType"] == 0 and money_op["Sum"] == 25000
+    assert fiscal.KIND_TITLES['deposit'] == "Внесение"
 
 
 def test_admin_page(wk, tg):

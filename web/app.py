@@ -35,9 +35,10 @@ from core.database import (get_receipt, get_job_run, marking_required, ensure_ad
                       get_product_by_article, get_products_by_articles, get_products_for_labels, add_product_to_db,
                       update_product, get_stock_report_data, get_low_stock_products, get_period_operations,
                       record_sale, get_today_sales_by_user, get_all_users, add_user_to_db, change_user_role_function,
-                      deactivate_user_in_db, update_user_phone)
+                      deactivate_user_in_db, update_user_phone, create_cash_deposit_record, recent_cash_operations)
 from core.schema import METAL_TYPES, PRODUCT_TYPES, ensure_schema
 from utils.catalog_import import build_plan, apply_plan, attach_photos, FIELD_TITLES
+from utils.customer_import import parse_customers, birthday_text, FIELD_TITLES as CUSTOMER_FIELD_TITLES
 from utils.photo_archive import PhotoArchive, ArchiveError
 from utils import mark_codes
 from utils.common import (money, today, now, parse_money, parse_float, parse_int, parse_date, normalize_phone,
@@ -470,6 +471,88 @@ def customers_page(request: Request, q: str = "", user=Depends(current_user)):
                   birthdays=customers.upcoming_birthdays() or [] if not q else [])
 
 
+# Добавление вручную и импорт — объявлены до /customers/{customer_id}, иначе «add» разбирался бы как id
+_customer_plans = {}   # id -> (user_id, created, columns, rows, counts, filename)
+
+
+@app.get("/customers/add", response_class=HTMLResponse)
+def customer_add_page(request: Request, user=Depends(current_user)):
+    return render(request, "customer_add.html", user, form={})
+
+
+@app.post("/customers/add", response_class=HTMLResponse)
+async def customer_add(request: Request, user=Depends(current_user)):
+    form = await request.form()
+    check_csrf(request, form.get("csrf"))
+    values = {k: str(form.get(k) or "").strip() for k in ("phone", "name", "birthday", "note")}
+    values["marketing"] = bool(form.get("marketing"))
+    error = None
+    born = parse_birthday(values["birthday"]) if values["birthday"] else None
+    if not form.get("consent"):
+        error = "Отметьте, что клиент согласился на хранение номера: без согласия добавлять нельзя."
+    elif values["birthday"] and not born:
+        error = "День рождения — ДД.ММ или ДД.ММ.ГГГГ, например 12.05 или 12.05.1995."
+    if not error:
+        ok, result = customers.create(values["phone"], values["name"], born, values["note"], values["marketing"], user['id'])
+        if ok:
+            flash(request, "Клиент добавлен.")
+            return RedirectResponse(f"/customers/{result}", status_code=303)
+        error = result
+        existing = customers.by_phone(values["phone"])
+        if existing:
+            flash(request, result + " Открыта его карточка.", "error")
+            return RedirectResponse(f"/customers/{existing['id']}", status_code=303)
+    return render(request, "customer_add.html", user, form=values, error=error)
+
+
+@app.post("/customers/import", response_class=HTMLResponse)
+async def customer_import_upload(request: Request, file: UploadFile = File(...), csrf: str = Form(""),
+                                 user=Depends(current_user)):
+    check_csrf(request, csrf)
+    data = await file.read(IMPORT_MAX + 1)
+    try:
+        if len(data) > IMPORT_MAX:
+            raise ValueError("Файл больше 10 МБ.")
+        columns, rows = await run_in_threadpool(parse_customers, data, file.filename or "")
+        if not rows:
+            raise ValueError("В файле нет строк с клиентами.")
+    except ValueError as e:
+        return render(request, "customer_add.html", user, form={}, import_error=str(e))
+    counts = customers.import_preview(rows)
+    if counts is None:
+        raise HTTPException(500, "Ошибка базы данных.")
+    cutoff = time.time() - IMPORT_TTL
+    for key in [k for k, v in _customer_plans.items() if v[1] < cutoff]:
+        _customer_plans.pop(key, None)
+    plan_id = secrets.token_urlsafe(12)
+    _customer_plans[plan_id] = (user['id'], time.time(), columns, rows, counts, file.filename)
+    problems = [r for r in rows if r['status'] in ('error', 'dup') or r.get('warning')]
+    return render(request, "customer_import.html", user, plan_id=plan_id, columns=columns, counts=counts,
+                  sample=[r for r in rows if r['status'] in ('new', 'update')][:30], problems=problems[:100],
+                  problems_total=len(problems), filename=file.filename, titles=CUSTOMER_FIELD_TITLES,
+                  bday=birthday_text)
+
+
+@app.post("/customers/import/{plan_id}")
+async def customer_import_apply(request: Request, plan_id: str, csrf: str = Form(""), consent: str = Form(""),
+                                user=Depends(current_user)):
+    check_csrf(request, csrf)
+    entry = _customer_plans.get(plan_id)
+    if not entry or entry[0] != user['id']:
+        flash(request, "Предпросмотр устарел, загрузите файл ещё раз.", "error")
+        return RedirectResponse("/customers/add", status_code=303)
+    if not consent:
+        flash(request, "Подтвердите, что клиенты из файла дали согласие на хранение номера.", "error")
+        return RedirectResponse("/customers/add", status_code=303)
+    _customer_plans.pop(plan_id, None)
+    ok, result = customers.import_rows(entry[3], user['id'])
+    if ok:
+        flash(request, f"Импорт клиентов: добавлено {result['created']}, дополнено {result['updated']}.")
+        return RedirectResponse("/customers", status_code=303)
+    flash(request, f"Импорт не выполнен, ничего не изменено: {result}", "error")
+    return RedirectResponse("/customers/add", status_code=303)
+
+
 @app.get("/customers/{customer_id}", response_class=HTMLResponse)
 def customer_page(request: Request, customer_id: int, user=Depends(current_user)):
     customer = customers.get(customer_id)
@@ -883,6 +966,37 @@ async def stores_action(request: Request, user=Depends(admin_only)):
         ok, msg = update_store(store_id, form.get("name"), form.get("address"), bool(form.get("is_active")))
     flash(request, msg, "ok" if ok else "error")
     return RedirectResponse("/stores", status_code=303)
+
+
+# ---------------------------------------------------------------- внесение денег в кассу
+
+@app.get("/cash", response_class=HTMLResponse)
+def cash_page(request: Request, user=Depends(current_user)):
+    stores = get_stores() or []
+    default = user.get('store_id') if user.get('store_id') in {st['id'] for st in stores} else None
+    if default is None and len(stores) == 1:
+        default = stores[0]['id']
+    return render(request, "cash.html", user, stores=stores, default_store=default,
+                  operations=recent_cash_operations(30) or [], fiscal_on=bool(config.FISCAL_ENABLED))
+
+
+@app.post("/cash")
+async def cash_deposit(request: Request, user=Depends(current_user)):
+    form = await request.form()
+    check_csrf(request, form.get("csrf"))
+    amount = parse_money(str(form.get("amount") or ""))
+    store_id = parse_int(str(form.get("store_id") or ""))
+    if amount is None or amount <= 0:
+        flash(request, "Введите сумму внесения больше нуля.", "error")
+        return RedirectResponse("/cash", status_code=303)
+    ok, result = create_cash_deposit_record(amount, form.get("comment"), user['id'], store_id)
+    if ok:
+        store = next((st['name'] for st in get_stores(active_only=False) or [] if st['id'] == store_id), "")
+        logger.info("Внесение #%s на %s в магазин %s (%s)", result, amount, store_id, user['id'])
+        flash(request, f"Внесение №{result}: {money(amount)} в кассу «{store}».")
+    else:
+        flash(request, result, "error")
+    return RedirectResponse("/cash", status_code=303)
 
 
 # ---------------------------------------------------------------- персонал

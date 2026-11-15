@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Импорт клиентов{% endblock %}
+{% block content %}
+<p><a href="/customers/add">← Другой файл</a></p>
+<h2>Импорт клиентов: проверка</h2>
+<p class="muted">Файл «{{ filename }}». Распознаны колонки:
+  {% for field, header in columns.items() %}{{ titles[field] }} ← «{{ header }}»{% if not loop.last %}, {% endif %}{% endfor %}.
+  Пока ничего не сохранено.</p>
+
+<div class="grid">
+  <article><div class="muted">Новые клиенты</div><div class="stat">{{ counts['new'] }}</div></article>
+  <article><div class="muted">Уже в базе — дополним</div><div class="stat">{{ counts['update'] }}</div>
+    <small class="muted">пустые имя, день рождения, заметка</small></article>
+  <article><div class="muted">Уже в базе без изменений</div><div class="stat">{{ counts['same'] }}</div></article>
+  <article><div class="muted">Пропущено</div><div class="stat">{{ counts['error'] + counts['dup'] }}</div>
+    <small class="muted">ошибки и повторы номера</small></article>
+</div>
+
+{% if problems %}
+<h4>Что не так в файле{% if problems_total > problems|length %} (первые {{ problems|length }} из {{ problems_total }}){% endif %}</h4>
+<div class="table-wrap"><table>
+  <thead><tr><th class="num">Строка</th><th>Телефон</th><th>Имя</th><th>Что не так</th></tr></thead>
+  <tbody>{% for r in problems %}
+    <tr><td class="num">{{ r.line }}</td><td>{{ r.raw_phone or '—' }}</td><td>{{ r.name or '' }}</td>
+      <td>{{ r.error or r.warning }}{% if not r.error %} <span class="muted">(клиент будет добавлен)</span>{% endif %}</td></tr>
+  {% endfor %}</tbody>
+</table></div>
+{% endif %}
+
+{% if sample %}
+<h4>Будут добавлены или дополнены{% if counts['new'] + counts['update'] > sample|length %} (первые {{ sample|length }}){% endif %}</h4>
+<div class="table-wrap"><table>
+  <thead><tr><th>Телефон</th><th>Имя</th><th>День рождения</th><th>Заметка</th>{% if 'marketing' in columns %}<th>Рассылка</th>{% endif %}<th></th></tr></thead>
+  <tbody>{% for r in sample %}
+    <tr><td style="white-space:nowrap">{{ r.phone }}</td><td>{{ r.name or '' }}</td><td>{{ bday(r.birthday) }}</td>
+      <td>{{ r.note or '' }}</td>{% if 'marketing' in columns %}<td>{{ 'да' if r.marketing else '' }}</td>{% endif %}
+      <td>{% if r.status == 'new' %}новый{% else %}<span class="muted">дополнить</span>{% endif %}</td></tr>
+  {% endfor %}</tbody>
+</table></div>
+{% endif %}
+
+{% if counts['new'] + counts['update'] %}
+<article>
+  <form method="post" action="/customers/import/{{ plan_id }}">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label><input type="checkbox" name="consent" required> <strong>Подтверждаю: клиенты из файла дали согласие на хранение
+      номера</strong> (например, при покупке или в анкете).</label>
+    <button type="submit">Сохранить: {{ counts['new'] }} новых{% if counts['update'] %}, {{ counts['update'] }} дополнить{% endif %}</button>
+  </form>
+</article>
+{% else %}
+<p>Сохранять нечего: все клиенты уже есть в базе или строки с ошибками.</p>
+{% endif %}
+{% endblock %}

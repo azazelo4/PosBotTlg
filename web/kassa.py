@@ -500,6 +500,8 @@ def _journal(ops):
                      int(t['price_difference']), t['payment_type_difference'] or "—", t['user_name']))
     for w in ops['withdrawals']:
         rows.append((w['withdrawal_date'], "Инкассация", w['comment'] or "", -int(w['amount']), "Наличные", w['user_name']))
+    for d in ops.get('deposits') or []:
+        rows.append((d['deposit_date'], "Внесение", d['comment'] or "", int(d['amount']), "Наличные", d['user_name']))
     rows.sort(key=lambda r: r[0], reverse=True)
     return [{"time": r[0].strftime('%H:%M'), "kind": r[1], "what": r[2], "amount": r[3], "payment": r[4],
              "user": r[5] or ""} for r in rows]
@@ -521,6 +523,7 @@ def shift(request: Request, user=Depends(kassa_user)):
         "buybacks_count": summary['buybacks_count'], "buybacks_total": int(summary['buybacks_total']),
         "trade_ins_count": summary['trade_ins_count'],
         "withdrawals_total": int(summary['withdrawals_total']),
+        "deposits_total": int(summary['deposits_total']),
         "flow": {k: int(v) for k, v in summary['flow'].items()},
         "cash_balance": int(summary['cash_balance']),
         "journal": _journal(ops),

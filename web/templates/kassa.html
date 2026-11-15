@@ -843,6 +843,7 @@ VIEWS.shift = async root => {
       <div class="stat"><span class="muted">Возвраты (${s.returns_count})</span><b class="num">${fmt(s.returns_total)}</b></div>
       <div class="stat"><span class="muted">Скупка (${s.buybacks_count})</span><b class="num">${fmt(s.buybacks_total)}</b></div>
       <div class="stat"><span class="muted">Инкассация</span><b class="num">${fmt(s.withdrawals_total)}</b></div>
+      ${s.deposits_total ? `<div class="stat"><span class="muted">Внесение</span><b class="num">${fmt(s.deposits_total)}</b></div>` : ""}
       <div class="stat"><span class="muted">Trade-In</span><b>${s.trade_ins_count}</b></div>
     </div>
     <h3>Движение денег по способам оплаты</h3>

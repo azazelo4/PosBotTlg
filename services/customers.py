@@ -164,6 +164,94 @@ def _profile(cursor, customer_id):
     }
 
 
+# ------------------------------------------------------------------ добавление вручную и импорт
+
+@with_transaction
+def create(cursor, phone, name, birthday, note, marketing, user_id):
+    """Клиент, добавленный в админке. Согласие на хранение номера подтверждает сотрудник (флажок в форме).
+    Возвращает (True, id); если номер уже есть — BusinessError (карточку найдёт by_phone())."""
+    norm = normalize_phone(phone)
+    if not norm:
+        raise BusinessError("Телефон: введите номер вида +7 701 123 45 67.")
+    cursor.execute("SELECT id FROM customers WHERE phone = %s", (norm,))
+    if cursor.fetchone():
+        raise BusinessError(f"Клиент с номером {norm} уже есть в базе.")
+    moment = now()
+    cursor.execute("""INSERT INTO customers (phone, name, birthday, note, consent_at, consent_source, consent_by, marketing,
+                                             created_at, updated_at)
+                      VALUES (%s, %s, %s, %s, %s, 'manual', %s, %s, %s, %s)""",
+                   (norm, (name or "").strip()[:100] or None, birthday, (note or "").strip()[:255] or None, moment,
+                    user_id, int(bool(marketing)), moment, moment))
+    logger.info("Клиент %s добавлен вручную пользователем %s", cursor.lastrowid, user_id)
+    return True, cursor.lastrowid
+
+
+@with_connection
+def by_phone(cursor, phone):
+    norm = normalize_phone(phone)
+    if not norm:
+        return None
+    cursor.execute("SELECT * FROM customers WHERE phone = %s", (norm,))
+    return cursor.fetchone()
+
+
+@with_connection
+def import_preview(cursor, rows):
+    """Помечает строки файла: new — новый клиент, update — есть в базе, дополним пустые имя/день рождения/заметку,
+    same — есть в базе, нечего менять, dup — номер уже встречался выше в файле, error — строка не подходит."""
+    phones = sorted({r['phone'] for r in rows if r['phone'] and not r['error']})
+    existing = {}
+    for i in range(0, len(phones), 500):
+        chunk = phones[i:i + 500]
+        cursor.execute(f"SELECT id, phone, name, birthday, note FROM customers WHERE phone IN ({','.join(['%s'] * len(chunk))})",
+                       chunk)
+        existing.update({c['phone']: c for c in cursor.fetchall()})
+    seen = set()
+    counts = {'new': 0, 'update': 0, 'same': 0, 'dup': 0, 'error': 0}
+    for r in rows:
+        if r['error']:
+            r['status'] = 'error'
+        elif r['phone'] in seen:
+            r['status'], r['error'] = 'dup', "номер повторяется в файле — взята первая строка"
+        else:
+            seen.add(r['phone'])
+            old = existing.get(r['phone'])
+            if not old:
+                r['status'] = 'new'
+            else:
+                r['customer_id'] = old['id']
+                fill = (r['name'] and not old['name']) or (r['birthday'] and not old['birthday']) or \
+                       (r['note'] and not old['note'])
+                r['status'] = 'update' if fill else 'same'
+        counts[r['status']] += 1
+    return counts
+
+
+@with_transaction
+def import_rows(cursor, rows, user_id):
+    """Сохраняет строки после import_preview: новые — с согласием «импорт из файла» (его подтвердил сотрудник),
+    у существующих только заполняет пустые имя, день рождения и заметку. Возвращает (True, {'created', 'updated'})."""
+    moment, created, updated = now(), 0, 0
+    for r in rows:
+        if r.get('status') == 'new':
+            cursor.execute("SELECT id FROM customers WHERE phone = %s", (r['phone'],))
+            if cursor.fetchone():
+                continue                                   # успели добавить на кассе, пока смотрели предпросмотр
+            cursor.execute("""INSERT INTO customers (phone, name, birthday, note, consent_at, consent_source, consent_by,
+                                                     marketing, created_at, updated_at)
+                              VALUES (%s, %s, %s, %s, %s, 'import', %s, %s, %s, %s)""",
+                           (r['phone'], r['name'], r['birthday'], r['note'], moment, user_id, int(bool(r['marketing'])),
+                            moment, moment))
+            created += 1
+        elif r.get('status') == 'update':
+            cursor.execute("""UPDATE customers SET name = COALESCE(name, %s), birthday = COALESCE(birthday, %s),
+                                                   note = COALESCE(note, %s), updated_at = %s WHERE phone = %s""",
+                           (r['name'], r['birthday'], r['note'], moment, r['phone']))
+            updated += cursor.rowcount > 0
+    logger.info("Импорт клиентов пользователем %s: новых %s, дополнено %s", user_id, created, updated)
+    return True, {'created': created, 'updated': updated}
+
+
 @with_transaction
 def update(cursor, customer_id, name, birthday, note):
     cursor.execute("UPDATE customers SET name = %s, birthday = %s, note = %s, updated_at = %s WHERE id = %s",

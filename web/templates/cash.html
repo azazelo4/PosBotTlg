@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Внесение денег{% endblock %}
+{% block content %}
+<h2>Внесение денег в кассу</h2>
+<p class="muted">Наличные, которые кладут в кассу не от продаж: размен на начало дня, возврат денег из банка, ошибка
+  инкассации. Внесение увеличивает «наличные в кассе» в отчётах и на кассе.{% if fiscal_on %} При фискализации оно уходит
+  в Webkassa как служебное внесение.{% endif %} Изъятие наличных — «Инкассация» в боте или на кассе ПК.</p>
+
+<article>
+  <form method="post">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="grid">
+      <label>Магазин
+        <select name="store_id" required>
+          {% if not default_store %}<option value="" disabled selected>— выберите —</option>{% endif %}
+          {% for st in stores %}<option value="{{ st.id }}" {% if st.id == default_store %}selected{% endif %}>{{ st.name }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Сумма, ₸
+        <input name="amount" inputmode="numeric" required placeholder="50 000" autocomplete="off">
+      </label>
+    </div>
+    <label>Комментарий
+      <input name="comment" maxlength="500" placeholder="Размен на начало дня">
+    </label>
+    <button type="submit">Внести</button>
+  </form>
+</article>
+
+<h3>Последние внесения и инкассации</h3>
+{% if operations %}
+<div class="table-wrap"><table>
+  <thead><tr><th>Дата</th><th>Операция</th><th class="num">Сумма</th><th>Магазин</th><th>Комментарий</th><th>Сотрудник</th></tr></thead>
+  <tbody>
+  {% for op in operations %}
+    <tr>
+      <td>{{ op.at.strftime('%d.%m.%Y %H:%M') }}</td>
+      <td>{{ 'Внесение' if op.kind == 'deposit' else 'Инкассация' }} №{{ op.id }}</td>
+      <td class="num">{{ '+' if op.kind == 'deposit' else '−' }}{{ op.amount | money }}</td>
+      <td>{{ op.store or '—' }}</td>
+      <td>{{ op.comment or '' }}</td>
+      <td>{{ op.user_name or '' }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% else %}
+<p class="muted">Операций пока нет.</p>
+{% endif %}
+{% endblock %}
