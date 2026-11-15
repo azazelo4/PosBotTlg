@@ -81,6 +81,7 @@ class Setting:
     env: str = None            # имя переменной окружения, если отличается от key
     hidden: bool = False       # служебная, не показывается в форме
     placeholder: str = ""
+    allow_zero: bool = False   # float: 0 — допустимое значение (НДС 0 %), иначе нужно число больше нуля
 
     @property
     def env_name(self):
@@ -146,8 +147,8 @@ SETTINGS = (
     Setting("WEBKASSA_LOGIN", "Логин кассира Webkassa", "fiscal"),
     Setting("WEBKASSA_PASSWORD", "Пароль кассира Webkassa", "fiscal", secret=True),
     Setting("WEBKASSA_API_KEY", "API-ключ интегратора (X-API-KEY)", "fiscal", secret=True),
-    Setting("FISCAL_VAT_PERCENT", "НДС в чеке, %", "fiscal", kind="float", default=0.0,
-            help="0 — без НДС (ИП на упрощённой декларации). Плательщикам НДС — ставка, например 12."),
+    Setting("FISCAL_VAT_PERCENT", "НДС в чеке, %", "fiscal", kind="float", default=0.0, allow_zero=True,
+            help="0 — без НДС (ИП на упрощённой декларации). Плательщикам НДС — ставка, с 2026 года базовая 16."),
     Setting("FISCAL_KASPI_MOBILE", "Kaspi — «мобильный платёж»", "fiscal", kind="bool", default=True,
             help="Включено — оплата Kaspi в чеке как мобильный платёж (Kaspi QR, перевод). "
                  "Выключено — как оплата картой (терминал Kaspi POS)."),
@@ -187,7 +188,7 @@ def parse_value(setting: Setting, raw):
             return int(raw)
         if kind == "float":
             value = float(raw.replace(",", "."))
-            if value <= 0:
+            if value < 0 or (value == 0 and not setting.allow_zero):
                 raise ValueError
             return value
     except ValueError:

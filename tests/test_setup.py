@@ -199,6 +199,26 @@ def test_settings_page(tg):
     assert "Изменений нет" in client.post("/settings", data=form).text
 
 
+def test_vat_zero_allowed(tg):
+    """НДС 0 % — допустимое значение (ИП без НДС); размер ценника 0 — нет."""
+    vat, width = config.BY_KEY["FISCAL_VAT_PERCENT"], config.BY_KEY["LABEL_WIDTH_MM"]
+    assert config.parse_value(vat, "0") == 0.0 and config.parse_value(vat, "16") == 16.0
+    for bad in ("-1", "abc"):
+        with pytest.raises(config.SettingError):
+            config.parse_value(vat, bad)
+    with pytest.raises(config.SettingError):
+        config.parse_value(width, "0")
+    client = _web(tg, ADMIN)
+    form = {"csrf": _csrf(client, "/settings"), "LABEL_WIDTH_MM": "30", "LABEL_HEIGHT_MM": "20", "TIMEZONE": "Asia/Almaty",
+            "LOW_STOCK_THRESHOLD": "5", "WEBKASSA_URL": "https://devkkm.webkassa.kz", "IMPORT_MIN_PRICE_PERCENT": "100",
+            "FISCAL_VAT_PERCENT": "16"}
+    assert "Сохранено" in client.post("/settings", data=form).text and config.FISCAL_VAT_PERCENT == 16.0
+    page = client.post("/settings", data={**form, "FISCAL_VAT_PERCENT": "0"}).text
+    assert "нужно число" not in page and config.FISCAL_VAT_PERCENT == 0.0
+    settings_store.reload()
+    assert config.FISCAL_VAT_PERCENT == 0.0
+
+
 def test_clearing_report_time_disables_report(tg, monkeypatch):
     """Стёрли время отчёта или остатков — уведомление выключено, а не возвращается время по умолчанию."""
     client = _web(tg, ADMIN)
