@@ -38,6 +38,15 @@
     .sale small { display: block; color: var(--hint); }
     .scan { font-size: 18px; padding: 18px; }
     label { display: block; margin: 12px 0 6px; font-size: 14px; color: var(--hint); }
+    /* Сканер камерой: штрихкоды (EAN, Code128…) и QR — встроенный сканер Telegram читает только QR */
+    #scanner { position: fixed; inset: 0; background: #000; z-index: 10; display: flex; flex-direction: column; }
+    #scanner.hidden { display: none; }
+    #scanner video { flex: 1; width: 100%; min-height: 0; object-fit: cover; }
+    #scanner .frame { position: absolute; left: 8%; right: 8%; top: 35%; height: 22%; border: 3px solid #fff;
+                      border-radius: 12px; box-shadow: 0 0 0 100vmax rgba(0,0,0,.45); pointer-events: none; }
+    #scanner .bar { padding: 14px 16px calc(14px + env(safe-area-inset-bottom)); background: #000; color: #fff; text-align: center; }
+    #scanner .bar p { margin: 0 0 10px; font-size: 15px; }
+    #scanner .btn.secondary { color: #fff; }
   </style>
 </head>
 <body>
@@ -56,6 +65,15 @@
   <div class="card" style="margin-top:16px">
     <div style="display:flex;justify-content:space-between"><strong>Мои продажи сегодня</strong><span id="today-total" class="muted"></span></div>
     <div id="today"></div>
+  </div>
+</div>
+
+<div id="scanner" class="hidden">
+  <video id="scan-video" playsinline muted></video>
+  <div class="frame"></div>
+  <div class="bar">
+    <p id="scan-hint">Наведите камеру на штрихкод или QR-код ценника</p>
+    <button class="btn secondary" id="scan-close">Закрыть</button>
   </div>
 </div>
 
@@ -161,17 +179,65 @@ function loadToday() {
   }).catch(e => { $('search-err').textContent = e.message; });
 }
 
+// ---- сканер камерой (ZXing, локально): штрихкоды старых ценников и QR новых
+const SCAN_FORMATS = ['EAN_13', 'EAN_8', 'UPC_A', 'UPC_E', 'CODE_128', 'CODE_39', 'CODE_93', 'ITF', 'CODABAR', 'QR_CODE'];
+let reader = null;
+
+function loadZXing() {
+  if (window.ZXing) return Promise.resolve();
+  return new Promise((ok, fail) => {
+    const s = document.createElement('script');
+    s.src = '/static/zxing.min.js'; s.onload = ok; s.onerror = () => fail(new Error('Не удалось загрузить сканер.'));
+    document.head.append(s);
+  });
+}
+
+function telegramQr(reason) {
+  // запасной путь: встроенный сканер Telegram — только QR
+  if (!tg.showScanQrPopup) { $('search-err').textContent = reason + ' Введите артикул вручную.'; return; }
+  $('search-err').textContent = reason + ' Открыт сканер Telegram — он читает только QR.';
+  tg.showScanQrPopup({text: 'Наведите камеру на QR-код ценника'}, text => { find(text); return true; });
+}
+
+async function startScan() {
+  $('search-err').textContent = '';
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { telegramQr('Камера недоступна в этом Telegram.'); return; }
+  try { await loadZXing(); } catch (e) { telegramQr(e.message); return; }
+  const hints = new Map();
+  hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, SCAN_FORMATS.map(f => ZXing.BarcodeFormat[f]));
+  // без TRY_HARDER: с ним потоковое распознавание с камеры в ZXing не находит код
+  reader = new ZXing.BrowserMultiFormatReader(hints, 200);
+  $('scanner').classList.remove('hidden');
+  const constraints = {video: {facingMode: {ideal: 'environment'}, width: {ideal: 1280}, height: {ideal: 720}}};
+  reader.decodeFromConstraints(constraints, $('scan-video'), (result) => {
+    if (!result || !reader) return;
+    const text = result.getText();
+    stopScan();
+    tg.HapticFeedback.impactOccurred('medium');
+    $('article').value = text;
+    find(text);
+  }).catch(e => {
+    stopScan();
+    const denied = e && (e.name === 'NotAllowedError' || e.name === 'SecurityError');
+    telegramQr(denied ? 'Нет доступа к камере — разрешите его Telegram в настройках телефона.' : 'Камера не запустилась.');
+  });
+}
+
+function stopScan() {
+  if (reader) { try { reader.reset(); } catch (e) {} reader = null; }
+  $('scanner').classList.add('hidden');
+}
+
 if (!tg || !tg.initData) {
   $('outside').classList.remove('hidden'); $('search').classList.add('hidden');
 } else {
   tg.ready(); tg.expand();
-  $('scan-btn').onclick = () => {
-    if (!tg.showScanQrPopup) { $('search-err').textContent = 'Обновите Telegram, чтобы сканировать QR.'; return; }
-    tg.showScanQrPopup({text: 'Наведите камеру на QR-код ценника'}, text => { find(text); return true; });
-  };
+  $('scan-btn').onclick = startScan;
+  $('scan-close').onclick = stopScan;
   $('find-btn').onclick = () => find($('article').value);
   $('article').addEventListener('keydown', e => { if (e.key === 'Enter') find($('article').value); });
   $('back-btn').onclick = showSearch;
+  document.addEventListener('visibilitychange', () => { if (document.hidden) stopScan(); });
   tg.BackButton.onClick(showSearch);
   $('price').addEventListener('input', updateMain);
   document.querySelectorAll('.pay').forEach(b => b.onclick = () => {
