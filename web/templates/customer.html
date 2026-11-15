@@ -5,7 +5,7 @@
 <h2>{{ c.name or 'Клиент без имени' }} <span class="muted" style="font-size:1rem">{{ c.phone }}</span></h2>
 <p class="muted">
   Покупок: {{ c.history|length }} на {{ c.spent|money }}
-  · согласие {{ c.consent_at.strftime('%d.%m.%Y') }} ({{ {'telegram': 'в Telegram', 'demo': 'демо-данные'}.get(c.consent_source, 'на кассе') }})
+  · согласие {{ c.consent_at.strftime('%d.%m.%Y') }} ({{ {'telegram': 'в Telegram', 'demo': 'демо-данные', 'manual': 'добавлен в админке', 'import': 'импорт из файла'}.get(c.consent_source, 'на кассе') }})
   · {% if c.chat_id %}📲 чеки приходят в Telegram{% else %}в Telegram не подписан{% endif %}
 </p>
 

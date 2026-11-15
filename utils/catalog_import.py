@@ -89,6 +89,17 @@ def map_headers(headers):
 
 def read_table(data: bytes, filename: str):
     """Возвращает (заголовки, строки) из .xlsx или .csv."""
+    rows = read_rows(data, filename)
+    # Заголовок — первая строка, где распознаётся хотя бы артикул и цена
+    for i, row in enumerate(rows[:15]):
+        fields = set(map_headers(row).values())
+        if {'article_number', 'price'} <= fields:
+            return row, rows[i + 1:]
+    raise ValueError("Не нашёл строку заголовков с колонками «Артикул» и «Цена».")
+
+
+def read_rows(data: bytes, filename: str):
+    """Непустые строки таблицы .xlsx или .csv (первый лист). ValueError — если формат не подходит."""
     name = (filename or '').lower()
     if name.endswith('.xlsx') or name.endswith('.xlsm'):
         wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
@@ -115,13 +126,7 @@ def read_table(data: bytes, filename: str):
         raise ValueError("Формат .xls не поддерживается. Сохраните файл в Excel как .xlsx и загрузите снова.")
     else:
         raise ValueError("Нужен файл .xlsx или .csv.")
-    rows = [r for r in rows if any(c not in (None, '') for c in r)]
-    # Заголовок — первая строка, где распознаётся хотя бы артикул и цена
-    for i, row in enumerate(rows[:15]):
-        fields = set(map_headers(row).values())
-        if {'article_number', 'price'} <= fields:
-            return row, rows[i + 1:]
-    raise ValueError("Не нашёл строку заголовков с колонками «Артикул» и «Цена».")
+    return [r for r in rows if any(c not in (None, '') for c in r)]
 
 
 def _type_from(value, model):

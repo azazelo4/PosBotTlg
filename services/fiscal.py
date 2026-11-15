@@ -19,13 +19,13 @@ from core.database import with_connection, with_transaction, get_connection, Bus
 from utils.common import now, money
 from utils.webkassa import (WebkassaClient, WebkassaError, WebkassaUnavailable, OPERATION_SALE, OPERATION_SALE_RETURN,
                             CASHBOX_BLOCKING_CODES, NO_SHIFT_CODE, NOT_ENOUGH_CASH_CODE,
-                            PAYMENT_CASH, PAYMENT_CARD, PAYMENT_MOBILE, ROUND_KOPECKS, MONEY_WITHDRAWAL, position,
+                            PAYMENT_CASH, PAYMENT_CARD, PAYMENT_MOBILE, ROUND_KOPECKS, MONEY_WITHDRAWAL, MONEY_DEPOSIT, position,
                             return_basis, find_key)
 
 logger = logging.getLogger(__name__)
 
 PAYMENT_TITLES = {PAYMENT_CASH: "наличные", PAYMENT_CARD: "карта", PAYMENT_MOBILE: "мобильный платёж"}
-KIND_TITLES = {'sale': "Продажа", 'return': "Возврат", 'withdrawal': "Изъятие (инкассация)", 'z_report': "Закрытие смены"}
+KIND_TITLES = {'sale': "Продажа", 'return': "Возврат", 'withdrawal': "Изъятие (инкассация)", 'deposit': "Внесение", 'z_report': "Закрытие смены"}
 STATUS_TITLES = {'pending': "ожидает", 'done': "пробит", 'error': "ошибка", 'manual': "оформлен вручную"}
 BATCH = 20
 MAX_DELAY = timedelta(minutes=30)
@@ -165,6 +165,8 @@ def _send(rec):
         return api.check(_return_body(rec))
     if rec['kind'] == 'withdrawal':
         return api.money_operation(rec['cashbox'], MONEY_WITHDRAWAL, _money(rec['total']), rec['external_number'])
+    if rec['kind'] == 'deposit':
+        return api.money_operation(rec['cashbox'], MONEY_DEPOSIT, _money(rec['total']), rec['external_number'])
     raise WebkassaError(0, f"неизвестный тип операции {rec['kind']}")
 
 

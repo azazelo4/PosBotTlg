@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Добавить клиентов{% endblock %}
+{% block content %}
+<p><a href="/customers">← Клиенты</a></p>
+<h2>Добавить клиентов</h2>
+<p class="muted">Номер клиента хранится только с его согласия (Закон РК «О персональных данных и их защите»). Добавляйте
+  тех, кто сам дал номер и согласился, — например, из вашей прежней клиентской базы.</p>
+
+<article>
+  <header><strong>Один клиент</strong></header>
+  {% if error %}<p class="flash error" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="/customers/add">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="grid">
+      <label>Телефон
+        <input name="phone" value="{{ form.phone or '' }}" required inputmode="tel" placeholder="+7 701 123 45 67" autocomplete="off">
+      </label>
+      <label>Имя
+        <input name="name" value="{{ form.name or '' }}" maxlength="100" placeholder="Айгерим" autocomplete="off">
+      </label>
+      <label>День рождения
+        <input name="birthday" value="{{ form.birthday or '' }}" placeholder="12.05 или 12.05.1995" autocomplete="off">
+      </label>
+    </div>
+    <label>Заметка
+      <input name="note" value="{{ form.note or '' }}" maxlength="255" placeholder="размер кольца 17, любит серьги">
+    </label>
+    <label><input type="checkbox" name="marketing" {% if form.marketing %}checked{% endif %}> Согласен получать новости и акции</label>
+    <label><input type="checkbox" name="consent" required> <strong>Клиент согласился на хранение номера</strong></label>
+    <button type="submit">Добавить клиента</button>
+  </form>
+</article>
+
+<article>
+  <header><strong>Импорт из файла</strong></header>
+  {% if import_error %}<p class="flash error" role="alert">{{ import_error }}</p>{% endif %}
+  <p class="muted">Excel (.xlsx) или CSV. Первая строка — заголовки, обязательна колонка <b>«Телефон»</b>; по желанию —
+    «Имя», «День рождения» (ДД.ММ.ГГГГ или ДД.ММ), «Заметка», «Рассылка» (да/нет). Номера в любом виде: 8 701…, +7 (701)…, 7701….
+    Клиенты, которые уже есть в базе, не дублируются — у них только заполнятся пустые имя, день рождения и заметка.
+    Перед сохранением покажем, что получится.</p>
+  <form method="post" action="/customers/import" enctype="multipart/form-data">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="file" name="file" accept=".xlsx,.csv" required aria-label="Файл с клиентами">
+    <button type="submit" class="secondary">Проверить файл</button>
+  </form>
+</article>
+{% endblock %}

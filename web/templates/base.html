@@ -67,7 +67,7 @@
     <li><a href="{{ href }}"{% if new_tab %} target="_blank"{% endif %}{% if path == href or (href != '/' and path.startswith(href + '/')) %} aria-current="page"{% endif %}>{{ title }}</a></li>
   {%- endmacro %}
   {% set stock_paths = ['/products', '/labels', '/import', '/marking'] %}
-  {% set cash_paths = ['/reports', '/analytics', '/customers', '/fiscal'] %}
+  {% set cash_paths = ['/reports', '/cash', '/analytics', '/customers', '/fiscal'] %}
   {% set admin_paths = ['/staff', '/stores', '/settings'] %}
   {% macro group_class(paths) -%}{% for p in paths if path == p or path.startswith(p + '/') %}{% if loop.first %}active{% endif %}{% endfor %}{%- endmacro %}
   <nav class="top">
@@ -91,6 +91,7 @@
           <ul>
             {{ item('/kassa', 'Касса на компьютере ↗', new_tab=True) }}
             {{ item('/reports', 'Отчёты') }}
+            {{ item('/cash', 'Внесение денег') }}
             {{ item('/analytics', 'Аналитика') }}
             {{ item('/customers', 'Клиенты') }}
             {% if fiscal_enabled() %}{{ item('/fiscal', 'Фискализация') }}{% endif %}

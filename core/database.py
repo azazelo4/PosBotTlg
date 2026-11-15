@@ -953,6 +953,39 @@ def create_cash_withdrawal_record(cursor, amount, comment, user_id, store_id):
     return True, withdrawal_id
 
 
+@with_transaction
+def create_cash_deposit_record(cursor, amount, comment, user_id, store_id):
+    """Внесение наличных в кассу магазина (размен, возврат из банка). Фискализируется как внесение."""
+    if not amount or amount <= 0:
+        raise BusinessError("Сумма внесения должна быть больше нуля.")
+    if not store_id:
+        raise BusinessError("Выберите магазин.")
+    cursor.execute("SELECT id FROM stores WHERE id = %s", (store_id,))
+    if not cursor.fetchone():
+        raise BusinessError("Магазин не найден.")
+    cursor.execute("INSERT INTO cash_deposits (amount, comment, user_id, store_id, deposit_date) VALUES (%s, %s, %s, %s, %s)",
+                   (amount, (comment or "").strip()[:500] or None, user_id, store_id, now()))
+    deposit_id = cursor.lastrowid
+    _enqueue_fiscal(cursor, 'deposit', deposit_id, store_id, amount, user_id)
+    return True, deposit_id
+
+
+@with_connection
+def recent_cash_operations(cursor, limit=30, store_id=None):
+    """Последние внесения и инкассации (для страницы «Внесение денег»)."""
+    where, params = ("WHERE x.store_id = %s", [store_id]) if store_id else ("", [])
+    cursor.execute(f"""
+        SELECT * FROM (
+          SELECT 'deposit' AS kind, x.id, x.deposit_date AS at, x.amount, x.comment, x.store_id, st.name AS store,
+                 u.name AS user_name FROM cash_deposits x
+          LEFT JOIN stores st ON st.id = x.store_id LEFT JOIN users u ON u.id = x.user_id {where}
+          UNION ALL
+          SELECT 'withdrawal', x.id, x.withdrawal_date, x.amount, x.comment, x.store_id, st.name, u.name FROM cash_withdrawals x
+          LEFT JOIN stores st ON st.id = x.store_id LEFT JOIN users u ON u.id = x.user_id {where}
+        ) ops ORDER BY at DESC, id DESC LIMIT %s""", (*params, *params, limit))
+    return cursor.fetchall()
+
+
 # ---------------------------------------------------------------- отчёты
 
 @with_connection
@@ -1018,6 +1051,13 @@ def get_period_operations(cursor, start_dt, end_dt, store_id=None):
         LEFT JOIN users u ON w.user_id = u.id
         WHERE w.withdrawal_date >= %s AND w.withdrawal_date < %s{STORE_FILTER}
         ORDER BY w.withdrawal_date, w.id""", "w")
+    result['deposits'] = run("""
+        SELECT d.id, d.deposit_date, d.amount, d.comment, d.store_id, st.name AS store, u.name AS user_name
+        FROM cash_deposits d
+        LEFT JOIN stores st ON st.id = d.store_id
+        LEFT JOIN users u ON d.user_id = u.id
+        WHERE d.deposit_date >= %s AND d.deposit_date < %s{STORE_FILTER}
+        ORDER BY d.deposit_date, d.id""", "d")
     _attach_payment_parts(cursor, result['sales'])
     return result
 

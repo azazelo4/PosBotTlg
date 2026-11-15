@@ -48,6 +48,8 @@ def build_summary(ops):
         else:
             tradein_out -= diff
     withdrawn = sum((_d(w['amount']) for w in withdrawals), D0)
+    deposits = ops.get('deposits') or []
+    deposited = sum((_d(d['amount']) for d in deposits), D0)
 
     sales_total = sum((_d(s['sold_price']) for s in sales), D0)
     # чек — несколько позиций одной оплатой; старые продажи без чека считаются чеком из одной позиции
@@ -69,23 +71,25 @@ def build_summary(ops):
         'tradein_out': tradein_out,
         'withdrawals_count': len(withdrawals),
         'withdrawals_total': withdrawn,
+        'deposits_count': len(deposits),
+        'deposits_total': deposited,
         'flow': dict(flow),
-        'cash_balance': flow.get('Наличные', D0) - withdrawn,
+        'cash_balance': flow.get('Наличные', D0) + deposited - withdrawn,
     }
 
 
-OP_KEYS = ('sales', 'returns', 'buybacks', 'trade_ins', 'withdrawals')
+OP_KEYS = ('sales', 'returns', 'buybacks', 'trade_ins', 'withdrawals', 'deposits')
 
 
 def split_by_store(ops):
     """{(store_id, название): ops только этого магазина}; операции без магазина — под (None, 'Без магазина')."""
     keys = {}
     for key in OP_KEYS:
-        for row in ops[key]:
+        for row in ops.get(key) or []:
             keys.setdefault(row.get('store_id'), row.get('store') or 'Без магазина')
     parts = {}
     for store_id, name in sorted(keys.items(), key=lambda kv: (kv[0] is None, kv[1])):
-        parts[(store_id, name)] = {key: [r for r in ops[key] if r.get('store_id') == store_id] for key in OP_KEYS}
+        parts[(store_id, name)] = {key: [r for r in ops.get(key) or [] if r.get('store_id') == store_id] for key in OP_KEYS}
     return parts
 
 
@@ -116,6 +120,8 @@ def summary_text(summary, start, end, store_name=None, breakdown=None):
                      f"выплаты клиентам {money(summary['tradein_out'])}")
     if summary['withdrawals_count']:
         lines.append(f"Инкассация: {summary['withdrawals_count']} раз на {money(summary['withdrawals_total'])}")
+    if summary.get('deposits_count'):
+        lines.append(f"Внесение в кассу: {summary['deposits_count']} раз на {money(summary['deposits_total'])}")
     lines += ["", "<b>Движение денег</b>"]
     for pt in PAYMENT_TYPES + sorted(set(summary['flow']) - set(PAYMENT_TYPES)):
         if pt in summary['flow'] or pt in PAYMENT_TYPES:
@@ -178,6 +184,7 @@ def build_excel(ops, summary, start, end, store_name=None, breakdown=None):
         ("Trade-In: доплаты клиентов", summary['tradein_in']),
         ("Trade-In: выплаты клиентам", summary['tradein_out']),
         ("Инкассация, сумма", summary['withdrawals_total']),
+        ("Внесение в кассу, сумма", summary['deposits_total']),
         (),
         ("Продажи по способу оплаты", "Количество", "Сумма"),
     ]
@@ -223,6 +230,9 @@ def build_excel(ops, summary, start, end, store_name=None, breakdown=None):
     _sheet(wb, "Инкассация",
            ["№", "Дата", "Сумма", "Комментарий", "Магазин", "Сотрудник"],
            [(w['id'], w['withdrawal_date'], w['amount'], w['comment'], w['store'], w['user_name']) for w in ops['withdrawals']])
+    _sheet(wb, "Внесение",
+           ["№", "Дата", "Сумма", "Комментарий", "Магазин", "Сотрудник"],
+           [(d['id'], d['deposit_date'], d['amount'], d['comment'], d['store'], d['user_name']) for d in ops.get('deposits') or []])
 
     for sheet in wb.worksheets[1:]:
         for row in sheet.iter_rows(min_row=2):

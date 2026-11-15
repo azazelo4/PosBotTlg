@@ -18,7 +18,7 @@
   <article><div class="muted">Продажи сегодня</div><div class="stat">{{ t.sales_total | money }}</div>
     <small class="muted">{{ t.sales_count }} шт.{% if t.returns_count %} · возвратов {{ t.returns_count }}{% endif %}</small></article>
   <article><div class="muted">Наличные в кассе за день</div><div class="stat">{{ t.cash_balance | money }}</div>
-    <small class="muted">после инкассации {{ t.withdrawals_total | money }}</small></article>
+    <small class="muted">после инкассации {{ t.withdrawals_total | money }}{% if t.deposits_count %} · внесено {{ t.deposits_total | money }}{% endif %}</small></article>
   <article><div class="muted">Продажи за месяц</div><div class="stat">{{ m.net_sales | money }}</div>
     <small class="muted">{{ m.sales_count }} шт. в {{ m.receipts_count }} чеках, средний чек {{ m.sales_avg | money }}</small></article>
   <article><div class="muted">Скупка / Trade-In сегодня</div><div class="stat">{{ t.buybacks_count }} / {{ t.trade_ins_count }}</div>
