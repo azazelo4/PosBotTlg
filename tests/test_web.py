@@ -9,6 +9,7 @@ from urllib.parse import urlencode
 
 import openpyxl
 import pytest
+from telebot import types
 from fastapi.testclient import TestClient
 from pypdf import PdfReader
 
@@ -175,6 +176,18 @@ def test_staff_admin_only_and_actions(tg, client):
     assert "собственную" in client.post("/staff", data={"csrf": token, "action": "deactivate", "user_id": me}).text
     client.post("/staff", data={"csrf": token, "action": "deactivate", "user_id": new['id']})
     assert db_query("SELECT is_active FROM users WHERE id=%s", (new['id'],))[0]['is_active'] == 0
+
+
+def test_pc_kassa_button_sends_link(tg):
+    """Кнопка «💻 Касса на ПК» — ссылка на кассу в браузере и как войти; доступна всем ролям."""
+    for chat_id in (CASHIER, MANAGER, ADMIN):
+        login(tg, chat_id)
+        calls = tg.send(chat_id, "💻 Касса на ПК")
+        text = tg.texts(calls)
+        assert "https://pos.test/kassa" in text and "камеру телефона" in text and "Выйти" in text
+        urls = [b.url for c in calls if isinstance(c.markup, types.InlineKeyboardMarkup) for row in c.markup.keyboard
+                for b in row]
+        assert urls == ["https://pos.test/kassa"]
 
 
 # ---------------------------------------------------------------- Mini App
