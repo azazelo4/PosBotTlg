@@ -195,6 +195,12 @@ def resolve_for_sale(chat_id, text):
                 bot.send_message(chat_id, f"Код {h(mark_codes.short(text))} уже {CODE_STATUS_TITLES[found['code']['status']]}. "
                                           "Отсканируйте другой.", reply_markup=create_cancel_markup())
                 return None, None
+            store_error = foreign_store_error(user_data.get(chat_id), found['product'].get('store_id'),
+                                              found['product'].get('Store'))
+            if store_error:
+                bot.send_message(chat_id, f"{product_line(found['product'])}\n{h(store_error)} Отсканируйте другой код "
+                                          "или нажмите «Отмена».", parse_mode='HTML', reply_markup=create_cancel_markup())
+                return None, None
             return found['product'], text
     product = get_product_by_article(text)
     if not product:
