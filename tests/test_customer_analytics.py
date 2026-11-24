@@ -13,6 +13,10 @@ from test_analytics import _pid, _at, _period, _sell
 from test_stores import _web, _csrf
 from utils.common import today
 
+import pytest
+
+pytestmark = pytest.mark.usefixtures("unbound_staff")   # продавцы работают в обоих магазинах
+
 
 
 def _buy(items, when, customer=None, payment="Kaspi"):

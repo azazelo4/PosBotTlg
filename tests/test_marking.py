@@ -179,3 +179,14 @@ def test_admin_accept_write_off_reconcile(tg, enabled):
     assert len(result['ok']) == 1 and len(result['not_sellable']) == 1 and len(result['unknown']) == 1
     assert [m['short'] for m in result['missing']] == [mark_codes.short(c4)]
     assert "Нет на витрине" in r.text and "Уже проданы" in r.text
+
+
+def test_bot_foreign_store_code_rejected_at_scan(tg, enabled):
+    """Ревью PR #53: код маркировки товара другого магазина отклоняется сразу при скане, а не на «Подтвердить»."""
+    c = code()
+    marking.accept_codes(_pid("A200"), [c], _admin(), add_to_stock=False)       # A200 — магазин Отау Сауда
+    login(tg, CASHIER)                                                         # кассир ЦУМ
+    tg.send(CASHIER, "Продажа")
+    text = tg.texts(tg.send(CASHIER, c))
+    assert "числится в магазине «Отау Сауда»" in text and "Отсканируйте другой код" in text
+    assert _status(c) == 'in_stock'

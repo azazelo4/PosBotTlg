@@ -215,3 +215,25 @@ def test_scanned_product_code_from_label(tg, client):
     sales = client.get("/kassa/api/sales-for-return", params={"article": f"#{product_id}"}).json()
     assert len(sales) == 1 and sales[0]["article"] == "A100"
     assert client.get("/kassa/api/product", params={"article": "#999999"}).status_code == 404
+
+
+def test_cashier_sells_only_own_store(tg, client):
+    """Кассир ЦУМ: товар Отау Сауда не находится для продажи и не продаётся (проверка и в записи чека)."""
+    kassa_login(tg, client)
+    r = client.get("/kassa/api/product", params={"article": "A200", "sale": 1})
+    assert r.status_code == 400 and "Отау Сауда" in r.json()["error"]
+    assert client.get("/kassa/api/product", params={"article": "A200"}).status_code == 200   # просто посмотреть можно
+    r = post(client, "sale", {"items": [{"article": "A200", "price": 20000}], "payment": "Наличные"})
+    assert r.status_code == 400 and "Отау Сауда" in r.text
+    assert db_query("SELECT COUNT(*) AS n FROM sales")[0]['n'] == 0
+
+
+def test_return_search_only_own_store(tg, client):
+    """Кассир ЦУМ: продажи артикула только в Отау Сауда — понятный отказ, а не «не найдено»."""
+    from core.database import record_receipt
+    admin = db_query("SELECT id FROM users WHERE role='admin'")[0]['id']
+    a200 = db_query("SELECT id FROM products WHERE article_number='A200'")[0]['id']
+    assert record_receipt([(a200, 20000)], admin, "Наличные")[0]
+    kassa_login(tg, client)
+    r = client.get("/kassa/api/sales-for-return", params={"article": "A200"})
+    assert r.status_code == 400 and "возврат оформляет сотрудник этого магазина" in r.json()["error"]
