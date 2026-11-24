@@ -69,6 +69,24 @@ def test_foreign_store_blocked_in_transaction(tg):
     assert create_return_record(r['sale_ids'][0], "A200", 20000, "Наличные", uid['cashier'], 2)[0]
 
 
+def test_return_finds_own_store_sale_behind_foreign_ones(tg):
+    """Ревью Graphify (PR #53): изделие перевозили — 10 свежих продаж в другом магазине не прячут старую продажу своего."""
+    from core.database import record_receipt
+    uid = {r['role']: r['id'] for r in db_query("SELECT id, role FROM users")}
+    a100 = db_query("SELECT id FROM products WHERE article_number='A100'")[0]['id']
+    db_query("UPDATE products SET quantity = 20 WHERE id = %s", (a100,))
+    ok, own = record_receipt([(a100, 150000)], uid['cashier'], "Наличные")             # ЦУМ
+    assert ok
+    db_query("UPDATE sales SET sale_date = NOW() - INTERVAL 5 DAY WHERE id = %s", (own['sale_ids'][0],))
+    db_query("UPDATE products SET store_id = 2 WHERE id = %s", (a100,))                  # перевезли в Отау Сауда
+    for _ in range(10):
+        assert record_receipt([(a100, 150000)], uid['admin'], "Наличные")[0]
+    login(tg, CASHIER)
+    tg.send(CASHIER, "Возврат")
+    text = tg.texts(tg.send(CASHIER, "A100"))
+    assert f"Продажа №{own['sale_ids'][0]}" in text and "Введите сумму возврата" in text
+
+
 def test_employee_without_store_is_asked(tg):
     login(tg, ADMIN)                          # администратор без магазина
     calls = tg.send(ADMIN, "Инкассация")

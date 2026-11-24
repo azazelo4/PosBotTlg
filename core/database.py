@@ -862,16 +862,25 @@ def get_receipt(cursor, receipt_id=None, token=None):
     return receipt
 
 
+def own_store(user):
+    """Магазин, которым ограничены операции сотрудника, или None (администратор, «Все магазины»)."""
+    if not user or user.get('role') == 'admin':
+        return None
+    return user.get('store_id') or None
+
+
 @with_connection
-def get_sales_for_return(cursor, article_number, days=60):
-    """Продажи артикула за последние N дней с отметкой, был ли уже возврат."""
+def get_sales_for_return(cursor, article_number, days=60, store_id=None):
+    """Продажи артикула за последние N дней с отметкой, был ли уже возврат. store_id — только продажи этого
+    магазина (сотрудник, закреплённый за магазином): фильтр до LIMIT, иначе старая продажа своего магазина
+    могла не попасть в выдачу из-за более новых продаж того же изделия в другом."""
     product_id = product_id_from_code(article_number)
     if product_id:
         cursor.execute("SELECT article_number FROM products WHERE id = %s", (product_id,))
         row = cursor.fetchone()
         if row:
             article_number = row['article_number']
-    cursor.execute("""
+    cursor.execute(f"""
         SELECT s.id AS sale_id, s.sold_price, s.payment_type AS sale_payment_type, s.sale_date,
                p.id AS product_id, p.article_number, p.model AS product_model, p.product_type,
                r.id AS return_id, s.store_id, st.name AS store
@@ -879,10 +888,10 @@ def get_sales_for_return(cursor, article_number, days=60):
         JOIN products p ON s.product_id = p.id
         LEFT JOIN returns r ON r.original_sale_id = s.id
         LEFT JOIN stores st ON st.id = s.store_id
-        WHERE p.article_number = %s AND s.sale_date >= %s
+        WHERE p.article_number = %s AND s.sale_date >= %s{" AND (s.store_id = %s OR s.store_id IS NULL)" if store_id else ""}
         ORDER BY s.sale_date DESC
         LIMIT 10
-    """, (article_number, now().replace(hour=0, minute=0, second=0) - timedelta(days=days)))
+    """, (article_number, now().replace(hour=0, minute=0, second=0) - timedelta(days=days), *((store_id,) if store_id else ())))
     return cursor.fetchall()
 
 

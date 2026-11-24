@@ -226,3 +226,14 @@ def test_cashier_sells_only_own_store(tg, client):
     r = post(client, "sale", {"items": [{"article": "A200", "price": 20000}], "payment": "Наличные"})
     assert r.status_code == 400 and "Отау Сауда" in r.text
     assert db_query("SELECT COUNT(*) AS n FROM sales")[0]['n'] == 0
+
+
+def test_return_search_only_own_store(tg, client):
+    """Кассир ЦУМ: продажи артикула только в Отау Сауда — понятный отказ, а не «не найдено»."""
+    from core.database import record_receipt
+    admin = db_query("SELECT id FROM users WHERE role='admin'")[0]['id']
+    a200 = db_query("SELECT id FROM products WHERE article_number='A200'")[0]['id']
+    assert record_receipt([(a200, 20000)], admin, "Наличные")[0]
+    kassa_login(tg, client)
+    r = client.get("/kassa/api/sales-for-return", params={"article": "A200"})
+    assert r.status_code == 400 and "возврат оформляет сотрудник этого магазина" in r.json()["error"]

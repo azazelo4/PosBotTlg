@@ -4,7 +4,7 @@ import logging
 from telebot import types
 
 from handlers.buttons import create_cancel_markup, create_confirmation_markup, create_payment_type_markup, PAYMENT_TYPES, BTN_CONFIRM
-from core.database import get_sales_for_return, get_sale_details_by_id, create_return_record, foreign_store_error
+from core.database import get_sales_for_return, get_sale_details_by_id, create_return_record, foreign_store_error, own_store
 from handlers.common import CASH_ROLES, in_state, is_button, user_ids, cash_menu, register_simple_cancel, ask_money, read_money
 from core.state import bot, user_data, user_state, get_op, start_op, end_op, cancel_current_operation
 from utils.common import money, h
@@ -24,10 +24,18 @@ def start(message):
 
 def on_article(message):
     chat_id, article = message.chat.id, (message.text or '').strip()
-    sales = get_sales_for_return(article)
+    store_id = own_store(user_data.get(chat_id))
+    sales = get_sales_for_return(article, store_id=store_id)
     if sales is None:
         bot.send_message(chat_id, "Ошибка базы данных. Попробуйте ещё раз.", reply_markup=create_cancel_markup())
         return
+    if not sales and store_id:
+        foreign = [s for s in get_sales_for_return(article) or [] if s.get('store_id')]
+        if foreign:
+            error = foreign_store_error(user_data.get(chat_id), foreign[0]['store_id'], foreign[0].get('store'), 'return')
+            bot.send_message(chat_id, f"{h(error)} Введите другой артикул или нажмите «Отмена».", parse_mode='HTML',
+                             reply_markup=create_cancel_markup())
+            return
     available = [s for s in sales if not s['return_id']]
     if not available:
         note = " Все продажи этого артикула за 60 дней уже возвращены." if sales else ""

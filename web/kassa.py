@@ -23,7 +23,7 @@ from handlers.buttons import PAYMENT_TYPES, ROLE_TITLES
 from core.database import (get_user_by_id, get_stores, get_product_by_article, record_receipt, MAX_RECEIPT_ITEMS, get_receipt,
                       find_by_mark_code, marking_required, SELLABLE_CODE, CODE_STATUS_TITLES, get_sales_for_return,
                       get_sale_details_by_id, create_return_record, create_buyback_record, create_trade_in_record,
-                      create_cash_withdrawal_record, get_period_operations, create_kassa_login, consume_kassa_login, foreign_store_error)
+                      create_cash_withdrawal_record, get_period_operations, create_kassa_login, consume_kassa_login, foreign_store_error, own_store)
 from core.schema import METAL_TYPES
 from utils import mark_codes
 from utils.common import now, today, day_bounds, parse_money, parse_float, money, normalize_phone, parse_birthday
@@ -393,9 +393,14 @@ def receipt_delivery(receipt_id, customer=None):
 
 @router.get("/sales-for-return")
 def sales_for_return(article: str, user=Depends(kassa_user)):
-    sales = get_sales_for_return(article.strip())
+    store_id = own_store(user)
+    sales = get_sales_for_return(article.strip(), store_id=store_id)
     if sales is None:
         raise HTTPException(500, "Ошибка базы данных. Попробуйте ещё раз.")
+    if not sales and store_id:
+        foreign = [s for s in get_sales_for_return(article.strip()) or [] if s.get('store_id')]
+        if foreign:
+            raise HTTPException(400, foreign_store_error(user, foreign[0]['store_id'], foreign[0].get('store'), 'return'))
     return [{"sale_id": s['sale_id'], "date": s['sale_date'].strftime('%d.%m.%Y %H:%M'), "price": int(s['sold_price']),
              "payment": s['sale_payment_type'], "model": s['product_model'], "article": s['article_number'],
              "returned": bool(s['return_id'])} for s in sales]
