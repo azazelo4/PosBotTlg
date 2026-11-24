@@ -28,6 +28,7 @@ from services import customers
 from services import fiscal
 from services import marking
 from services import photos
+from core import logsafe
 from core import settings_store
 from handlers.buttons import PAYMENT_TYPES, ROLE_TITLES
 from utils import receipt_text
@@ -50,6 +51,7 @@ from utils.stock_report import build_stock_excel, stock_totals
 from web import settings_form, kassa, manual
 from web.security import (session_secret, redeem_login_token, validate_init_data, new_csrf, ADMIN_ROLES, CASH_ROLES)
 
+logsafe.install()          # токен бота и текст сообщений не попадают в логи (аудит, Н-2)
 logger = logging.getLogger("posbot.web")
 
 BASE = Path(__file__).parent

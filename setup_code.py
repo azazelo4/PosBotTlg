@@ -2,6 +2,7 @@
 
     docker compose exec web python -m setup_code
     docker compose exec web python -m setup_code --web-url https://pos.example.kz   (адрес веб-админки)
+    docker compose exec -T web python -m setup_code --token < файл_или_ввод       (новый токен бота, posbot token)
 """
 import sys
 
@@ -29,6 +30,38 @@ def set_web_url(url):
     return 0
 
 
+TOKEN_IN_ENV = 3   # код выхода: токен проверен, но задан в .env — менять его там (так делает posbot token)
+
+
+def set_token(raw):
+    """Новый токен бота без входа в админку — например, после /revoke, когда бот уже не работает и ссылку входа
+    получить негде. Токен читается со стандартного ввода (не из аргументов: не останется в истории и в ps),
+    проверяется у Telegram и сохраняется зашифрованным, как в «Настройках». Бот перезапустится сам."""
+    token = (raw or "").strip()
+    try:
+        token = config.parse_value(config.BY_KEY["TOKEN"], token)
+    except config.SettingError as e:
+        print(e)
+        return 1
+    if not token:
+        print("Токен пустой. Скопируйте его из @BotFather: ваш бот → API Token.")
+        return 1
+    ok, result = settings_store.check_telegram_token(token)
+    if not ok:
+        print(result)
+        return 1
+    if config.env_overridden("TOKEN"):
+        print(f"Токен подходит ({result}), но задан строкой TOKEN в .env — замените его там и перезапустите: "
+              "docker compose up -d (posbot token делает это сам).")
+        return TOKEN_IN_ENV
+    ok, err = settings_store.save({"TOKEN": token})
+    if not ok:
+        print(f"Не сохранено: {err}")
+        return 1
+    print(f"Токен сохранён: {result}. Бот перезапустится с ним в течение минуты.")
+    return 0
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     init_pool(retries=5)
@@ -39,6 +72,8 @@ def main(argv=None):
         connection.close()
     if argv[:1] == ["--web-url"]:
         return set_web_url(argv[1] if len(argv) > 1 else "")
+    if argv[:1] == ["--token"]:
+        return set_token(sys.stdin.readline())
     code = settings_store.ensure_setup_code()
     if not code:
         print("Первоначальная настройка уже выполнена. Настройки меняются в веб-админке: раздел «Настройки».")

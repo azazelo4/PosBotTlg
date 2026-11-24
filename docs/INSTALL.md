@@ -71,6 +71,7 @@ bash install.sh --key <ключ_доступа>
 | `posbot restore /opt/pos-bot-backups/<файл>` | восстановить БД из бэкапа |
 | `posbot restore-photos [каталог]` | вернуть фото товаров из копии (по умолчанию `/opt/pos-bot-backups/photos`) |
 | `posbot setup-code` | код мастера настройки, если он ещё не пройден |
+| `posbot token` | новый токен бота (после Revoke в @BotFather; ввод скрытый, бот перезапускается сам) |
 | `posbot offsite <адрес>` | копия бэкапов вне сервера (`ssh://…`, `rclone:…`, `https://…`); `posbot offsite test` — проверить |
 | `posbot web-url <адрес>` | адрес веб-админки (то же, что в «Настройках») |
 | `posbot tunnel …` | туннель для ПК без белого IP (см. «Маленькая точка») |

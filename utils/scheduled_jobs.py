@@ -16,6 +16,7 @@ from core.database import (get_low_stock_products, get_chat_ids_by_roles, get_pe
 from core.state import bot
 from utils.common import today, now, h, day_bounds, money
 from utils.report_generator import generate_period_report
+from core.logsafe import describe
 
 DAILY_REPORT_JOB = "daily_report"
 TELEGRAM_JOB = "telegram"
@@ -32,7 +33,7 @@ def _send_safe(chat_id, text, **kwargs):
         bot.send_message(chat_id, text, **kwargs)
         return True
     except Exception as e:
-        logger.warning("Не удалось отправить сообщение в чат %s: %s", chat_id, e)
+        logger.warning("Не удалось отправить сообщение в чат %s: %s", chat_id, describe(e))
         return False
 
 
@@ -60,7 +61,7 @@ def send_daily_report(day=None, late=False):
             delivered = True
             logger.info("Отчёт за %s отправлен в чат %s", day, chat_id)
         except Exception as e:
-            logger.warning("Отчёт за %s не доставлен в чат %s: %s", day, chat_id, e)
+            logger.warning("Отчёт за %s не доставлен в чат %s: %s", day, chat_id, describe(e))
     if delivered:
         mark_job_run(DAILY_REPORT_JOB, day)
     return delivered
@@ -121,7 +122,7 @@ def telegram_heartbeat():
     try:
         bot.get_me()
     except Exception as e:
-        logger.warning("Нет связи с Telegram: %s", e)
+        logger.warning("Нет связи с Telegram: %s", describe(e))
         return False
     mark_job_run(TELEGRAM_JOB)
     return True
@@ -204,10 +205,10 @@ def send_customer_receipts():
             if e.error_code == 403:                  # клиент заблокировал бота — больше не пишем
                 customers.unsubscribe(row['chat_id'])
                 customers.mark_sent(row['id'])
-            logger.warning("Чек №%s клиенту не доставлен: %s", row['id'], e)
+            logger.warning("Чек №%s клиенту не доставлен: %s", row['id'], describe(e))
             continue
         except Exception as e:
-            logger.warning("Чек №%s клиенту не доставлен: %s", row['id'], e)
+            logger.warning("Чек №%s клиенту не доставлен: %s", row['id'], describe(e))
             continue
         customers.mark_sent(row['id'])
         sent += 1

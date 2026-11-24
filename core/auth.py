@@ -8,7 +8,8 @@
 import logging
 import time
 
-from telebot.handler_backends import BaseMiddleware
+from telebot import types
+from telebot.handler_backends import BaseMiddleware, CancelUpdate
 
 from core.database import get_user_by_phone, get_user_by_chat_id, get_user_by_id, set_user_chat_id
 from core.state import user_data, user_state
@@ -106,6 +107,45 @@ def invalidate_user_sessions(user_id):
 def has_role(chat_id, *roles):
     session = user_data.get(chat_id) or {}
     return bool(session.get('is_active')) and session.get('role') in (roles or ROLES)
+
+
+def is_private_update(update):
+    """Обновление из личного чата с ботом: чат личный и это чат самого отправителя.
+
+    Вся логика бота держится на «chat_id = сотрудник/клиент»: сессия, роль, шаг операции, подписка на чеки.
+    В группе это неверно — вошедший там сотрудник отдал бы свои права всем участникам (аудит, Н-1).
+    Нечитаемые поля — отказ."""
+    message = update.message if isinstance(update, types.CallbackQuery) else update
+    chat = getattr(message, 'chat', None)
+    sender = getattr(update, 'from_user', None)
+    if chat is None or sender is None or getattr(sender, 'is_bot', False):
+        return False
+    return getattr(chat, 'type', None) == 'private' and getattr(chat, 'id', None) == sender.id
+
+
+class PrivateChatMiddleware(BaseMiddleware):
+    """Самый первый фильтр: обновления не из личного чата отбрасываются без ответа. Бот может отправлять
+    ежедневный отчёт в группу, но в группе ничего не делает и ни на что не отвечает."""
+
+    def __init__(self):
+        super().__init__()
+        self.update_sensitive = False
+        self.update_types = ['message', 'callback_query']
+        self._warned = set()
+
+    def pre_process(self, update, data):
+        if is_private_update(update):
+            return None
+        message = update.message if isinstance(update, types.CallbackQuery) else update
+        chat_id = getattr(getattr(message, 'chat', None), 'id', None)
+        if chat_id not in self._warned:
+            self._warned.add(chat_id)
+            logger.warning("Чат %s (%s): обновление не из личного чата — не обрабатывается", chat_id,
+                           getattr(getattr(message, 'chat', None), 'type', None))
+        return CancelUpdate()
+
+    def post_process(self, update, data, exception=None):
+        pass
 
 
 class SessionMiddleware(BaseMiddleware):
