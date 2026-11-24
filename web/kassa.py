@@ -31,6 +31,7 @@ from utils import receipt_text
 from utils.labels import details_line
 from services import photos
 from utils.report_generator import build_summary
+from core.logsafe import describe
 
 logger = logging.getLogger("posbot.kassa")
 
@@ -59,7 +60,7 @@ def bot_username():
     try:
         return _bot_username(config.TOKEN)
     except Exception as e:
-        logger.warning("Не удалось узнать имя бота: %s", e)
+        logger.warning("Не удалось узнать имя бота: %s", describe(e))
         return None
 
 

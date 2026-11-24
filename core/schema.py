@@ -496,6 +496,9 @@ def ensure_schema(connection, default_stores=None):
                 logger.info("Миграция: изменяю колонку %s.%s", table, column)
                 cursor.execute(f"ALTER TABLE `{table}` MODIFY COLUMN `{column}` {definition}")
         _migrate_fiscal_kinds(cursor)
+        # Аудит Н-1: вход из группы привязывал сотрудника/клиента к чату группы (id < 0) — отвязываем
+        cursor.execute("UPDATE users SET chat_id = NULL WHERE chat_id < 0")
+        cursor.execute("UPDATE customers SET chat_id = NULL WHERE chat_id < 0")
         _migrate_stores(cursor, default_stores)
         for table, index, cols in INDEXES:
             if not _index_exists(cursor, table, index):

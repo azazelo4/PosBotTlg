@@ -13,6 +13,7 @@ from core.schema import METAL_TYPES, PRODUCT_TYPES
 from core.state import bot, user_state, get_op, start_op, end_op, cancel_current_operation
 from utils.stock_report import build_stock_excel, stock_totals
 from utils.common import parse_float, parse_int, parse_money, money, h, now
+from core.logsafe import describe
 
 logger = logging.getLogger(__name__)
 
@@ -246,7 +247,7 @@ def on_photo(message):
     try:
         data = bot.download_file(bot.get_file(file_id).file_path)
     except Exception as e:  # noqa: BLE001 — сеть Telegram: сообщаем и ждём следующее фото
-        logger.warning("Chat %s: не удалось скачать фото: %s", chat_id, e)
+        logger.warning("Chat %s: не удалось скачать фото: %s", chat_id, describe(e))
         bot.send_message(chat_id, "Не удалось получить фото из Telegram. Пришлите его ещё раз.")
         return
     ok, result = photos.add(op['product']['id'], data, _user_id(chat_id))

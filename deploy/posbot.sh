@@ -8,6 +8,7 @@
 #   posbot restore ФАЙЛ        восстановить БД из бэкапа (перед этим делается бэкап текущей)
 #   posbot restore-photos [КАТАЛОГ]   вернуть фото товаров из копии (по умолчанию $BACKUP_DIR/photos)
 #   posbot setup-code          код мастера первоначальной настройки
+#   posbot token               новый токен бота (после /revoke в @BotFather; вход в админку для этого не нужен)
 #   posbot web-url [АДРЕС]     адрес веб-админки (как в «Настройках»)
 #   posbot offsite [АДРЕС|test|off]   копия бэкапов вне ПК: ssh://user@host/путь, rclone:remote:путь, https://…/
 #   posbot tunnel [cloudflare ТОКЕН|tailscale|off]   публичный HTTPS без белого IP (Mini App, вход снаружи)
@@ -232,6 +233,23 @@ case "$cmd" in
   setup-code)
     compose exec -T web python -m setup_code
     ;;
+  token)
+    # Токен — скрытым вводом, не аргументом: не попадёт в историю команд и в список процессов
+    if [ -t 0 ]; then read -rsp "Новый токен от @BotFather (ввод не отображается): " new_token; echo
+    else read -r new_token; fi
+    [ -n "$new_token" ] || die "токен пустой"
+    set +e
+    printf '%s\n' "$new_token" | compose exec -T web python -m setup_code --token
+    rc=$?
+    set -e
+    if [ "$rc" -eq 3 ]; then               # проверен, но задан строкой TOKEN в .env — меняем там
+      set_env TOKEN "$new_token"
+      compose up -d
+      echo "Токен заменён в .env, бот и веб перезапущены."
+    elif [ "$rc" -ne 0 ]; then
+      exit "$rc"
+    fi
+    ;;
   backup)
     do_backup
     ;;
@@ -300,7 +318,7 @@ case "$cmd" in
     echo "Готово: $(compose exec -T web sh -c "find /app/data/photos -name '*.jpg' ! -name '*_t.jpg' | wc -l") фото в приложении."
     ;;
   -h|--help|help)
-    sed -n '2,15p' "$0"
+    sed -n '2,/^set -euo/p' "$0" | grep '^#'
     ;;
   *)
     die "неизвестная команда $cmd (posbot help)"

@@ -8,6 +8,7 @@ from core import config
 from handlers.common import is_button
 from core.state import bot, user_data, cancel_current_operation
 from web.security import issue_login_link
+from core.logsafe import describe
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ def set_app_menu_button(chat_id):
         else:
             bot.set_chat_menu_button(chat_id, types.MenuButtonDefault())
     except Exception as e:
-        logger.warning("Chat %s: не удалось установить кнопку Mini App: %s", chat_id, e)
+        logger.warning("Chat %s: не удалось установить кнопку Mini App: %s", chat_id, describe(e))
 
 
 def _is_lan_url():
@@ -41,7 +42,7 @@ def send_link(chat_id, text, label, url, **kwargs):
     try:
         return bot.send_message(chat_id, text, reply_markup=kb, **kwargs)
     except Exception as e:
-        logger.info("Chat %s: ссылка не принята кнопкой (%s), отправляю текстом", chat_id, e)
+        logger.info("Chat %s: ссылка не принята кнопкой (%s), отправляю текстом", chat_id, describe(e))
         return bot.send_message(chat_id, f"{text}\n\n{url}", disable_web_page_preview=True, **kwargs)
 
 

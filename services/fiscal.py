@@ -17,6 +17,7 @@ from datetime import timedelta
 from core import config
 from core.database import with_connection, with_transaction, get_connection, BusinessError, get_job_run, mark_job_run
 from utils.common import now, money
+from core.logsafe import describe
 from utils.webkassa import (WebkassaClient, WebkassaError, WebkassaUnavailable, OPERATION_SALE, OPERATION_SALE_RETURN,
                             CASHBOX_BLOCKING_CODES, NO_SHIFT_CODE, NOT_ENOUGH_CASH_CODE,
                             PAYMENT_CASH, PAYMENT_CARD, PAYMENT_MOBILE, ROUND_KOPECKS, MONEY_WITHDRAWAL, MONEY_DEPOSIT, position,
@@ -242,7 +243,7 @@ def process_queue(limit=BATCH, notify=None, on_error=None):
                         on_error(rec, f"Касса {rec['cashbox']} не принимает чеки: {e.text}. Исправьте в кабинете "
                                       "Webkassa — чеки уйдут сами.")
                     except Exception as err:
-                        logger.warning("Фискализация: уведомление не отправлено: %s", err)
+                        logger.warning("Фискализация: уведомление не отправлено: %s", describe(err))
                 continue
             if e.code == NOT_ENOUGH_CASH_CODE:
                 e = WebkassaError(e.code, e.text + ". В Webkassa наличных меньше, чем в учёте бота "
@@ -271,7 +272,7 @@ def process_queue(limit=BATCH, notify=None, on_error=None):
             try:
                 notify(rec, data or {})
             except Exception as e:
-                logger.warning("Фискализация #%s: уведомление не отправлено: %s", rec['id'], e)
+                logger.warning("Фискализация #%s: уведомление не отправлено: %s", rec['id'], describe(e))
     return stats
 
 

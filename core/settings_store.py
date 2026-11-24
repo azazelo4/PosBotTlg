@@ -15,6 +15,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from core import config
 from core.database import with_connection, with_transaction
 from utils.common import now
+from core.logsafe import describe
 
 logger = logging.getLogger(__name__)
 
@@ -255,7 +256,7 @@ def check_telegram_token(token):
             return False, "Telegram не принял токен: проверьте, что он скопирован из @BotFather целиком."
         return False, f"Telegram ответил ошибкой: {e.description}"
     except Exception as e:  # сеть
-        logger.warning("Проверка токена: %s", e)
+        logger.warning("Проверка токена: %s", describe(e))
         return False, "Не удалось связаться с Telegram. Проверьте доступ сервера в интернет."
     return True, "@" + (me.get('username') or '?')
 

@@ -87,7 +87,16 @@ ufw status       # OpenSSH, 80/tcp, 443/tcp — ALLOW
 `production` и в **Deployment branches** ограничить его веткой `POS-Bot`.
 
 Если токен бота ещё не перевыпущен после утечки в истории git — сделать это сейчас: @BotFather → `/revoke`,
-новый токен ввести в мастере `/setup` (или на странице «Настройки», если бот уже настроен).
+новый токен ввести в мастере `/setup`, а если бот уже настроен — на сервере (после `/revoke` бот не работает,
+и войти в «Настройки» по ссылке из бота нельзя):
+
+```bash
+cd /opt/pos-bot
+read -rsp 'Новый токен: ' T; echo; printf '%s\n' "$T" | docker compose exec -T web python -m setup_code --token; unset T
+```
+
+Если токен задан строкой `TOKEN=` в `.env` или секретом `TOKEN` в GitHub, команда скажет об этом — тогда
+замените его там (секрет — **Settings → Secrets and variables → Actions**) и перезапустите: `docker compose up -d`.
 
 **Runner.** GitHub: **Settings → Actions → Runners → New self-hosted runner → Linux → x64**. Страница
 покажет команды с актуальной версией и одноразовым токеном (действует час). Выполнить на сервере:

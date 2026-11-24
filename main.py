@@ -18,10 +18,12 @@ from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from core import config
+from core import logsafe
 from core import settings_store
 from core.database import init_pool, get_connection, ensure_admin
 from core.schema import ensure_schema
 
+logsafe.install()          # токен бота и текст сообщений не попадают в логи (аудит, Н-2)
 logging.basicConfig(
     level=getattr(logging, (config.LOG_LEVEL or "INFO").upper(), logging.INFO),
     format='%(asctime)s %(levelname)s %(name)s: %(message)s',
@@ -37,7 +39,7 @@ FISCAL_POLL_SECONDS = 5
 
 
 def register_handlers():
-    from core.auth import SessionMiddleware, has_role
+    from core.auth import PrivateChatMiddleware, SessionMiddleware, has_role
     from handlers.buttons import BTN_CASH, BTN_STOCK, BTN_STAFF, BTN_BACK, BTN_CANCEL
     from core.state import bot
     from handlers.navigation import (on_cancel, on_back, on_cash_menu, on_stock_menu, on_staff_menu, on_fallback,
@@ -57,6 +59,7 @@ def register_handlers():
     from handlers.web_handler import register_web_handlers
     from handlers.user_management import configure_user_management
 
+    bot.setup_middleware(PrivateChatMiddleware())        # первым: группы и чужие чаты не доходят до сессий
     bot.setup_middleware(SessionMiddleware())
     from handlers.customer_handler import register_customer_handlers, register_customer_fallback
     register_kassa_login_handlers()  # /start k_<токен> — до обычного /start
@@ -192,7 +195,9 @@ def main():
     register_handlers()
     start_scheduler()
     logger.info("Бот запущен, начинаю опрос Telegram.")
-    bot.infinity_polling(timeout=30, long_polling_timeout=30, skip_pending=False)
+    # Только те типы обновлений, которые бот обрабатывает (сообщения и кнопки); остальное Telegram не присылает
+    bot.infinity_polling(timeout=30, long_polling_timeout=30, skip_pending=False,
+                         allowed_updates=['message', 'callback_query'])
 
 
 if __name__ == '__main__':
