@@ -714,6 +714,33 @@ def _upsert_customer(cursor, phone, name=None, source='kassa', user_id=None, bir
     return cursor.lastrowid
 
 
+# ---------------------------------------------------------------- свой магазин
+
+def foreign_store_error(user, store_id, store_name=None, kind='sale'):
+    """Текст отказа, если сотрудник закреплён за магазином, а операция — по товару (продаже) другого магазина.
+    None — можно. Без ограничений: администратор, сотрудник «Все магазины», товар без магазина."""
+    if not user or user.get('role') == 'admin' or not user.get('store_id') or not store_id or store_id == user['store_id']:
+        return None
+    where = f"«{store_name}»" if store_name else "другом магазине"
+    if kind == 'return':
+        return (f"Эта продажа была в магазине {where} — возврат оформляет сотрудник этого магазина "
+                "или администратор.")
+    return (f"Этот товар числится в магазине {where} — его продаёт продавец этого магазина. Если изделие перевезли, "
+            "менеджер меняет магазин в карточке товара.")
+
+
+def _check_store(cursor, user_id, store_id, kind='sale'):
+    """Проверка «свой магазин» в той же транзакции, что и операция: обойти её через другой путь нельзя."""
+    if not store_id or not user_id:
+        return
+    cursor.execute("SELECT u.role, u.store_id, st.name AS store FROM users u LEFT JOIN stores st ON st.id = %s "
+                   "WHERE u.id = %s", (store_id, user_id))
+    row = cursor.fetchone()
+    error = foreign_store_error(row, store_id, row['store'] if row else None, kind)
+    if error:
+        raise BusinessError(error)
+
+
 def _record_receipt(cursor, items, user_id, payment_type, store_id=None, customer=None):
     """Чек: позиции [(product_id, цена[, код маркировки]), ...] одним платежом. Позиция — строка sales (одна штука).
 
@@ -753,6 +780,7 @@ def _record_receipt(cursor, items, user_id, payment_type, store_id=None, custome
     if len(stores) > 1:
         raise BusinessError("В одном чеке — товары одного магазина.")
     receipt_store = stores.pop() or store_id
+    _check_store(cursor, user_id, receipt_store)
     total = sum(price for _, price, _ in items)
     payments = _split_payments(payment_type, total)
     payment_type = payments[0][0] if len(payments) == 1 else MIXED_PAYMENT
@@ -846,10 +874,11 @@ def get_sales_for_return(cursor, article_number, days=60):
     cursor.execute("""
         SELECT s.id AS sale_id, s.sold_price, s.payment_type AS sale_payment_type, s.sale_date,
                p.id AS product_id, p.article_number, p.model AS product_model, p.product_type,
-               r.id AS return_id
+               r.id AS return_id, s.store_id, st.name AS store
         FROM sales s
         JOIN products p ON s.product_id = p.id
         LEFT JOIN returns r ON r.original_sale_id = s.id
+        LEFT JOIN stores st ON st.id = s.store_id
         WHERE p.article_number = %s AND s.sale_date >= %s
         ORDER BY s.sale_date DESC
         LIMIT 10
@@ -862,10 +891,11 @@ def get_sale_details_by_id(cursor, sale_id):
     cursor.execute("""
         SELECT s.id AS sale_id, s.sold_price, s.payment_type AS sale_payment_type, s.sale_date,
                p.id AS product_id, p.article_number, p.model AS product_model, p.product_type,
-               r.id AS return_id
+               r.id AS return_id, s.store_id, st.name AS store
         FROM sales s
         JOIN products p ON s.product_id = p.id
         LEFT JOIN returns r ON r.original_sale_id = s.id
+        LEFT JOIN stores st ON st.id = s.store_id
         WHERE s.id = %s
     """, (sale_id,))
     return cursor.fetchone()
@@ -882,6 +912,7 @@ def create_return_record(cursor, sale_id, product_article, return_price, payment
         raise BusinessError("По этой продаже уже оформлен возврат.")
     if return_price <= 0 or return_price > sale['sold_price']:
         raise BusinessError("Сумма возврата должна быть больше нуля и не больше суммы продажи.")
+    _check_store(cursor, user_id, sale['store_id'], 'return')
     cursor.execute("""INSERT INTO returns (original_sale_id, product_article, return_price, payment_type, user_id, store_id, return_date)
                       VALUES (%s, %s, %s, %s, %s, %s, %s)""",
                    (sale_id, product_article, return_price, payment_type, user_id, sale['store_id'] or store_id, now()))
@@ -923,6 +954,7 @@ def create_trade_in_record(cursor, new_product_article, new_sale_price, old_item
     cursor.execute("SELECT id, article_number, store_id, is_marked FROM products WHERE id = %s", (new_id,))
     new_product = cursor.fetchone()
     store_id = new_product['store_id'] or store_id  # магазин нового товара
+    _check_store(cursor, user_id, new_product['store_id'])
     code = None
     if new_mark_code:
         code = _take_code(cursor, new_mark_code, new_product, set())

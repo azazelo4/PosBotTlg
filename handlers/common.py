@@ -5,7 +5,7 @@ from core.auth import has_role
 from handlers.buttons import (create_cash_operations_buttons, create_choice_markup, create_skip_cancel_markup,
                      create_cancel_markup, BTN_CANCEL)
 from core.database import (get_product_by_article, get_stores, find_by_mark_code, marking_required, SELLABLE_CODE,
-                      CODE_STATUS_TITLES)
+                      CODE_STATUS_TITLES, foreign_store_error)
 from utils import mark_codes
 from core.schema import METAL_TYPES
 from core.state import bot, user_data, user_state, end_op, get_op, register_cancel
@@ -200,6 +200,11 @@ def resolve_for_sale(chat_id, text):
     if not product:
         what = "Код маркировки" if mark_codes.looks_like_code(text) else "Артикул"
         bot.send_message(chat_id, f"{what} <code>{h(mark_codes.short(text))}</code> не найден. Введите другой или нажмите «Отмена».",
+                         parse_mode='HTML', reply_markup=create_cancel_markup())
+        return None, None
+    store_error = foreign_store_error(user_data.get(chat_id), product.get('store_id'), product.get('Store'))
+    if store_error:
+        bot.send_message(chat_id, f"{product_line(product)}\n{h(store_error)} Введите другой артикул или нажмите «Отмена».",
                          parse_mode='HTML', reply_markup=create_cancel_markup())
         return None, None
     if marking_required(product):

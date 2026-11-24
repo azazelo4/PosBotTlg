@@ -192,7 +192,7 @@ def test_pc_kassa_button_sends_link(tg):
 
 # ---------------------------------------------------------------- Mini App
 
-def test_mini_app_sale_flow(tg, client):
+def test_mini_app_sale_flow(tg, client, unbound_staff):
     login(tg, CASHIER)
     headers = {"X-Telegram-Init-Data": init_data(CASHIER)}
     assert "Сканировать" in client.get("/app").text
@@ -232,3 +232,15 @@ def test_mini_app_rejects_bad_signature_and_strangers(tg, client):
     assert client.get("/api/app/me", headers={"X-Telegram-Init-Data": init_data(CASHIER, auth_date=old)}).status_code == 401
     # подпись верная, но этот Telegram-аккаунт не вошёл в бота
     assert client.get("/api/app/me", headers={"X-Telegram-Init-Data": init_data(999999)}).status_code == 403
+
+
+def test_mini_app_cashier_sells_only_own_store(tg, client):
+    """Кассир ЦУМ в «📷 Кассе»: товар Отау Сауда сразу отклоняется, продажа тоже."""
+    login(tg, CASHIER)
+    headers = {"X-Telegram-Init-Data": init_data(CASHIER)}
+    r = client.get("/api/app/product", params={"article": "A200"}, headers=headers)
+    assert r.status_code == 400 and "Отау Сауда" in r.json()["error"]
+    r = client.post("/api/app/sale", json={"article": "A200", "price": 20000, "payment": "Kaspi"}, headers=headers)
+    assert r.status_code == 400 and "Отау Сауда" in r.json()["error"]
+    assert client.get("/api/app/product", params={"article": "A100"}, headers=headers).status_code == 200
+

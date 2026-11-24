@@ -4,9 +4,9 @@ import logging
 from telebot import types
 
 from handlers.buttons import create_cancel_markup, create_confirmation_markup, create_payment_type_markup, PAYMENT_TYPES, BTN_CONFIRM
-from core.database import get_sales_for_return, get_sale_details_by_id, create_return_record
+from core.database import get_sales_for_return, get_sale_details_by_id, create_return_record, foreign_store_error
 from handlers.common import CASH_ROLES, in_state, is_button, user_ids, cash_menu, register_simple_cancel, ask_money, read_money
-from core.state import bot, user_state, get_op, start_op, end_op, cancel_current_operation
+from core.state import bot, user_data, user_state, get_op, start_op, end_op, cancel_current_operation
 from utils.common import money, h
 
 logger = logging.getLogger(__name__)
@@ -66,6 +66,12 @@ def on_pick_text(message):
 
 
 def _select_sale(chat_id, sale):
+    error = foreign_store_error(user_data.get(chat_id), sale.get('store_id'), sale.get('store'), 'return')
+    if error:
+        bot.send_message(chat_id, f"{h(error)} Введите другой артикул или нажмите «Отмена».", parse_mode='HTML',
+                         reply_markup=create_cancel_markup())
+        user_state[chat_id] = ARTICLE
+        return
     get_op(chat_id)['sale'] = sale
     user_state[chat_id] = PRICE
     ask_money(chat_id,

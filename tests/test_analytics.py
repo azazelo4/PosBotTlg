@@ -14,6 +14,10 @@ from test_stores import _web
 from utils.common import today
 from web.app import app
 
+import pytest
+
+pytestmark = pytest.mark.usefixtures("unbound_staff")   # продавцы работают в обоих магазинах
+
 
 def _pid(article):
     return db_query("SELECT id FROM products WHERE article_number=%s", (article,))[0]['id']

@@ -245,3 +245,11 @@ def login(tg, chat_id):
     calls = tg.contact(chat_id, PHONES[chat_id])
     assert "Здравствуйте" in tg.texts(calls), tg.texts(calls)
     return calls
+
+
+@pytest.fixture
+def unbound_staff(tg):
+    """Кассир и менеджер — «Все магазины»: для тестов, где один продавец работает в обоих магазинах
+    (иначе продажа товара другого магазина отклоняется — продавец закреплён за магазином)."""
+    db_query("UPDATE users SET store_id = NULL WHERE role IN ('cashier', 'manager')")
+

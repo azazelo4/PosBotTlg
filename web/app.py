@@ -36,7 +36,7 @@ from core.database import (get_receipt, get_job_run, marking_required, ensure_ad
                       get_product_by_article, get_products_by_articles, get_products_for_labels, add_product_to_db,
                       update_product, get_stock_report_data, get_low_stock_products, get_period_operations,
                       record_sale, get_today_sales_by_user, get_all_users, add_user_to_db, change_user_role_function,
-                      deactivate_user_in_db, update_user_phone, create_cash_deposit_record, recent_cash_operations)
+                      deactivate_user_in_db, update_user_phone, create_cash_deposit_record, recent_cash_operations, foreign_store_error)
 from core.schema import METAL_TYPES, PRODUCT_TYPES, ensure_schema
 from utils.catalog_import import build_plan, apply_plan, attach_photos, FIELD_TITLES
 from utils.customer_import import parse_customers, birthday_text, FIELD_TITLES as CUSTOMER_FIELD_TITLES
@@ -1101,6 +1101,9 @@ def api_product(article: str, user=Depends(app_user)):
         product = get_product_by_article(article.lstrip("0"))      # штрихкод дополнен нулями слева (EAN)
     if not product:
         raise HTTPException(404, f"Артикул {article} не найден.")
+    store_error = foreign_store_error(user, product.get('store_id'), product.get('Store'))
+    if store_error:
+        raise HTTPException(400, store_error)
     if marking_required(product):
         raise HTTPException(400, "Маркируемый товар: продажа по коду маркировки — на кассе ПК со сканером или в боте.")
     return _product_json(product)

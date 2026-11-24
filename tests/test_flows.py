@@ -65,7 +65,7 @@ def test_sale_full_flow_with_kaspi(tg):
     assert CASHIER not in user_state
 
 
-def test_sale_reports_db_failure_instead_of_success(tg):
+def test_sale_reports_db_failure_instead_of_success(tg, unbound_staff):
     login(tg, CASHIER)
     tg.send(CASHIER, "Продажа")
     tg.send(CASHIER, "A200")
@@ -197,7 +197,7 @@ def test_tradein_client_pays_difference(tg):
     assert db_query("SELECT quantity FROM products WHERE article_number='A100'")[0]['quantity'] == 2
 
 
-def test_tradein_shop_pays_client_and_old_item_to_stock(tg):
+def test_tradein_shop_pays_client_and_old_item_to_stock(tg, unbound_staff):
     login(tg, CASHIER)
     tg.send(CASHIER, "Trade-In")
     tg.send(CASHIER, "A100")          # клиент сдаёт наше кольцо
@@ -232,8 +232,9 @@ def test_withdrawal(tg):
 def test_report_today_includes_all_operations(tg):
     login(tg, CASHIER)
     _sell(tg, CASHIER, "A100", 150000, "Наличные")
-    _sell(tg, CASHIER, "A200", 20000, "Kaspi")
-    tg.send(CASHIER, "Возврат"); tg.send(CASHIER, "A200"); tg.send(CASHIER, "20000"); tg.send(CASHIER, "Kaspi"); tg.send(CASHIER, "Подтвердить")
+    login(tg, ADMIN)                          # A200 — в Отау Сауда: продаёт и возвращает сотрудник «все магазины»
+    _sell(tg, ADMIN, "A200", 20000, "Kaspi")
+    tg.send(ADMIN, "Возврат"); tg.send(ADMIN, "A200"); tg.send(ADMIN, "20000"); tg.send(ADMIN, "Kaspi"); tg.send(ADMIN, "Подтвердить")
     tg.send(CASHIER, "Скупка"); tg.send(CASHIER, "Без артикула"); tg.send(CASHIER, "серебро"); tg.send(CASHIER, "5")
     tg.send(CASHIER, "Пропустить"); tg.send(CASHIER, "3000"); tg.send(CASHIER, "Наличные"); tg.send(CASHIER, "Подтвердить")
     tg.send(CASHIER, "Инкассация"); tg.send(CASHIER, "100000"); tg.send(CASHIER, "Пропустить"); tg.send(CASHIER, "Подтвердить")
