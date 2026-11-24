@@ -49,13 +49,25 @@ def install():
     _installed = True
     previous = logging.getLogRecordFactory()
 
+    def clean_arg(value):
+        # строки и ошибки (в тексте ошибки сети — адрес с токеном) маскируем; числа и прочее не трогаем,
+        # чтобы форматы вида %d и разбор аргументов (журнал запросов uvicorn) работали как раньше
+        if isinstance(value, str):
+            return scrub(value)
+        if isinstance(value, BaseException):
+            return scrub(str(value))
+        return value
+
     def factory(*args, **kwargs):
         record = previous(*args, **kwargs)
-        try:
-            message = record.getMessage()
-        except Exception:                                 # кривой формат — оставляем как есть, logging сам сообщит
-            return record
-        record.msg, record.args = scrub(message), None
+        if isinstance(record.msg, str):
+            record.msg = scrub(record.msg)
+        elif isinstance(record.msg, BaseException):
+            record.msg = scrub(str(record.msg))
+        if isinstance(record.args, tuple):
+            record.args = tuple(clean_arg(a) for a in record.args)
+        elif isinstance(record.args, dict):
+            record.args = {k: clean_arg(v) for k, v in record.args.items()}
         if record.exc_info and record.exc_info[0] is not None:
             text = "".join(traceback.format_exception(*record.exc_info)).rstrip("\n")
             clean = scrub(text)

@@ -67,3 +67,24 @@ def test_failed_customer_receipt_logs_no_token(tg, token, caplog, monkeypatch):
     with caplog.at_level(logging.WARNING):
         assert scheduled_jobs._send_safe(5, "x") is False
     assert "нет связи с Telegram" in caplog.text and token not in caplog.text and PHONE not in caplog.text
+
+
+def test_uvicorn_access_log_still_formats(token):
+    """Ревью: аргументы записи сохраняются — журнал запросов uvicorn разбирает их кортежем."""
+    import io
+    from uvicorn.logging import AccessFormatter
+    out = io.StringIO()
+    handler = logging.StreamHandler(out)
+    handler.setFormatter(AccessFormatter('%(client_addr)s - "%(request_line)s" %(status_code)s'))
+    handler.handleError = lambda record: out.write("Logging error\n")
+    access = logging.getLogger("uvicorn.access.test")
+    access.addHandler(handler)
+    access.propagate = False
+    try:
+        access.warning('%s - "%s %s HTTP/%s" %d', "1.2.3.4:5", "GET", f"/x?t={token}", "1.1", 200)
+    finally:
+        access.removeHandler(handler)
+    text = out.getvalue()
+    assert "Logging error" not in text and "GET /x?t=<токен> HTTP/1.1" in text and token not in text
+    assert logging.getLogger().makeRecord("x", 30, "f", 1, "число %d, доля %.1f%%", (5, 12.5), None).getMessage() \
+        == "число 5, доля 12.5%"
