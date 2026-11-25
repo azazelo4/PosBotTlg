@@ -1019,12 +1019,22 @@ def inventory_summary(request: Request, inventory_id: int, user=Depends(current_
     return render(request, "inventory_summary.html", user, inv=inv, s=summary, limit=inventory.LIST_LIMIT)
 
 
+async def _json_object(request):
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
+    if not isinstance(body, dict):
+        raise HTTPException(400, "Неверный запрос.")
+    return body
+
+
 @app.post("/api/inventory/{inventory_id}/scan")
 async def inventory_scan(request: Request, inventory_id: int, user=Depends(current_user)):
     check_csrf(request, request.headers.get("x-csrf", ""))
     _inventory_or_404(inventory_id, user)
-    body = await request.json()
-    ok, result = inventory.scan(inventory_id, body.get("code"), user['id'])
+    body = await _json_object(request)
+    ok, result = inventory.scan(inventory_id, str(body.get("code") or ""), user['id'])
     if not ok:
         raise HTTPException(400, result)
     return result
@@ -1034,7 +1044,7 @@ async def inventory_scan(request: Request, inventory_id: int, user=Depends(curre
 async def inventory_unscan(request: Request, inventory_id: int, user=Depends(current_user)):
     check_csrf(request, request.headers.get("x-csrf", ""))
     _inventory_or_404(inventory_id, user)
-    body = await request.json()
+    body = await _json_object(request)
     ok, result = inventory.unscan(inventory_id, parse_int(str(body.get("scan_id") or "")) or 0)
     if not ok:
         raise HTTPException(400, result)

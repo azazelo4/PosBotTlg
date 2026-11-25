@@ -131,6 +131,7 @@ def test_inventory_web_flow_and_access(tg):
     h = {"X-CSRF": csrf}
     assert manager.post(f"/api/inventory/{inv}/scan", json={"code": "A100"}).status_code == 400   # без CSRF
     d = manager.post(f"/api/inventory/{inv}/scan", json={"code": "A100"}, headers=h).json()
+    assert manager.post(f"/api/inventory/{inv}/scan", json=["A100"], headers=h).status_code == 400  # не объект
     assert d["status"] == "found" and d["found"] == 1 and d["scan_id"]
     summary = manager.get(f"/inventory/{inv}/summary").text
     assert "Найдено изделий" in summary and "Применить" in summary
