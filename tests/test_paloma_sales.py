@@ -180,7 +180,12 @@ def test_extra_reports_are_skipped(tg):
     files = _files()
     plan = paloma_sales.build_plan(files + [(junk, "1795615310.xls"), (files[0][0], "again.xls")])
     assert not plan.errors, plan.errors
-    assert any("пропущены: 1795615310.xls, again.xls (второй «Акт реализации»)" in w for w in plan.warnings)
+    assert any("пропущены: 1795615310.xls, again.xls (такой же «Акт реализации»)" in w for w in plan.warnings)
+    other = _act([(D1, [("A100", "Кольцо", 1, 99000, 0, 0)])])                        # другой акт — не молча
+    plan = paloma_sales.build_plan(files + [(other, "other.xls")])
+    assert any("два разных «Акт реализации»" in e for e in plan.errors)
+    pdf = paloma_sales.build_plan(files + [(b"%PDF-1.4", "scan.pdf")])                # нечитаемый лишний файл
+    assert not pdf.errors and any("scan.pdf" in w for w in pdf.warnings)
 
 
 def test_act_by_store_with_date_column():
@@ -194,3 +199,13 @@ def test_act_by_store_with_date_column():
             "<td>121 000</td><td>0</td><td>0</td><td>0</td></tr></tbody></table>").encode()
     act = paloma_sales.parse_act(paloma_sales.read_rows(html, "act.xls"))
     assert [(a['day'], a['code'], int(a['sum'])) for a in act] == [(D1, "A100", 121000)]
+
+
+def test_act_bad_date_is_an_error():
+    rows = [["", "№ п/п", "Дата", "Код товара", "Наименование", "Кол-во", "Продажа / Цена", "Продажа / Сумма"],
+            ["", "1.1.", "31.02.2026", "A100", "Кольцо", 1, 100, 100]]
+    try:
+        paloma_sales.parse_act(rows)
+        assert False, "ожидалась ошибка"
+    except ValueError as e:
+        assert "не понял дату «31.02.2026»" in str(e)

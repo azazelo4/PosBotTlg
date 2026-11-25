@@ -210,10 +210,14 @@ def parse_act(rows):
         if m and m.group(2).lower() in MONTHS:
             day = date(int(m.group(3)), MONTHS[m.group(2).lower()], int(m.group(1)))
             continue
-        if c_day is not None:
-            day = _day(row[c_day]) or day
         code = str(row[c_code]).strip()
-        if not day or not re.fullmatch(r"[0-9A-Za-zА-Яа-я\-_.]{1,64}", code) or code.lower().startswith("итого"):
+        if not re.fullmatch(r"[0-9A-Za-zА-Яа-я\-_.]{1,64}", code) or code.lower().startswith("итого"):
+            continue                                 # строки групп («Торговая точка: …») и итогов
+        if c_day is not None and str(row[c_day]).strip():
+            day = _day(row[c_day])
+            if not day:
+                raise ValueError(f"не понял дату «{row[c_day]}» в колонке «Дата».")
+        if not day:
             continue
         qty, total = int(_num(row[c_qty])), _num(row[c_sum])
         ret_qty = int(_num(row[c_rq])) if c_rq is not None else 0
@@ -234,12 +238,18 @@ def _day(value):
     if isinstance(value, date):
         return value
     s = str(value or "").strip().lower()
-    m = re.match(r"(\d{1,2})\s+(\S+)\s+(\d{4})", s)
-    if m and m.group(2) in MONTHS:
-        return date(int(m.group(3)), MONTHS[m.group(2)], int(m.group(1)))
-    m = re.match(r"(\d{1,2})\.(\d{1,2})\.(\d{4})", s)
-    if m:
-        return date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+    try:
+        m = re.match(r"(\d{1,2})\s+(\S+)\s+(\d{4})", s)
+        if m and m.group(2) in MONTHS:
+            return date(int(m.group(3)), MONTHS[m.group(2)], int(m.group(1)))
+        m = re.match(r"(\d{1,2})\.(\d{1,2})\.(\d{4})", s)
+        if m:
+            return date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+        m = re.match(r"(\d{4})-(\d{2})-(\d{2})", s)
+        if m:
+            return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    except ValueError:                               # 31.02.2026
+        return None
     return None
 
 
@@ -420,44 +430,57 @@ def _lookup(cursor, codes):
     return found, loaded, users, stores
 
 
+def _same(a, b):
+    """Один и тот же отчёт в другой раскладке (акт по датам и акт по торговым точкам)."""
+    def key(rows):
+        return sorted(tuple(str(r.get(k)) for k in ('day', 'code', 'qty', 'sum', 'ret_qty', 'ret_sum', 'time', 'total'))
+                      for r in rows)
+    return key(a) == key(b)
+
+
 def build_plan(files):
     """files: [(bytes, имя файла)] — оба отчёта в любом порядке. Возвращает SalesPlan (errors — если загружать нельзя)."""
     plan = SalesPlan()
-    act = checks = None
-    act_errors, skipped = [], []
+    found = {'act': None, 'checks': None}
+    titles = {'act': "Акт реализации", 'checks': "Отчёт по счетам"}
+    bad, skipped = {'act': [], 'checks': [], None: []}, []
     for data, name in files:
         try:
             rows = read_rows(data, name)
-        except ValueError as e:
-            plan.errors.append(f"{name}: {e}")
-            continue
-        except Exception:
-            logger.exception("Импорт продаж: не прочитан %s", name)
-            plan.errors.append(f"{name}: не удалось прочитать файл.")
+        except Exception as e:
+            if not isinstance(e, ValueError):
+                logger.exception("Импорт продаж: не прочитан %s", name)
+            bad[None].append(f"{name}: {e if isinstance(e, ValueError) else 'не удалось прочитать файл.'}")
             continue
         kind = detect(rows)
+        if kind is None:
+            skipped.append(name)
+            continue
         try:
-            if kind == 'act':
-                parsed = parse_act(rows)
-                if act is None:
-                    act = parsed
-                else:
-                    skipped.append(f"{name} (второй «Акт реализации»)")
-            elif kind == 'checks':
-                parsed = parse_checks(rows)
-                if checks is None:
-                    checks = parsed
-                else:
-                    skipped.append(f"{name} (второй «Отчёт по счетам»)")
-            else:
-                skipped.append(name)
+            parsed = parse_act(rows) if kind == 'act' else parse_checks(rows)
         except ValueError as e:
-            (act_errors if kind == 'act' else plan.errors).append(f"{name}: {e}")
+            bad[kind].append(f"{name}: {e}")
+            continue
+        if found[kind] is None:
+            found[kind] = (name, parsed)
+        elif _same(found[kind][1], parsed):
+            skipped.append(f"{name} (такой же «{titles[kind]}»)")
+        else:
+            plan.errors.append(f"Загружены два разных «{titles[kind]}»: {found[kind][0]} и {name}. Нужен один отчёт "
+                               "за весь период — выгрузите его заново.")
+    act = found['act'][1] if found['act'] else None
+    checks = found['checks'][1] if found['checks'] else None
+    if act is not None and checks is not None:
+        skipped += [b.split(":")[0] for b in bad[None] + bad['act'] + bad['checks']]
+    elif bad[None]:
+        plan.errors += bad[None]
     if skipped:
         plan.warnings.append("Не нужны для импорта, пропущены: " + ", ".join(skipped) + ".")
     if act is None:
-        plan.errors += act_errors or ["Нужен «Акт реализации» Паломы — что продано."]
+        plan.errors += bad['act'] or ["Нужен «Акт реализации» Паломы — что продано."]
     if checks is None:
+        plan.errors += bad['checks']
+    if checks is None and not bad['checks']:
         plan.errors.append("Нужен «Отчёт по счетам» Паломы — чеки: время, продавец, оплата.")
     if plan.errors:
         return plan
