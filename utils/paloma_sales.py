@@ -199,6 +199,7 @@ def parse_act(rows):
     c_qty = _col(cells, "кол-во")
     c_sum = _col(cells, "продажа / сумма", "сумма")
     c_rq, c_rs = _col(cells, "возвраты / кол-во"), _col(cells, "возвраты / сумма")
+    c_day = _col(cells, "дата")                    # вариант акта «по торговым точкам»: дата в каждой строке
     if None in (c_code, c_name, c_qty, c_sum):
         raise ValueError("В «Акте реализации» не нашёл колонки «Код товара», «Кол-во», «Продажа / Сумма».")
     lines, day = [], None
@@ -209,6 +210,8 @@ def parse_act(rows):
         if m and m.group(2).lower() in MONTHS:
             day = date(int(m.group(3)), MONTHS[m.group(2).lower()], int(m.group(1)))
             continue
+        if c_day is not None:
+            day = _day(row[c_day]) or day
         code = str(row[c_code]).strip()
         if not day or not re.fullmatch(r"[0-9A-Za-zА-Яа-я\-_.]{1,64}", code) or code.lower().startswith("итого"):
             continue
@@ -222,6 +225,22 @@ def parse_act(rows):
     if not lines:
         raise ValueError("В «Акте реализации» не нашёл продаж.")
     return lines
+
+
+def _day(value):
+    """«2 января 2026 г.», «02.01.2026» или дата Excel → date."""
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    s = str(value or "").strip().lower()
+    m = re.match(r"(\d{1,2})\s+(\S+)\s+(\d{4})", s)
+    if m and m.group(2) in MONTHS:
+        return date(int(m.group(3)), MONTHS[m.group(2)], int(m.group(1)))
+    m = re.match(r"(\d{1,2})\.(\d{1,2})\.(\d{4})", s)
+    if m:
+        return date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+    return None
 
 
 def _dt(value):
@@ -405,6 +424,7 @@ def build_plan(files):
     """files: [(bytes, имя файла)] — оба отчёта в любом порядке. Возвращает SalesPlan (errors — если загружать нельзя)."""
     plan = SalesPlan()
     act = checks = None
+    act_errors, skipped = [], []
     for data, name in files:
         try:
             rows = read_rows(data, name)
@@ -418,15 +438,25 @@ def build_plan(files):
         kind = detect(rows)
         try:
             if kind == 'act':
-                act = parse_act(rows)
+                parsed = parse_act(rows)
+                if act is None:
+                    act = parsed
+                else:
+                    skipped.append(f"{name} (второй «Акт реализации»)")
             elif kind == 'checks':
-                checks = parse_checks(rows)
+                parsed = parse_checks(rows)
+                if checks is None:
+                    checks = parsed
+                else:
+                    skipped.append(f"{name} (второй «Отчёт по счетам»)")
             else:
-                plan.errors.append(f"{name}: это не «Акт реализации» и не «Отчёт по счетам».")
+                skipped.append(name)
         except ValueError as e:
-            plan.errors.append(f"{name}: {e}")
+            (act_errors if kind == 'act' else plan.errors).append(f"{name}: {e}")
+    if skipped:
+        plan.warnings.append("Не нужны для импорта, пропущены: " + ", ".join(skipped) + ".")
     if act is None:
-        plan.errors.append("Нужен «Акт реализации» Паломы — что продано.")
+        plan.errors += act_errors or ["Нужен «Акт реализации» Паломы — что продано."]
     if checks is None:
         plan.errors.append("Нужен «Отчёт по счетам» Паломы — чеки: время, продавец, оплата.")
     if plan.errors:
