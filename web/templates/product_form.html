@@ -45,6 +45,8 @@
     <label>Производитель<input name="manufacturer" value="{{ product.manufacturer or '' }}" maxlength="255"></label>
   </div>
   <label>Комментарий<input name="commentaries" value="{{ product.commentaries or '' }}" maxlength="500"></label>
+  <label>Штрихкод старого ценника<input name="barcode" value="{{ product.barcode or '' }}" maxlength="64" autocomplete="off"
+    placeholder="например, 2004788000007"><small class="muted">Если на изделии ценник прежней программы: касса найдёт товар и по этому штрихкоду.</small></label>
   <label><input type="checkbox" name="track_stock" role="switch" {% if product.track_stock %}checked{% endif %}>
     Уведомлять, когда остаток станет низким</label>
   <label><input type="checkbox" name="is_marked" role="switch" {% if product.is_marked %}checked{% endif %}>

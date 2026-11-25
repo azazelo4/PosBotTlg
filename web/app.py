@@ -26,13 +26,14 @@ from core import config
 from services import demo_data
 from services import customers
 from services import fiscal
+from services import inventory
 from services import marking
 from services import photos
 from core import logsafe
 from core import settings_store
 from handlers.buttons import PAYMENT_TYPES, ROLE_TITLES
 from utils import receipt_text
-from core.database import (get_receipt, get_job_run, marking_required, ensure_admin, get_connection, get_stores, get_store_counts, create_store, update_store, set_user_store, init_pool, get_user_by_id, get_user_by_chat_id, search_products, get_product_by_id,
+from core.database import (own_store, get_receipt, get_job_run, marking_required, ensure_admin, get_connection, get_stores, get_store_counts, create_store, update_store, set_user_store, init_pool, get_user_by_id, get_user_by_chat_id, search_products, get_product_by_id,
                       get_product_by_article, get_products_by_articles, get_products_for_labels, add_product_to_db,
                       update_product, get_stock_report_data, get_low_stock_products, get_period_operations,
                       record_sale, get_today_sales_by_user, get_all_users, add_user_to_db, change_user_role_function,
@@ -315,6 +316,7 @@ def _product_form_data(form):
     data['inserts'] = text('inserts', 255)
     data['manufacturer'] = text('manufacturer', 255)
     data['commentaries'] = text('commentaries', 500)
+    data['barcode'] = re.sub(r"\s+", "", form.get('barcode') or "")[:64] or None
     weight = parse_float(form.get('weight') or '0')
     if weight is None or weight < 0:
         errors.append("Вес — неотрицательное число.")
@@ -968,6 +970,109 @@ async def stores_action(request: Request, user=Depends(admin_only)):
         ok, msg = update_store(store_id, form.get("name"), form.get("address"), bool(form.get("is_active")))
     flash(request, msg, "ok" if ok else "error")
     return RedirectResponse("/stores", status_code=303)
+
+
+# ---------------------------------------------------------------- инвентаризация
+
+def _inventory_or_404(inventory_id, user):
+    inv = inventory.get(inventory_id)
+    if not inv:
+        raise HTTPException(404, "Инвентаризация не найдена.")
+    if not inventory.can_use_store(user, inv['store_id']):
+        raise HTTPException(403, "Инвентаризация другого магазина.")
+    return inv
+
+
+@app.get("/inventory", response_class=HTMLResponse)
+def inventory_list(request: Request, user=Depends(current_user)):
+    stores = [st for st in get_stores() or [] if inventory.can_use_store(user, st['id'])]
+    return render(request, "inventory_list.html", user, stores=stores, rows=inventory.recent(own_store(user)) or [],
+                  default_store=user.get('store_id'))
+
+
+@app.post("/inventory")
+def inventory_start(request: Request, store_id: str = Form(""), csrf: str = Form(""), user=Depends(current_user)):
+    check_csrf(request, csrf)
+    store = parse_int(store_id)
+    if not store or not inventory.can_use_store(user, store):
+        flash(request, "Выберите магазин.", "error")
+        return RedirectResponse("/inventory", status_code=303)
+    ok, result = inventory.start(store, user['id'])
+    if not ok:
+        flash(request, result, "error")
+        return RedirectResponse("/inventory", status_code=303)
+    return RedirectResponse(f"/inventory/{result}", status_code=303)
+
+
+@app.get("/inventory/{inventory_id}", response_class=HTMLResponse)
+def inventory_page(request: Request, inventory_id: int, user=Depends(current_user)):
+    inv = _inventory_or_404(inventory_id, user)
+    return render(request, "inventory.html", user, inv=inv, scans=inventory.scans(inventory_id) or [])
+
+
+@app.get("/inventory/{inventory_id}/summary", response_class=HTMLResponse)
+def inventory_summary(request: Request, inventory_id: int, user=Depends(current_user)):
+    inv = _inventory_or_404(inventory_id, user)
+    summary = inventory.summary(inventory_id)
+    if summary is None:
+        raise HTTPException(500, "Ошибка базы данных.")
+    return render(request, "inventory_summary.html", user, inv=inv, s=summary, limit=inventory.LIST_LIMIT)
+
+
+async def _json_object(request):
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
+    if not isinstance(body, dict):
+        raise HTTPException(400, "Неверный запрос.")
+    return body
+
+
+@app.post("/api/inventory/{inventory_id}/scan")
+async def inventory_scan(request: Request, inventory_id: int, user=Depends(current_user)):
+    check_csrf(request, request.headers.get("x-csrf", ""))
+    _inventory_or_404(inventory_id, user)
+    body = await _json_object(request)
+    ok, result = inventory.scan(inventory_id, str(body.get("code") or ""), user['id'])
+    if not ok:
+        raise HTTPException(400, result)
+    return result
+
+
+@app.post("/api/inventory/{inventory_id}/unscan")
+async def inventory_unscan(request: Request, inventory_id: int, user=Depends(current_user)):
+    check_csrf(request, request.headers.get("x-csrf", ""))
+    _inventory_or_404(inventory_id, user)
+    body = await _json_object(request)
+    ok, result = inventory.unscan(inventory_id, parse_int(str(body.get("scan_id") or "")) or 0)
+    if not ok:
+        raise HTTPException(400, result)
+    return result
+
+
+@app.post("/inventory/{inventory_id}/apply")
+def inventory_apply(request: Request, inventory_id: int, csrf: str = Form(""), zero_missing: str = Form(""),
+                    user=Depends(current_user)):
+    check_csrf(request, csrf)
+    _inventory_or_404(inventory_id, user)
+    ok, result = inventory.apply(inventory_id, user['id'], zero_missing=bool(zero_missing))
+    if ok:
+        flash(request, f"Инвентаризация применена: в наличии {result['found']} изделий"
+                       + (f", из них перенесено из других магазинов {result['moved']}" if result['moved'] else "")
+                       + (f"; остаток обнулён у {result['zeroed']} ненайденных" if result['zeroed'] else "") + ".")
+    else:
+        flash(request, result, "error")
+    return RedirectResponse(f"/inventory/{inventory_id}", status_code=303)
+
+
+@app.post("/inventory/{inventory_id}/cancel")
+def inventory_cancel(request: Request, inventory_id: int, csrf: str = Form(""), user=Depends(current_user)):
+    check_csrf(request, csrf)
+    _inventory_or_404(inventory_id, user)
+    ok, result = inventory.cancel(inventory_id, user['id'])
+    flash(request, "Инвентаризация отменена, остатки не менялись." if ok else result, "ok" if ok else "error")
+    return RedirectResponse("/inventory", status_code=303)
 
 
 # ---------------------------------------------------------------- внесение денег в кассу

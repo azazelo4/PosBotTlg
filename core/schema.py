@@ -88,8 +88,10 @@ TABLES = {
           `track_stock` tinyint(1) NOT NULL DEFAULT 1,
           `cost_price` decimal(12,0) DEFAULT NULL,
           `is_marked` tinyint(1) NOT NULL DEFAULT 0,
+          `barcode` varchar(64) DEFAULT NULL,
           PRIMARY KEY (`id`),
           KEY `idx_products_article` (`article_number`),
+          KEY `idx_products_barcode` (`barcode`),
           KEY `idx_products_store` (`store_id`)
         ) {CHARSET}""",
     "receipts": f"""
@@ -313,6 +315,32 @@ TABLES = {
           KEY `idx_withdrawals_date` (`withdrawal_date`),
           CONSTRAINT `cash_withdrawals_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
         ) {CHARSET}""",
+    # Инвентаризация: в магазине сканируют всё, что лежит на витрине и в сейфе; итог задаёт остатки и магазин
+    "inventories": f"""
+        CREATE TABLE IF NOT EXISTS `inventories` (
+          `id` int NOT NULL AUTO_INCREMENT,
+          `store_id` int NOT NULL,
+          `user_id` int NOT NULL,
+          `status` enum('open','applied','cancelled') NOT NULL DEFAULT 'open',
+          `started_at` datetime NOT NULL,
+          `finished_at` datetime DEFAULT NULL,
+          `finished_by` int DEFAULT NULL,
+          `result` text DEFAULT NULL,
+          PRIMARY KEY (`id`),
+          KEY `idx_inventories_store` (`store_id`, `status`)
+        ) {CHARSET}""",
+    "inventory_scans": f"""
+        CREATE TABLE IF NOT EXISTS `inventory_scans` (
+          `id` int NOT NULL AUTO_INCREMENT,
+          `inventory_id` int NOT NULL,
+          `product_id` int DEFAULT NULL,
+          `code` varchar(128) NOT NULL,
+          `user_id` int NOT NULL,
+          `scanned_at` datetime NOT NULL,
+          PRIMARY KEY (`id`),
+          UNIQUE KEY `uq_inventory_product` (`inventory_id`, `product_id`),
+          KEY `idx_inventory_scans` (`inventory_id`, `scanned_at`)
+        ) {CHARSET}""",
     # Внесение наличных в кассу (размен на начало дня, возврат из банка) — обратная операция к инкассации
     "cash_deposits": f"""
         CREATE TABLE IF NOT EXISTS `cash_deposits` (
@@ -355,6 +383,8 @@ COLUMNS = [
     ("products", "cost_price", "decimal(12,0) DEFAULT NULL"),
     # маркировка: поштучные коды DataMatrix
     ("products", "is_marked", "tinyint(1) NOT NULL DEFAULT 0"),
+    # штрихкод с ценника прежней программы (EAN и т. п.) — касса находит товар и по нему
+    ("products", "barcode", "varchar(64) DEFAULT NULL"),
     ("sales", "mark_code_id", "int DEFAULT NULL"),
     ("trade_ins", "new_mark_code_id", "int DEFAULT NULL"),
     # фискализация: заводской номер кассы Webkassa (ЗНК) у магазина
@@ -384,6 +414,7 @@ INDEXES = [
     ("users", "idx_users_chat", "(`chat_id`)"),
     ("sales", "idx_sales_date", "(`sale_date`)"),
     ("products", "idx_products_article", "(`article_number`)"),
+    ("products", "idx_products_barcode", "(`barcode`)"),
     ("sales", "idx_sales_receipt", "(`receipt_id`)"),
     ("receipts", "idx_receipts_customer", "(`customer_id`)"),
 ]

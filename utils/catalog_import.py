@@ -15,7 +15,7 @@ from decimal import Decimal
 import openpyxl
 
 from core import config
-from core.database import get_products_by_articles, import_products, get_stores
+from core.database import get_products_by_articles, import_products, get_stores, products_by_barcodes
 from core.schema import PRODUCT_TYPES
 from utils.common import parse_money, parse_float, parse_date
 
@@ -40,13 +40,14 @@ HEADERS = {
     'commentaries': ["комментарий", "примечание", "описание"],
     'arrival_date': ["дата поступления", "дата прихода", "поступление", "дата"],
     'photo': ["фото", "фотография", "фотографии", "изображение", "картинка", "photo", "image", "файл фото"],
+    'barcode': ["штрихкод", "штрих код", "основной штрих код", "штрихкод товара", "barcode", "ean", "ean13"],
 }
 FIELD_TITLES = {
     'article_number': "артикул", 'model': "название", 'product_type': "тип", 'metal_type': "металл",
     'fineness': "проба", 'weight': "вес", 'size': "размер", 'inserts': "вставки", 'price': "цена",
     'min_price': "мин. цена", 'price_per_gram': "цена за грамм", 'cost_price': "себестоимость", 'quantity': "остаток", 'Store': "магазин",
     'manufacturer': "производитель", 'commentaries': "комментарий", 'arrival_date': "дата поступления",
-    'photo': "фото",
+    'photo': "фото", 'barcode': "штрихкод",
 }
 
 TYPE_SYNONYMS = {
@@ -181,6 +182,16 @@ def _text(value, limit):
         value = int(value)
     s = str(value).strip()
     return s[:limit] if s else None
+
+
+def _barcode(value):
+    """Штрихкод из ячейки: Excel хранит 2004788000007 числом (иногда 2.004788E+12) — без «.0» и пробелов."""
+    if value in (None, ''):
+        return None
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    text = re.sub(r"\s+", "", str(value))
+    return text[:64] or None
 
 
 def _money_value(value):
@@ -326,9 +337,10 @@ def build_plan(data: bytes, filename: str, default_store=None, archive=None) -> 
             'cost_price': _money_value(row.get('cost_price')),
             'quantity': quantity, 'store_id': store, '_store_name': store_names.get(store),
             'manufacturer': _text(row.get('manufacturer'), 255), 'commentaries': _text(row.get('commentaries'), 500),
-            'arrival_date': arrival,
+            'arrival_date': arrival, 'barcode': _barcode(row.get('barcode')),
             '_weight_given': weight is not None,
         })
+    _dedupe_barcodes(plan)
     existing = set(existing_products)
     articles = [r['article_number'] for r in plan.rows]
     plan.existing = sum(1 for a in articles if a in existing)
@@ -348,6 +360,44 @@ def build_plan(data: bytes, filename: str, default_store=None, archive=None) -> 
     if plan.rows and not any(r['_weight_given'] for r in plan.rows):
         plan.warnings.append("В файле нет веса: у новых товаров вес будет 0, на ценнике он не печатается.")
     return plan
+
+
+def _dedupe_barcodes(plan):
+    """Один штрихкод — один товар: повтор в файле, штрихкод, занятый другим товаром в базе, или совпадающий
+    с чужим артикулом не загружается (товар загрузится без него) — предупреждение в предпросмотре."""
+    first, dropped = {}, []
+    file_articles = {r['article_number'] for r in plan.rows}
+    for r in plan.rows:
+        code = r.get('barcode')
+        if not code:
+            continue
+        if code in file_articles and code != r['article_number']:
+            dropped.append(f"{code} ({r['article_number']}, это артикул другого товара)")
+            r['barcode'] = None
+            r['_given'].discard('barcode')
+        elif code in first:
+            dropped.append(f"{code} ({r['article_number']}, уже у {first[code]})")
+            r['barcode'] = None
+            r['_given'].discard('barcode')
+        else:
+            first[code] = r['article_number']
+    codes = list(first)
+    taken = {}
+    for i in range(0, len(codes), 500):
+        for p in products_by_barcodes(codes[i:i + 500]) or []:
+            if p['barcode'] in first:
+                taken[p['barcode']] = p['article_number']
+            if p['article_number'] in first:
+                taken[p['article_number']] = p['article_number']
+    for r in plan.rows:
+        owner = taken.get(r.get('barcode'))
+        if owner and owner != r['article_number']:
+            dropped.append(f"{r['barcode']} ({r['article_number']}, в базе у {owner})")
+            r['barcode'] = None
+            r['_given'].discard('barcode')
+    if dropped:
+        plan.warnings.append(f"Штрихкод повторяется — товары загрузятся без него ({len(dropped)}): "
+                             + "; ".join(dropped[:5]) + ("…" if len(dropped) > 5 else ""))
 
 
 def apply_plan(plan: ImportPlan, update_existing=True):

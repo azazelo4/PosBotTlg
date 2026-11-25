@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Итог инвентаризации №{{ inv.id }}{% endblock %}
+{% block content %}
+<p><a href="/inventory/{{ inv.id }}">← {{ 'К сканированию' if inv.status == 'open' else 'Инвентаризация №' ~ inv.id }}</a></p>
+<h2>Итог инвентаризации №{{ inv.id }} · {{ inv.store }}</h2>
+{% macro line(r) %}{{ r.model or '' }} <span class="muted">{{ r.article_number }}{% if r.weight %} · {{ '%g' % r.weight }} г{% endif %}{% if r.size %} · р. {{ r.size }}{% endif %}</span>{% endmacro %}
+<div class="grid">
+  <article><div class="muted">Найдено изделий</div><div class="stat">{{ s.found }}</div>
+    <small class="muted">{{ s.restocked }} из них сейчас с остатком 0 — получат 1</small></article>
+  <article><div class="muted">Из других магазинов</div><div class="stat">{{ s.moved|length }}</div>
+    <small class="muted">будут перенесены в «{{ inv.store }}»</small></article>
+  <article><div class="muted">Не найдено</div><div class="stat">{{ s.missing|length }}</div>
+    <small class="muted">числятся в «{{ inv.store }}» с остатком, но не отсканированы</small></article>
+  <article><div class="muted">Неизвестные коды</div><div class="stat">{{ s.unknown|length }}</div>
+    <small class="muted">товара с таким кодом нет в базе</small></article>
+</div>
+
+{% if inv.status == 'open' %}
+<article>
+  <form method="post" action="/inventory/{{ inv.id }}/apply"
+        data-confirm="Применить инвентаризацию? Остатки магазина «{{ inv.store }}» изменятся." onsubmit="return confirm(this.dataset.confirm)">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label><input type="checkbox" name="zero_missing" checked> Обнулить остаток у ненайденных ({{ s.missing|length }})</label>
+    <button type="submit">Применить</button>
+  </form>
+  <small class="muted">Найденные изделия получат остаток 1 и магазин «{{ inv.store }}». Изделие, проданное уже после скана,
+    остаток не получит. Коды маркировки и цены не меняются.</small>
+</article>
+{% endif %}
+
+{% if s.sold_after %}
+<h4>Проданы после скана ({{ s.sold_after|length }}) — остаток не получат</h4>
+<ul>{% for r in s.sold_after[:limit] %}<li>{{ line(r) }}</li>{% endfor %}</ul>
+{% endif %}
+
+{% if s.moved %}
+<h4>Из других магазинов ({{ s.moved|length }})</h4>
+<div class="table-wrap"><table><tbody>{% for r in s.moved[:limit] %}
+  <tr><td>{{ line(r) }}</td><td class="muted">сейчас: {{ r.store or 'без магазина' }}</td></tr>{% endfor %}</tbody></table></div>
+{% endif %}
+
+{% if s.unknown %}
+<h4>Неизвестные коды ({{ s.unknown|length }})</h4>
+<p class="muted">Такого кода нет ни у одного товара: изделие не загружено в каталог или у товара не указан штрихкод
+  старого ценника. Найдите изделие, добавьте его (или впишите штрихкод в карточку товара) и отсканируйте ещё раз.</p>
+<div class="table-wrap"><table><tbody>{% for u in s.unknown[:limit] %}
+  <tr><td><code>{{ u.code }}</code></td><td class="muted">{{ u.n }} раз, последний {{ u.last.strftime('%H:%M') }}</td></tr>{% endfor %}</tbody></table></div>
+{% endif %}
+
+{% if s.missing %}
+<h4>Не найдено ({{ s.missing|length }}{% if s.missing|length > limit %}, показаны первые {{ limit }}{% endif %})</h4>
+<div class="table-wrap"><table><tbody>{% for r in s.missing[:limit] %}
+  <tr><td>{{ line(r) }}</td><td class="num">{{ r.quantity }} шт.</td></tr>{% endfor %}</tbody></table></div>
+{% endif %}
+{% endblock %}
