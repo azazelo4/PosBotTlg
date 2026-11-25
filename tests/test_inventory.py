@@ -246,3 +246,41 @@ def test_inventory_marks_in_admin(tg):
     db_query("UPDATE users SET store_id=1 WHERE chat_id=%s", (MANAGER,))
     r = manager.post(f"/products/{_pid('A100')}/inventory-resolved", data={"csrf": csrf})
     assert "Отмечено: уточнено" in r.text and "уточнено после инвентаризации" in r.text
+
+
+def test_photo_during_inventory(tg):
+    from test_photos import _img
+    manager = _web(tg, MANAGER)
+    ok, inv = inventory.start(1, _uid('manager'))
+    csrf = _csrf(manager, f"/inventory/{inv}")
+    h = {"X-CSRF": csrf}
+    d = manager.post(f"/api/inventory/{inv}/scan", json={"code": "A100"}, headers=h).json()
+    assert d["item"]["id"] == _pid("A100") and d["item"]["photos"] == 0
+    r = manager.post(f"/api/inventory/{inv}/photo", data={"product_id": _pid("A100")},
+                     files={"photo": ("p.jpg", _img(), "image/jpeg")}, headers=h)
+    assert r.status_code == 200 and r.json()["photos"] == 1
+    assert "📷 1" in manager.get(f"/inventory/{inv}").text
+    # не отсканированное в этой инвентаризации — нельзя; без CSRF — нельзя
+    r = manager.post(f"/api/inventory/{inv}/photo", data={"product_id": _pid("A300")},
+                     files={"photo": ("p.jpg", _img(), "image/jpeg")}, headers=h)
+    assert r.status_code == 400 and "отсканированному" in r.json()["error"]
+    assert manager.post(f"/api/inventory/{inv}/photo", data={"product_id": _pid("A100")},
+                        files={"photo": ("p.jpg", _img(), "image/jpeg")}).status_code == 400
+    # продавец со страницы /scan (Telegram)
+    login(tg, CASHIER)
+    client = TestClient(app)
+    th = {"X-Telegram-Init-Data": init_data(CASHIER)}
+    assert client.post(f"/api/scan/{inv}", json={"code": "A300"}, headers=th).json()["item"]["photos"] == 0
+    r = client.post(f"/api/scan/{inv}/photo", data={"product_id": _pid("A300")},
+                    files={"photo": ("p.jpg", _img(), "image/jpeg")}, headers=th)
+    assert r.status_code == 200 and r.json()["photos"] == 1
+    mine = client.get("/api/scan", headers=th).json()["inventories"][0]["mine"]
+    assert mine[0]["product_id"] == _pid("A300") and mine[0]["photos"] == 1
+    r = client.post(f"/api/scan/{inv}/photo", data={"product_id": _pid("A300")},
+                    files={"photo": ("p.txt", b"not an image", "text/plain")}, headers=th)
+    assert r.status_code == 400
+    # после применения — нельзя
+    inventory.apply(inv, _uid('manager'))
+    r = manager.post(f"/api/inventory/{inv}/photo", data={"product_id": _pid("A100")},
+                     files={"photo": ("p.jpg", _img(), "image/jpeg")}, headers=h)
+    assert r.status_code in (400, 404)

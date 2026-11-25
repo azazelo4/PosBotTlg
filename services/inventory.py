@@ -85,7 +85,8 @@ def _item(product):
     details = " · ".join(str(x) for x in (
         f"{product['weight']:g} г" if product.get('weight') else None,
         f"р. {product['size']}" if product.get('size') else None) if x)
-    return {"article": product['article_number'], "model": product.get('model') or product.get('product_type') or '',
+    return {"id": product['id'], "article": product['article_number'],
+            "model": product.get('model') or product.get('product_type') or '',
             "details": details, "store": product.get('Store'), "store_id": product.get('store_id')}
 
 
@@ -111,6 +112,8 @@ def scan(cursor, inventory_id, raw_code, user_id):
                               VALUES (%s, %s, %s, %s, %s)""", (inventory_id, product['id'], code, user_id, moment))
             scan_id = cursor.lastrowid
         item = _item(product)
+        cursor.execute("SELECT COUNT(*) AS n FROM product_photos WHERE product_id = %s", (product['id'],))
+        item['photos'] = cursor.fetchone()['n']
         other = bool(product.get('store_id')) and product['store_id'] != inv['store_id']
     else:
         status, other = 'unknown', False
@@ -139,6 +142,15 @@ def unscan(cursor, inventory_id, scan_id, user_id=None):
                    "FROM inventory_scans WHERE inventory_id = %s", (inventory_id,))
     counts = cursor.fetchone()
     return True, {"removed": removed, "found": int(counts['found'] or 0), "unknown": int(counts['unknown'] or 0)}
+
+
+@with_connection
+def photo_allowed(cursor, inventory_id, product_id):
+    """Фото во время инвентаризации — только к изделию, отсканированному в этой (открытой) инвентаризации."""
+    cursor.execute("""SELECT 1 FROM inventory_scans s JOIN inventories i ON i.id = s.inventory_id
+                      WHERE s.inventory_id = %s AND s.product_id = %s AND i.status = 'open' LIMIT 1""",
+                   (inventory_id, product_id))
+    return cursor.fetchone() is not None
 
 
 @with_connection
@@ -179,7 +191,8 @@ def mark_notified(cursor, inventory_id):
 @with_connection
 def scans(cursor, inventory_id, limit=30, user_id=None):
     cursor.execute("""SELECT s.id, s.code, s.scanned_at, s.product_id, p.article_number, p.model, p.weight, p.size,
-                             p.store_id, st.name AS store, u.name AS user_name
+                             p.store_id, st.name AS store, u.name AS user_name,
+                             (SELECT COUNT(*) FROM product_photos ph WHERE ph.product_id = s.product_id) AS photos
                       FROM inventory_scans s LEFT JOIN products p ON p.id = s.product_id
                       LEFT JOIN stores st ON st.id = p.store_id LEFT JOIN users u ON u.id = s.user_id
                       WHERE s.inventory_id = %s AND (%s IS NULL OR s.user_id = %s)

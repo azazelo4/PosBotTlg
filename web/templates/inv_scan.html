@@ -39,6 +39,9 @@
     .scan span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
     .scan small { color: var(--hint); margin-right: 6px; }
     .scan button { border: 0; background: transparent; color: var(--danger); cursor: pointer; padding: 4px 8px; }
+    .scan button.ph { color: var(--link); }
+    #photo-bar { display: flex; gap: 8px; align-items: center; margin: -2px 0 10px; }
+    #photo-bar .btn { width: auto; padding: 10px 14px; }
     .pick { margin-top: 8px; }
   </style>
 </head>
@@ -73,6 +76,9 @@
     <button class="btn" type="submit">OK</button>
   </form>
   <div class="msg" id="msg">Готово к сканированию.</div>
+  <div id="photo-bar" class="hidden"><button class="btn secondary" id="photo-btn" type="button">📷 Добавить фото</button>
+    <span class="muted" id="photo-note"></span></div>
+  <input type="file" id="photo-file" accept="image/*" capture="environment" hidden>
   <div class="card">
     <strong>Мои сканы</strong>
     <div id="list"></div>
@@ -119,8 +125,13 @@
     const div = document.createElement("div"); div.className = "scan"; div.dataset.id = s.id;
     const t = document.createElement("small"); t.textContent = s.time;
     const n = document.createElement("span"); n.textContent = s.name;
+    div.append(t, n);
+    if (s.product_id) {
+      const p = document.createElement("button"); p.type = "button"; p.className = "ph"; p.dataset.product = s.product_id;
+      p.textContent = "📷 " + (s.photos || 0); p.title = "Добавить фото"; div.append(p);
+    }
     const b = document.createElement("button"); b.type = "button"; b.textContent = "убрать"; b.className = "del";
-    div.append(t, n, b);
+    div.append(b);
     if (top) $("list").prepend(div); else $("list").append(div);
     while ($("list").children.length > 30) $("list").lastChild.remove();
   }
@@ -159,15 +170,42 @@
       const it = d.item || {}, name = [it.model, it.article, it.details].filter(Boolean).join(" · ");
       if (d.scan_id) my += 1;
       counts(d);
+      photoBar(d.status === "unknown" ? null : it);
+      const r = {id: d.scan_id, time: hhmm(), name, product_id: it.id, photos: it.photos};
       if (d.status === "unknown") { show("unknown", "❓ Неизвестный код " + it.code + " — отложите изделие для менеджера"); beep(false); row({id: d.scan_id, time: hhmm(), name: "неизвестный код " + it.code}, true); }
       else if (d.status === "again") { show("again", "Уже отсканировано: " + name); beep(true); }
-      else if (d.other_store) { show("moved", "⚠️ " + name + " — числится в «" + (it.store || "—") + "», будет в «" + STORE + "»"); beep(true); row({id: d.scan_id, time: hhmm(), name}, true); }
-      else { show("found", "✅ " + name); beep(true); row({id: d.scan_id, time: hhmm(), name}, true); }
+      else if (d.other_store) { show("moved", "⚠️ " + name + " — числится в «" + (it.store || "—") + "», будет в «" + STORE + "»"); beep(true); row(r, true); }
+      else { show("found", "✅ " + name); beep(true); row(r, true); }
     }).catch(e => { show("error", e.message); beep(false); if (e.status === 404) setTimeout(() => location.reload(), 1500); }));
   }
 
   $("form").addEventListener("submit", e => { e.preventDefault(); const v = $("code").value; $("code").value = ""; send(v); if (!inTelegram) $("code").focus(); });
+  // фото к изделию — с камеры телефона или файлом на ПК
+  let photoFor = null;
+  function photoBar(it) {
+    $("photo-bar").classList.toggle("hidden", !it);
+    if (!it) return;
+    photoFor = it.id;
+    $("photo-note").textContent = it.photos ? "фото у товара: " + it.photos : "у товара ещё нет фото";
+  }
+  function pickPhoto(id) { photoFor = id; $("photo-file").value = ""; $("photo-file").click(); }
+  $("photo-btn").onclick = () => pickPhoto(photoFor);
+  $("photo-file").addEventListener("change", () => {
+    const file = $("photo-file").files[0]; if (!file || !photoFor) return;
+    const fd = new FormData(); fd.append("product_id", photoFor); fd.append("photo", file);
+    const headers = inTelegram ? {"X-Telegram-Init-Data": init} : {"X-Kassa": "1"};
+    show("again", "Загружаю фото…");
+    fetch(`/api/scan/${ID}/photo`, {method: "POST", headers, body: fd})
+      .then(async r => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || "Ошибка " + r.status); return d; })
+      .then(d => {
+        show("found", "📷 Фото добавлено — у товара фото: " + d.photos); beep(true);
+        document.querySelectorAll(`.ph[data-product="${photoFor}"]`).forEach(b => b.textContent = "📷 " + d.photos);
+        $("photo-note").textContent = "фото у товара: " + d.photos;
+      })
+      .catch(e => { show("error", e.message); beep(false); });
+  });
   $("list").addEventListener("click", e => {
+    const ph = e.target.closest(".ph"); if (ph) return pickPhoto(Number(ph.dataset.product));
     const b = e.target.closest(".del"); if (!b) return;
     const div = b.closest(".scan");
     api(`/api/scan/${ID}/unscan`, {scan_id: Number(div.dataset.id)}).then(d => { div.remove(); my = Math.max(0, my - 1); counts(d); show("again", "Скан убран."); })
