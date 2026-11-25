@@ -101,9 +101,12 @@ def store_breakdown(ops):
     return [(name, build_summary(sub)) for (_, name), sub in parts.items()]
 
 
-def summary_text(summary, start, end, store_name=None, breakdown=None):
+def summary_text(summary, start, end, store_name=None, breakdown=None, user_name=None):
     period = start.strftime('%d.%m.%Y') if start == end else f"{start:%d.%m.%Y} — {end:%d.%m.%Y}"
-    title = f"<b>Отчёт за {period}</b>" + (f" · {h(store_name)}" if store_name else " · все магазины" if breakdown else "")
+    if user_name:
+        title = f"<b>Мои продажи за {period}</b> · {h(user_name)}"
+    else:
+        title = f"<b>Отчёт за {period}</b>" + (f" · {h(store_name)}" if store_name else " · все магазины" if breakdown else "")
     lines = [title, ""]
     lines.append(f"Продажи: {summary['sales_count']} шт. на <b>{money(summary['sales_total'])}</b>")
     if summary['receipts_count']:
@@ -126,7 +129,8 @@ def summary_text(summary, start, end, store_name=None, breakdown=None):
     for pt in PAYMENT_TYPES + sorted(set(summary['flow']) - set(PAYMENT_TYPES)):
         if pt in summary['flow'] or pt in PAYMENT_TYPES:
             lines.append(f"  • {h(pt)}: {money(summary['flow'].get(pt, D0))}")
-    lines.append(f"Наличные в кассе за период (после инкассации): <b>{money(summary['cash_balance'])}</b>")
+    lines.append(("Наличные по моим операциям" if user_name else "Наличные в кассе за период (после инкассации)")
+                 + f": <b>{money(summary['cash_balance'])}</b>")
     if breakdown:
         lines += ["", "<b>По магазинам</b>"]
         for name, sub in breakdown:
@@ -162,7 +166,7 @@ def _cell(value):
     return value
 
 
-def build_excel(ops, summary, start, end, store_name=None, breakdown=None):
+def build_excel(ops, summary, start, end, store_name=None, breakdown=None, user_name=None):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Сводка"
@@ -170,6 +174,7 @@ def build_excel(ops, summary, start, end, store_name=None, breakdown=None):
     rows = [
         ("Период", period),
         ("Магазин", store_name or "Все магазины"),
+        *([("Продавец", user_name)] if user_name else []),
         (),
         ("Продажи, шт.", summary['sales_count']),
         ("Продажи, сумма", summary['sales_total']),
@@ -246,17 +251,19 @@ def build_excel(ops, summary, start, end, store_name=None, breakdown=None):
     return buffer
 
 
-def generate_period_report(start, end, store_id=None, store_name=None):
+def generate_period_report(start, end, store_id=None, store_name=None, user_id=None, user_name=None):
     """Возвращает (текст сводки, Excel BytesIO, имя файла) или None при ошибке БД.
 
     store_id — отчёт по одному магазину; без него — по всем с разбивкой по магазинам.
+    user_id — «мои продажи»: только операции этого сотрудника (по всем магазинам, без разбивки).
     """
     start_dt, end_dt = day_bounds(start, end)
-    ops = get_period_operations(start_dt, end_dt, store_id)
+    ops = get_period_operations(start_dt, end_dt, store_id, user_id=user_id)
     if ops is None:
         return None
     summary = build_summary(ops)
-    breakdown = [] if store_id else store_breakdown(ops)
-    excel = build_excel(ops, summary, start, end, store_name=store_name, breakdown=breakdown)
-    name = f"report_{start:%Y%m%d}.xlsx" if start == end else f"report_{start:%Y%m%d}_{end:%Y%m%d}.xlsx"
-    return summary_text(summary, start, end, store_name, breakdown), excel, name
+    breakdown = [] if (store_id or user_id) else store_breakdown(ops)
+    excel = build_excel(ops, summary, start, end, store_name=store_name, breakdown=breakdown, user_name=user_name)
+    prefix = "my_sales" if user_id else "report"
+    name = f"{prefix}_{start:%Y%m%d}.xlsx" if start == end else f"{prefix}_{start:%Y%m%d}_{end:%Y%m%d}.xlsx"
+    return summary_text(summary, start, end, store_name, breakdown, user_name), excel, name

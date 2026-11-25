@@ -61,7 +61,8 @@ def create_staff_management_buttons():
 
 
 def create_cash_operations_buttons():
-    return _kb(["Продажа", "Возврат"], ["Trade-In", "Скупка"], ["Инкассация", "Отчеты"], [BTN_BACK])
+    return _kb(["Продажа", "Возврат"], ["Trade-In", "Скупка"], ["Инкассация", "Отчеты"],
+               ([BTN_PC_KASSA, BTN_BACK] if config.WEB_URL else [BTN_BACK]))
 
 
 def create_stock_management_buttons():

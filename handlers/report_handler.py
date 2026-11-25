@@ -6,7 +6,7 @@ from telebot import types
 
 from handlers.buttons import create_cancel_markup, create_choice_markup
 from handlers.common import store_names, store_id_by_name, CASH_ROLES, in_state, is_button, cash_menu, register_simple_cancel
-from core.state import bot, user_state, get_op, start_op, end_op, cancel_current_operation
+from core.state import bot, user_state, user_data, get_op, start_op, end_op, cancel_current_operation
 from utils.common import today, parse_date
 from utils.report_generator import generate_period_report
 
@@ -34,11 +34,16 @@ def period_dates(name, ref=None):
     return None
 
 
+def _is_cashier(chat_id):
+    return (user_data.get(chat_id) or {}).get('role') == 'cashier'
+
+
 def start(message):
     chat_id = message.chat.id
     cancel_current_operation(chat_id, notify=False)
     start_op(chat_id, CHOOSE)
-    bot.send_message(chat_id, "За какой период нужен отчёт?", reply_markup=create_choice_markup(PERIODS, 2))
+    question = ("Мои продажи: за какой период?" if _is_cashier(chat_id) else "За какой период нужен отчёт?")
+    bot.send_message(chat_id, question, reply_markup=create_choice_markup(PERIODS, 2))
 
 
 def on_choose(message):
@@ -83,6 +88,9 @@ def on_custom_end(message):
 
 
 def _ask_store_or_send(chat_id, start_date, end_date):
+    if _is_cashier(chat_id):                 # продавец видит свои операции по всем магазинам
+        send_report(chat_id, start_date, end_date, own=True)
+        return
     names = store_names()
     if len(names) < 2:
         send_report(chat_id, start_date, end_date)
@@ -101,11 +109,18 @@ def on_store(message):
     send_report(chat_id, *get_op(chat_id)['dates'], store_id=store_id, store_name=text if store_id else None)
 
 
-def send_report(chat_id, start_date, end_date, store_id=None, store_name=None):
+def send_report(chat_id, start_date, end_date, store_id=None, store_name=None, own=False):
     end_op(chat_id)
+    me = user_data.get(chat_id) or {}
+    own = own or _is_cashier(chat_id)           # роль могли сменить, пока выбирался магазин
+    if own and not me.get('id'):
+        cash_menu(chat_id, "❌ Не удалось определить сотрудника. Отправьте /start и попробуйте снова.")
+        return
     bot.send_chat_action(chat_id, 'upload_document')
     try:
-        report = generate_period_report(start_date, end_date, store_id, store_name)
+        report = generate_period_report(start_date, end_date, store_id, store_name,
+                                        user_id=me.get('id') if own else None,
+                                        user_name=" ".join(p for p in (me.get('name'), me.get('surename')) if p) if own else None)
     except Exception:
         logger.exception("Chat %s: ошибка формирования отчёта", chat_id)
         report = None

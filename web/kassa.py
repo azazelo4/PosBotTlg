@@ -17,6 +17,7 @@ from functools import lru_cache
 from io import StringIO
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 
 from core import config
 from handlers.buttons import PAYMENT_TYPES, ROLE_TITLES
@@ -26,12 +27,13 @@ from core.database import (get_user_by_id, get_stores, get_product_by_article, r
                       create_cash_withdrawal_record, get_period_operations, create_kassa_login, consume_kassa_login, foreign_store_error, own_store)
 from core.schema import METAL_TYPES
 from utils import mark_codes
-from utils.common import now, today, day_bounds, parse_money, parse_float, money, normalize_phone, parse_birthday
+from utils.common import (now, today, day_bounds, parse_money, parse_float, money, normalize_phone, parse_birthday,
+                          parse_date)
 from utils import receipt_text
 from utils.labels import details_line
 from services import photos
 from services import inventory
-from utils.report_generator import build_summary
+from utils.report_generator import build_summary, generate_period_report
 from core.logsafe import describe
 
 logger = logging.getLogger("posbot.kassa")
@@ -485,8 +487,8 @@ async def withdrawal(request: Request, user=Depends(kassa_user), _=Depends(same_
 
 # ---------------------------------------------------------------- итоги смены
 
-def _journal(ops):
-    """Операции дня одним списком, новые сверху."""
+def _journal(ops, with_date=False):
+    """Операции одним списком, новые сверху (with_date — время с датой, для периода)."""
     rows = []
     receipts = {}
     for s in ops['sales']:   # позиции одного чека — одной строкой
@@ -515,8 +517,61 @@ def _journal(ops):
     for d in ops.get('deposits') or []:
         rows.append((d['deposit_date'], "Внесение", d['comment'] or "", int(d['amount']), "Наличные", d['user_name']))
     rows.sort(key=lambda r: r[0], reverse=True)
-    return [{"time": r[0].strftime('%H:%M'), "kind": r[1], "what": r[2], "amount": r[3], "payment": r[4],
+    fmt = '%d.%m %H:%M' if with_date else '%H:%M'
+    return [{"time": r[0].strftime(fmt), "kind": r[1], "what": r[2], "amount": r[3], "payment": r[4],
              "user": r[5] or ""} for r in rows]
+
+
+MY_SALES_MAX_DAYS = 366
+
+
+def _my_period(start, end):
+    d = today()
+    s = parse_date(start) if start else d
+    e = parse_date(end) if end else d
+    if not s or not e:
+        raise HTTPException(400, "Не понял дату периода.")
+    if s > d:
+        raise HTTPException(400, "Начало периода — в будущем.")
+    if e < s:
+        raise HTTPException(400, "Дата окончания раньше даты начала.")
+    e = min(e, d)
+    if (e - s).days > MY_SALES_MAX_DAYS:
+        raise HTTPException(400, "Период — не больше года.")
+    return s, e
+
+
+@router.get("/my-sales")
+def my_sales(start: str = "", end: str = "", user=Depends(kassa_user)):
+    """Продажи и операции этого сотрудника за период (по всем магазинам)."""
+    s, e = _my_period(start, end)
+    ops = get_period_operations(*day_bounds(s, e), user_id=user['id'])
+    if ops is None:
+        raise HTTPException(500, "Ошибка базы данных. Попробуйте ещё раз.")
+    summary = build_summary(ops)
+    journal = _journal(ops, with_date=s != e)
+    return {
+        "start": s.isoformat(), "end": e.isoformat(),
+        "period": s.strftime('%d.%m.%Y') if s == e else f"{s:%d.%m.%Y} — {e:%d.%m.%Y}",
+        "sales_count": summary["sales_count"], "receipts_count": summary["receipts_count"],
+        "sales_total": int(summary['sales_total']), "sales_avg": int(summary['sales_avg']),
+        "returns_count": summary['returns_count'], "returns_total": int(summary['returns_total']),
+        "net_sales": int(summary['net_sales']),
+        "by_payment": {k: {"count": c, "total": int(t)} for k, (c, t) in summary['sales_by_payment'].items()},
+        "journal": journal[:500], "more": max(0, len(journal) - 500),
+    }
+
+
+@router.get("/my-sales.xlsx")
+def my_sales_excel(start: str = "", end: str = "", user=Depends(kassa_user)):
+    s, e = _my_period(start, end)
+    name = " ".join(p for p in (user.get('name'), user.get('surename')) if p)
+    report = generate_period_report(s, e, user_id=user['id'], user_name=name)
+    if report is None:
+        raise HTTPException(500, "Ошибка базы данных. Попробуйте ещё раз.")
+    _, excel, filename = report
+    return StreamingResponse(excel, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                             headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 @router.get("/shift")

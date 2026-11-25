@@ -119,9 +119,10 @@ def test_report_for_one_store(tg, unbound_staff):
     login(tg, CASHIER)
     _sell(tg, CASHIER, "A100", 150000, "Kaspi")
     _sell(tg, CASHIER, "A200", 20000)
-    tg.send(CASHIER, "Отчеты")
-    tg.send(CASHIER, "Сегодня")
-    calls = tg.send(CASHIER, "Отау Сауда")
+    login(tg, MANAGER)
+    tg.send(MANAGER, "Отчеты")
+    tg.send(MANAGER, "Сегодня")
+    calls = tg.send(MANAGER, "Отау Сауда")
     text = tg.texts(calls)
     assert "· Отау Сауда" in text and "Продажи: 1 шт. на <b>20 000 ₸</b>" in text and "По магазинам" not in text
     wb = openpyxl.load_workbook(io.BytesIO(tg.documents[-1].data))
