@@ -40,6 +40,7 @@ from core.database import (own_store, get_receipt, get_job_run, marking_required
                       deactivate_user_in_db, update_user_phone, create_cash_deposit_record, recent_cash_operations, foreign_store_error)
 from core.schema import METAL_TYPES, PRODUCT_TYPES, ensure_schema
 from utils.catalog_import import build_plan, apply_plan, attach_photos, FIELD_TITLES
+from utils import paloma_sales
 from utils.customer_import import parse_customers, birthday_text, FIELD_TITLES as CUSTOMER_FIELD_TITLES
 from utils.photo_archive import PhotoArchive, ArchiveError
 from utils import mark_codes
@@ -848,6 +849,61 @@ async def import_apply(request: Request, plan_id: str, mode: str = Form("all"), 
         _drop_plan(plan)
     flash(request, f"Импорт не выполнен, ничего не изменено: {result}", "error")
     return RedirectResponse("/import", status_code=303)
+
+
+# ---------------------------------------------------------------- импорт продаж из Паломы (utils/paloma_sales.py)
+
+_sales_plans = {}    # id -> (user_id, created, plan)
+SALES_IMPORT_MAX = 30 * 1024 * 1024
+
+
+@app.get("/sales-import", response_class=HTMLResponse)
+def sales_import_form(request: Request, user=Depends(admin_only)):
+    return render(request, "sales_import.html", user)
+
+
+@app.post("/sales-import", response_class=HTMLResponse)
+async def sales_import_preview(request: Request, user=Depends(admin_only)):
+    form = await request.form()
+    check_csrf(request, form.get("csrf"))
+    files = []
+    for upload in form.getlist("files"):
+        if hasattr(upload, "read") and upload.filename:
+            data = await upload.read(SALES_IMPORT_MAX + 1)
+            if len(data) > SALES_IMPORT_MAX:
+                return render(request, "sales_import.html", user, error=f"{upload.filename}: файл больше 30 МБ.")
+            files.append((data, upload.filename))
+    if not files:
+        return render(request, "sales_import.html", user, error="Выберите оба файла.")
+    plan = await run_in_threadpool(paloma_sales.build_plan, files)
+    cutoff = time.time() - 3600
+    for key in [k for k, v in _sales_plans.items() if v[1] < cutoff]:
+        _sales_plans.pop(key, None)
+    plan_id = None
+    if not plan.errors:
+        plan_id = secrets.token_urlsafe(12)
+        _sales_plans[plan_id] = (user['id'], time.time(), plan)
+    return render(request, "sales_import.html", user, plan=plan, plan_id=plan_id,
+                  missing=sorted(plan.missing.items(), key=lambda kv: -kv[1]['sum'])[:50])
+
+
+@app.post("/sales-import/{plan_id}")
+async def sales_import_apply(request: Request, plan_id: str, csrf: str = Form(""), user=Depends(admin_only)):
+    check_csrf(request, csrf)
+    entry = _sales_plans.pop(plan_id, None)
+    if not entry or entry[0] != user['id']:
+        flash(request, "Предпросмотр устарел, загрузите файлы ещё раз.", "error")
+        return RedirectResponse("/sales-import", status_code=303)
+    ok, result = await run_in_threadpool(paloma_sales.apply_plan, entry[2], user['id'])
+    if ok:
+        flash(request, f"Загружено из Паломы: чеков {result['receipts']}, продаж {result['sales']}, "
+                       f"возвратов {result['returns']}"
+                       + (f"; добавлено в каталог изделий — {result['products']}" if result['products'] else "")
+                       + (f"; возвратов без продажи в базе — {result['unlinked_returns']} (не загружены)"
+                          if result['unlinked_returns'] else "") + ".")
+        return RedirectResponse("/reports", status_code=303)
+    flash(request, f"Импорт не выполнен, ничего не изменено: {result}", "error")
+    return RedirectResponse("/sales-import", status_code=303)
 
 
 # ---------------------------------------------------------------- ценники

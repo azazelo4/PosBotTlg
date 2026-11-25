@@ -555,7 +555,7 @@ def get_today_sales_by_user(cursor, user_id, start_dt, end_dt):
     cursor.execute("""
         SELECT s.id, s.sale_date, s.sold_price, s.payment_type, p.article_number, p.model
         FROM sales s JOIN products p ON p.id = s.product_id
-        WHERE s.user_id = %s AND s.sale_date >= %s AND s.sale_date < %s
+        WHERE s.user_id = %s AND s.sale_date >= %s AND s.sale_date < %s AND s.source IS NULL
         ORDER BY s.sale_date DESC""", (user_id, start_dt, end_dt))
     return cursor.fetchall()
 
@@ -1075,8 +1075,9 @@ def recent_cash_operations(cursor, limit=30, store_id=None):
 # ---------------------------------------------------------------- отчёты
 
 @with_connection
-def get_period_operations(cursor, start_dt, end_dt, store_id=None):
+def get_period_operations(cursor, start_dt, end_dt, store_id=None, include_imported=True):
     """Все операции за полуинтервал [start_dt, end_dt) для отчёта; store_id — фильтр по магазину.
+    include_imported=False — без продаж и возвратов, загруженных из прежней программы (итоги смены, касса).
 
     Магазин операции: продажа — магазин товара на момент продажи, возврат — магазин продажи,
     trade-in — магазин нового товара, скупка и инкассация — магазин сотрудника (или выбранный).
@@ -1085,6 +1086,8 @@ def get_period_operations(cursor, start_dt, end_dt, store_id=None):
 
     def run(sql, alias):
         flt = f" AND {alias}.store_id = %s" if store_id else ""
+        if not include_imported and alias in ("s", "r"):
+            flt += f" AND {alias}.source IS NULL"
         cursor.execute(sql.replace("{STORE_FILTER}", flt), (start_dt, end_dt) + ((store_id,) if store_id else ()))
         return cursor.fetchall()
 
