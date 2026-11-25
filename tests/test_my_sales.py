@@ -44,6 +44,7 @@ def test_kassa_my_sales(tg, client):  # noqa: F811
     assert s["sales_count"] == 1 and s["sales_total"] == 150000 and len(s["journal"]) == 1
     assert s["by_payment"] == {"Наличные": {"count": 1, "total": 150000}}
     assert client.get("/kassa/api/my-sales?start=2026-02-01&end=2026-01-01").status_code == 400
+    assert client.get("/kassa/api/my-sales?start=abc").status_code == 400
     x = client.get(f"/kassa/api/my-sales.xlsx?start={d}&end={d}")
     assert x.status_code == 200 and x.content[:2] == b"PK"
     assert "Мои продажи" in client.get("/kassa").text

@@ -522,17 +522,20 @@ def _journal(ops, with_date=False):
              "user": r[5] or ""} for r in rows]
 
 
-MY_SALES_MAX_DAYS = 400
+MY_SALES_MAX_DAYS = 366
 
 
 def _my_period(start, end):
-    s, e = parse_date(start or ""), parse_date(end or "")
     d = today()
-    s, e = s or d, e or d
+    s = parse_date(start) if start else d
+    e = parse_date(end) if end else d
+    if not s or not e:
+        raise HTTPException(400, "Не понял дату периода.")
+    if s > d:
+        raise HTTPException(400, "Начало периода — в будущем.")
     if e < s:
         raise HTTPException(400, "Дата окончания раньше даты начала.")
-    if e > d:
-        e = d
+    e = min(e, d)
     if (e - s).days > MY_SALES_MAX_DAYS:
         raise HTTPException(400, "Период — не больше года.")
     return s, e

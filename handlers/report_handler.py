@@ -111,8 +111,12 @@ def on_store(message):
 
 def send_report(chat_id, start_date, end_date, store_id=None, store_name=None, own=False):
     end_op(chat_id)
-    bot.send_chat_action(chat_id, 'upload_document')
     me = user_data.get(chat_id) or {}
+    own = own or _is_cashier(chat_id)           # роль могли сменить, пока выбирался магазин
+    if own and not me.get('id'):
+        cash_menu(chat_id, "❌ Не удалось определить сотрудника. Отправьте /start и попробуйте снова.")
+        return
+    bot.send_chat_action(chat_id, 'upload_document')
     try:
         report = generate_period_report(start_date, end_date, store_id, store_name,
                                         user_id=me.get('id') if own else None,

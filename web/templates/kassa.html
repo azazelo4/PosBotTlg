@@ -908,6 +908,8 @@ VIEWS.mysales = root => {
         '<tr><td colspan="5" class="muted">Операций за период нет</td></tr>'}</table>
       ${s.more ? `<p class="muted">…и ещё ${s.more} — полный список в Excel.</p>` : ""}`;
   }
+  const link = () => { $("#ms-xlsx", root).href = `/kassa/api/my-sales.xlsx?start=${$("#ms-start", root).value}&end=${$("#ms-end", root).value}`; };
+  $("#ms-start", root).onchange = $("#ms-end", root).onchange = link;
   $("#ms-go", root).onclick = load;
   load();
 };
