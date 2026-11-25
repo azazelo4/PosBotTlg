@@ -240,10 +240,12 @@ def summary(cursor, inventory_id):
     store = inv['store_id']
     cursor.execute(_FOUND_SQL, (inventory_id,))
     found = cursor.fetchall()
-    groups = {'checked': [], 'added': [], 'moved': []}
+    groups = {'checked': [], 'added': [], 'moved': [], 'reduced': []}
     for r in found:
         r['mark'], r['note'], r['new_qty'] = _classify(r, store)
-        groups[r['mark']].append(r)
+        # «проверено», но остаток меняется (по базе было 3 → станет 1, продано после скана → 0) — показать отдельно
+        key = 'reduced' if r['mark'] == 'checked' and r['new_qty'] != (r['quantity'] or 0) else r['mark']
+        groups[key].append(r)
     cursor.execute("""SELECT code, COUNT(*) AS n, MAX(scanned_at) AS last FROM inventory_scans
                       WHERE inventory_id = %s AND product_id IS NULL GROUP BY code ORDER BY last DESC""", (inventory_id,))
     unknown = cursor.fetchall()
@@ -254,6 +256,7 @@ def summary(cursor, inventory_id):
     return {
         "found": len(found),
         "checked": groups['checked'],
+        "reduced": groups['reduced'],
         "added": groups['added'],
         "moved": groups['moved'],
         "sold_after": [r for r in found if r['sold_after']],

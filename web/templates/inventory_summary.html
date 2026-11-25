@@ -19,8 +19,8 @@
     <small class="muted">по базе 0 — станет 1, метка «выявлено»</small></article>
   <article><div class="muted">🔁 Будет перенесено</div><div class="stat">{{ s.moved|length }}</div>
     <small class="muted">из других магазинов в «{{ inv.store }}»</small></article>
-  <article><div class="muted">✔️ Есть в базе</div><div class="stat">{{ s.checked|length }}</div>
-    <small class="muted">без изменений, метка «проверено»</small></article>
+  <article><div class="muted">✔️ Есть в базе</div><div class="stat">{{ s.checked|length + s.reduced|length }}</div>
+    <small class="muted">метка «проверено»{% if s.reduced %}; у {{ s.reduced|length }} остаток уменьшится{% else %}, без изменений{% endif %}</small></article>
   <article><div class="muted">❓ Нет в базе</div><div class="stat">{{ s.unknown|length }}</div>
     <small class="muted">добавьте товар и отсканируйте ещё раз</small></article>
 </div>
@@ -47,6 +47,12 @@
     <td>{% if inv.status == 'open' %}<a role="button" class="secondary outline" style="padding:.2rem .7rem;margin:0"
       href="/products/new?{{ u.suggest | urlencode }}&store_id={{ inv.store_id }}&quantity=0" target="_blank">+ Добавить товар</a>{% endif %}</td></tr>{% endfor %}</tbody></table></div>
 {{ more(s.unknown) }}
+{% endif %}
+
+{% if s.reduced %}
+<h4>🔽 Есть в базе, остаток уменьшится ({{ s.reduced|length }})</h4>
+<div class="table-wrap"><table><tbody>{% for r in s.reduced[:limit] %}
+  <tr><td>{{ line(r) }}</td><td class="muted">{{ r.note }}</td><td class="num">{{ r.quantity }} → <b>{{ r.new_qty }}</b></td></tr>{% endfor %}</tbody></table></div>{{ more(s.reduced) }}
 {% endif %}
 
 {% if s.added %}
@@ -77,7 +83,7 @@
 {% if inv.status == 'open' %}
 <article>
   <form method="post" action="/inventory/{{ inv.id }}/apply"
-        data-confirm="Применить инвентаризацию магазина «{{ inv.store }}»?&#10;&#10;Снизить до 0: {{ s.missing|length }}&#10;Добавить: {{ s.added|length }}&#10;Перенести: {{ s.moved|length }}&#10;Без изменений: {{ s.checked|length }}"
+        data-confirm="Применить инвентаризацию магазина «{{ inv.store }}»?&#10;&#10;Снизить до 0: {{ s.missing|length }}&#10;Добавить: {{ s.added|length }}&#10;Перенести: {{ s.moved|length }}{% if s.reduced %}&#10;Уменьшить остаток: {{ s.reduced|length }}{% endif %}&#10;Без изменений: {{ s.checked|length }}"
         onsubmit="return confirm(this.dataset.confirm)">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <button type="submit">Применить</button>

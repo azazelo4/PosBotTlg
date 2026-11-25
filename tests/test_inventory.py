@@ -123,6 +123,7 @@ def test_inventory_sold_after_scan(tg):
     inventory.scan(inv, "A100", admin)
     assert record_receipt([(_pid("A100"), 150000)], admin, "Наличные")[0]       # продали уже после скана
     assert [r['article_number'] for r in inventory.summary(inv)['sold_after']] == ["A100"]
+    assert [(r['article_number'], r['new_qty']) for r in inventory.summary(inv)['reduced']] == [("A100", 0)]   # 2 → 0
     ok, result = inventory.apply(inv, admin)
     assert ok and result['zeroed'] == 0 and result['checked'] == 1
     row = db_query("SELECT quantity, inv_mark, inv_mark_note FROM products WHERE article_number='A100'")[0]
@@ -240,5 +241,8 @@ def test_inventory_marks_in_admin(tg):
     assert "A300" in manager.get("/products", params={"mark": "added"}).text
     card = manager.get(f"/products/{_pid('A100')}").text
     assert "не найдено — остаток 0, требует уточнения" in card and "Уточнено" in card
+    db_query("UPDATE users SET store_id=2 WHERE chat_id=%s", (MANAGER,))       # менеджер другого магазина
+    assert manager.post(f"/products/{_pid('A100')}/inventory-resolved", data={"csrf": csrf}).status_code == 403
+    db_query("UPDATE users SET store_id=1 WHERE chat_id=%s", (MANAGER,))
     r = manager.post(f"/products/{_pid('A100')}/inventory-resolved", data={"csrf": csrf})
     assert "Отмечено: уточнено" in r.text and "уточнено после инвентаризации" in r.text

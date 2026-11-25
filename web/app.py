@@ -435,6 +435,11 @@ async def product_save(request: Request, product_id: int, user=Depends(current_u
 @app.post("/products/{product_id}/inventory-resolved")
 def product_inventory_resolved(request: Request, product_id: int, csrf: str = Form(""), user=Depends(current_user)):
     check_csrf(request, csrf)
+    product = get_product_by_id(product_id)
+    if not product:
+        raise HTTPException(404, "Товар не найден.")
+    if not inventory.can_use_store(user, product.get('store_id')):
+        raise HTTPException(403, "Товар другого магазина.")
     ok, msg = inventory.resolve(product_id, user['name'])
     flash(request, msg, "ok" if ok else "error")
     return RedirectResponse(f"/products/{product_id}", status_code=303)
