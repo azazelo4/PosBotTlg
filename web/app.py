@@ -1135,6 +1135,29 @@ async def inventory_unscan(request: Request, inventory_id: int, user=Depends(cur
     return result
 
 
+async def _inventory_photo(request, inventory_id, user_id):
+    """Фото к изделию прямо во время инвентаризации (multipart: product_id, photo)."""
+    form = await request.form()
+    product_id = parse_int(str(form.get("product_id") or "")) or 0
+    if not inventory.photo_allowed(inventory_id, product_id):
+        raise HTTPException(400, "Фото — только к изделию, отсканированному в этой инвентаризации.")
+    upload = form.get("photo")
+    if not hasattr(upload, "read"):
+        raise HTTPException(400, "Выберите фото.")
+    data = await upload.read(photos.MAX_BYTES + 1)
+    ok, result = await run_in_threadpool(photos.add, product_id, data, user_id)
+    if not ok:
+        raise HTTPException(400, result)
+    return {"photo_id": result, "photos": len(photos.for_product(product_id) or [])}
+
+
+@app.post("/api/inventory/{inventory_id}/photo")
+async def inventory_photo(request: Request, inventory_id: int, user=Depends(current_user)):
+    check_csrf(request, request.headers.get("x-csrf", ""))
+    _inventory_or_404(inventory_id, user)
+    return await _inventory_photo(request, inventory_id, user['id'])
+
+
 @app.post("/inventory/{inventory_id}/apply")
 def inventory_apply(request: Request, inventory_id: int, csrf: str = Form(""), user=Depends(current_user)):
     check_csrf(request, csrf)
@@ -1349,7 +1372,8 @@ def _mine(inventory_id, user_id):
     out = []
     for s in inventory.scans(inventory_id, 30, user_id) or []:
         name = " · ".join(str(x) for x in (s.get('model'), s.get('article_number')) if x) or f"неизвестный код {s['code']}"
-        out.append({"id": s['id'], "time": s['scanned_at'].strftime('%H:%M'), "name": name})
+        out.append({"id": s['id'], "time": s['scanned_at'].strftime('%H:%M'), "name": name,
+                    "product_id": s['product_id'], "photos": int(s['photos'] or 0)})
     return out
 
 
@@ -1377,6 +1401,12 @@ async def scan_code(request: Request, inventory_id: int, who=Depends(scan_user))
     if not ok:
         raise HTTPException(400, result)
     return result
+
+
+@app.post("/api/scan/{inventory_id}/photo")
+async def scan_photo(request: Request, inventory_id: int, who=Depends(scan_user)):
+    _joined(inventory_id, who)
+    return await _inventory_photo(request, inventory_id, who[0]['id'])
 
 
 @app.post("/api/scan/{inventory_id}/unscan")

@@ -32,6 +32,11 @@
 </form>
 <video id="inv-video" class="hidden" playsinline muted></video>
 <div id="inv-msg" class="inv-msg" aria-live="polite"></div>
+<div id="inv-photo-bar" class="row-actions hidden" style="margin:-.5rem 0 1rem">
+  <button type="button" class="secondary" id="inv-photo-btn">📷 Добавить фото</button>
+  <small class="muted" id="inv-photo-note"></small>
+</div>
+<input type="file" id="inv-photo-file" accept="image/*" capture="environment" hidden>
 
 <div class="row-actions" style="margin-bottom:1rem">
   <a href="/inventory/{{ inv.id }}/summary" role="button">Итог и применение →</a>
@@ -45,6 +50,8 @@
   {% for s in scans %}
   <tr data-id="{{ s.id }}"><td>{{ s.scanned_at.strftime('%H:%M') }}</td>
     <td>{% if s.product_id %}{{ s.model or '' }} <span class="muted">{{ s.article_number }}</span>{% if s.store_id != inv.store_id %} <span class="muted">· из «{{ s.store or '—' }}»</span>{% endif %}{% else %}<span class="muted">неизвестный код</span> {{ s.code }}{% endif %}</td>
+    <td>{% if s.product_id %}<button class="secondary outline inv-ph" data-product="{{ s.product_id }}" style="padding:.2rem .6rem;margin:0"
+          title="Добавить фото">📷 {{ s.photos }}</button>{% endif %}</td>
     <td><button class="secondary outline inv-del" style="padding:.2rem .6rem;margin:0">убрать</button></td></tr>
   {% endfor %}
 </tbody></table></div>
@@ -70,12 +77,17 @@
                                                   body: JSON.stringify(body)})
       .then(async r => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || (r.status === 401 ? "Войдите в админку заново." : "Ошибка " + r.status)); return d; });
   }
-  function row(text, id) {
+  function row(text, id, productId, nPhotos) {
     const tr = document.createElement("tr"); tr.dataset.id = id || "";
     const t = document.createElement("td"); t.textContent = new Date().toTimeString().slice(0, 5);
     const w = document.createElement("td"); w.textContent = text;
+    const p = document.createElement("td");
+    if (productId) {
+      const pb = document.createElement("button"); pb.className = "secondary outline inv-ph"; pb.dataset.product = productId;
+      pb.style.cssText = "padding:.2rem .6rem;margin:0"; pb.title = "Добавить фото"; pb.textContent = "📷 " + (nPhotos || 0); p.append(pb);
+    }
     const b = document.createElement("td"); b.innerHTML = '<button class="secondary outline inv-del" style="padding:.2rem .6rem;margin:0">убрать</button>';
-    tr.append(t, w, b); list.prepend(tr);
+    tr.append(t, w, p, b); list.prepend(tr);
     while (list.children.length > 50) list.lastChild.remove();
   }
   let busy = Promise.resolve();
@@ -84,14 +96,39 @@
     busy = busy.then(() => api("scan", {code}).then(d => {
       $("inv-found").textContent = d.found; $("inv-unknown").textContent = d.unknown;
       const it = d.item || {}, name = [it.model, it.article, it.details].filter(Boolean).join(" · ");
+      photoBar(d.status === "unknown" ? null : it);
       if (d.status === "unknown") { show("unknown", "❓ Неизвестный код " + it.code + " — товара с таким кодом нет в базе"); beep(false); row("неизвестный код " + it.code, d.scan_id); }
       else if (d.status === "again") { show("again", "Уже отсканировано: " + name); beep(true); }
-      else if (d.other_store) { show("moved", "⚠️ " + name + " — числится в «" + (it.store || "—") + "», после применения будет в «" + STORE + "»"); beep(true); row(name + " · из «" + (it.store || "—") + "»", d.scan_id); }
-      else { show("found", "✅ " + name); beep(true); row(name, d.scan_id); }
+      else if (d.other_store) { show("moved", "⚠️ " + name + " — числится в «" + (it.store || "—") + "», после применения будет в «" + STORE + "»"); beep(true); row(name + " · из «" + (it.store || "—") + "»", d.scan_id, it.id, it.photos); }
+      else { show("found", "✅ " + name); beep(true); row(name, d.scan_id, it.id, it.photos); }
     }).catch(e => { show("error", e.message); beep(false); }));
   }
+  // фото к изделию: кнопка под сообщением (последнее отсканированное) или 📷 в строке скана
+  let photoFor = null, barProduct = null;
+  function photoBar(it) {
+    $("inv-photo-bar").classList.toggle("hidden", !it);
+    if (!it) return;
+    barProduct = it.id;
+    $("inv-photo-note").textContent = it.photos ? "фото у товара: " + it.photos : "у товара ещё нет фото";
+  }
+  function pickPhoto(productId) { photoFor = productId; $("inv-photo-file").value = ""; $("inv-photo-file").click(); }
+  $("inv-photo-btn").addEventListener("click", () => pickPhoto(barProduct));
+  $("inv-photo-file").addEventListener("change", () => {
+    const pid = photoFor, file = $("inv-photo-file").files[0]; if (!file || !pid) return;
+    const fd = new FormData(); fd.append("product_id", pid); fd.append("photo", file);
+    show("again", "Загружаю фото…");
+    fetch(`/api/inventory/${ID}/photo`, {method: "POST", headers: {"X-CSRF": CSRF}, body: fd})
+      .then(async r => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || "Ошибка " + r.status); return d; })
+      .then(d => {
+        show("found", "📷 Фото добавлено — у товара фото: " + d.photos);
+        document.querySelectorAll(`.inv-ph[data-product="${pid}"]`).forEach(b => b.textContent = "📷 " + d.photos);
+        if (pid === barProduct) $("inv-photo-note").textContent = "фото у товара: " + d.photos;
+      })
+      .catch(e => show("error", e.message)).finally(() => input.focus());
+  });
   $("inv-form").addEventListener("submit", e => { e.preventDefault(); const v = input.value; input.value = ""; send(v); input.focus(); });
   list.addEventListener("click", e => {
+    const ph = e.target.closest(".inv-ph"); if (ph) return pickPhoto(Number(ph.dataset.product));
     const btn = e.target.closest(".inv-del"); if (!btn) return;
     const tr = btn.closest("tr"); if (!tr.dataset.id) return;
     api("unscan", {scan_id: Number(tr.dataset.id)}).then(d => { tr.remove(); $("inv-found").textContent = d.found;
