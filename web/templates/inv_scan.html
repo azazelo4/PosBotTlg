@@ -181,26 +181,26 @@
 
   $("form").addEventListener("submit", e => { e.preventDefault(); const v = $("code").value; $("code").value = ""; send(v); if (!inTelegram) $("code").focus(); });
   // фото к изделию — с камеры телефона или файлом на ПК
-  let photoFor = null;
+  let photoFor = null, barProduct = null;
   function photoBar(it) {
     $("photo-bar").classList.toggle("hidden", !it);
     if (!it) return;
-    photoFor = it.id;
+    barProduct = it.id;
     $("photo-note").textContent = it.photos ? "фото у товара: " + it.photos : "у товара ещё нет фото";
   }
   function pickPhoto(id) { photoFor = id; $("photo-file").value = ""; $("photo-file").click(); }
-  $("photo-btn").onclick = () => pickPhoto(photoFor);
+  $("photo-btn").onclick = () => pickPhoto(barProduct);
   $("photo-file").addEventListener("change", () => {
-    const file = $("photo-file").files[0]; if (!file || !photoFor) return;
-    const fd = new FormData(); fd.append("product_id", photoFor); fd.append("photo", file);
+    const pid = photoFor, file = $("photo-file").files[0]; if (!file || !pid) return;
+    const fd = new FormData(); fd.append("product_id", pid); fd.append("photo", file);
     const headers = inTelegram ? {"X-Telegram-Init-Data": init} : {"X-Kassa": "1"};
     show("again", "Загружаю фото…");
     fetch(`/api/scan/${ID}/photo`, {method: "POST", headers, body: fd})
       .then(async r => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || "Ошибка " + r.status); return d; })
       .then(d => {
         show("found", "📷 Фото добавлено — у товара фото: " + d.photos); beep(true);
-        document.querySelectorAll(`.ph[data-product="${photoFor}"]`).forEach(b => b.textContent = "📷 " + d.photos);
-        $("photo-note").textContent = "фото у товара: " + d.photos;
+        document.querySelectorAll(`.ph[data-product="${pid}"]`).forEach(b => b.textContent = "📷 " + d.photos);
+        if (pid === barProduct) $("photo-note").textContent = "фото у товара: " + d.photos;
       })
       .catch(e => { show("error", e.message); beep(false); });
   });
