@@ -8,7 +8,7 @@
 <article>
   <form method="post" enctype="multipart/form-data">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <label>Два отчёта Паломы за один период — «Акт реализации» и «Отчёт по счетам» (.xls как выгружает Палома или .xlsx)
+    <label>Два отчёта Паломы за один период — «Акт реализации» и «Отчёт по счетам» (.xls, как выгружает Палома, или сохранённые в .xlsx)
       <input type="file" name="files" accept=".xls,.xlsx,.html,.htm" multiple required></label>
     <button type="submit">Проверить файлы</button>
   </form>

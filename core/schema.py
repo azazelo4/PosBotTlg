@@ -171,8 +171,10 @@ TABLES = {
           `store_id` int DEFAULT NULL,
           `return_date` datetime NOT NULL,
           `source` varchar(16) DEFAULT NULL,
+          `external_id` varchar(96) DEFAULT NULL,
           PRIMARY KEY (`id`),
           UNIQUE KEY `uq_returns_sale` (`original_sale_id`),
+          UNIQUE KEY `uq_returns_external` (`source`, `external_id`),
           KEY `idx_returns_date` (`return_date`),
           CONSTRAINT `returns_sale_fk` FOREIGN KEY (`original_sale_id`) REFERENCES `sales` (`id`),
           CONSTRAINT `returns_user_fk` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
@@ -406,6 +408,7 @@ COLUMNS = [
     ("receipts", "external_id", "varchar(96) DEFAULT NULL"),
     ("sales", "source", "varchar(16) DEFAULT NULL"),
     ("returns", "source", "varchar(16) DEFAULT NULL"),
+    ("returns", "external_id", "varchar(96) DEFAULT NULL"),
     ("sales", "mark_code_id", "int DEFAULT NULL"),
     ("trade_ins", "new_mark_code_id", "int DEFAULT NULL"),
     # фискализация: заводской номер кассы Webkassa (ЗНК) у магазина
@@ -440,6 +443,7 @@ INDEXES = [
     ("sales", "idx_sales_receipt", "(`receipt_id`)"),
     ("receipts", "idx_receipts_customer", "(`customer_id`)"),
     ("receipts", "uq_receipts_external", "UNIQUE (`source`, `external_id`)"),
+    ("returns", "uq_returns_external", "UNIQUE (`source`, `external_id`)"),
 ]
 
 

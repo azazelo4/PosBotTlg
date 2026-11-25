@@ -90,6 +90,7 @@ def test_parse_and_match():
 def test_import_sales_history(tg):
     qty_before = {r['article_number']: r['quantity'] for r in db_query("SELECT article_number, quantity FROM products")}
     plan = paloma_sales.build_plan(_files())
+    stale = paloma_sales.build_plan(_files())                          # второй предпросмотр того же периода
     assert not plan.errors, plan.errors
     assert plan.stores == {"Магазин ЦУМ": (1, "ЦУМ")}
     assert plan.sellers["Кассир"][1] == "Кассир" and plan.sellers["Айгуль"] == (None, "Айгуль (Палома)")
@@ -126,6 +127,9 @@ def test_import_sales_history(tg):
     found = get_sales_for_return("A300")
     assert len(found) == 2 and all(f['return_id'] is None for f in found)
 
+    # устаревший второй предпросмотр: ни чеков, ни возвратов повторно
+    assert paloma_sales.apply_plan(stale, admin) == (False, "Все чеки уже были загружены раньше.")
+    assert db_query("SELECT COUNT(*) AS n FROM returns")[0]['n'] == 1
     # повторная загрузка — дубли не создаются
     again = paloma_sales.build_plan(_files())
     assert "Загружать нечего." in again.errors
@@ -149,3 +153,22 @@ def test_sales_import_web(tg):
     # один файл — понятная ошибка
     r = admin.post("/sales-import", data={"csrf": csrf}, files=[("files", (cn, checks, "application/octet-stream"))])
     assert "Нужен «Акт реализации»" in r.text
+
+
+def test_act_saved_as_xlsx():
+    """Акт, пересохранённый в Excel: шапка в две строки с объединёнными ячейками."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["", "№ п/п", "Код товара", "Внешний ID", "Наименование", "Артикул", "Кол-во", "Продажа", None,
+               "Розница на конец периода", None, None, "Обслуж.", "Скидка", "Отказы", None, None, "Возвраты", None, None,
+               "Итог", None, None])
+    ws.append([None] * 7 + ["Цена", "Сумма", "Кол-во", "Цена", "Сумма", None, None, "Кол-во", "Цена", "Сумма",
+                            "Кол-во", "Цена", "Сумма", "Кол-во", "Цена", "Сумма"])
+    ws.append([None, "1.", f"Дата: {_ru(D1)}"])
+    ws.append([None, "1.1.", "A100", None, "Кольцо", "2-1", 2, 100000, 200000, 0, 0, 0, 0, 0, 0, 0, 0, 1, 100000, 100000,
+               1, 100000, 100000])
+    buf = io.BytesIO()
+    wb.save(buf)
+    act = paloma_sales.parse_act(paloma_sales.read_rows(buf.getvalue(), "act.xlsx"))
+    assert [(a['code'], a['qty'], int(a['sum']), a['ret_qty'], int(a['ret_sum'])) for a in act] == [
+        ("A100", 2, 200000, 1, 100000)]

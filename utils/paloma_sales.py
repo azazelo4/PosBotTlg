@@ -185,6 +185,16 @@ def detect(rows):
 def parse_act(rows):
     """Акт реализации → [{day, code, name, qty, sum, ret_qty, ret_sum}]."""
     h, cells = _find_header(rows, "код товара", "наименование")
+    if "продажа / сумма" not in cells and h + 1 < len(rows):
+        # .xlsx с объединёнными ячейками шапки: «Продажа» в первой строке, «Цена / Сумма» — во второй
+        sub = [str(c).strip().lower() for c in rows[h + 1]]
+        if any(c in ("цена", "сумма") for c in sub):
+            top, last = [], ""
+            for c in cells:
+                last = c or last
+                top.append(last)
+            cells = [f"{t} / {b}" if b and b != t else t for t, b in zip(top, sub + [""] * len(top))]
+            h += 1
     c_code, c_name = _col(cells, "код товара"), _col(cells, "наименование")
     c_qty = _col(cells, "кол-во")
     c_sum = _col(cells, "продажа / сумма", "сумма")
@@ -245,12 +255,14 @@ def parse_checks(rows):
             continue
         cash = _num(row[c["cash"]]) if c["cash"] is not None else Decimal(0)
         card = _num(row[c["card"]]) if c["card"] is not None else Decimal(0)
-        if cash + card != total:                     # отчёт без разбивки оплаты
+        pay_unknown = cash + card != total           # другой способ оплаты или отчёт без разбивки
+        if pay_unknown:
             cash, card = Decimal(0), Decimal(0)
         checks.append({"no": str(row[c["no"]]).strip() if c["no"] is not None else "",
                        "time": moment, "seller": str(row[c["seller"]] or "").strip() if c["seller"] is not None else "",
                        "store": str(row[c["store"]] or "").strip() if c["store"] is not None else "",
-                       "total": total, "cash": cash, "card": card, "items": [], "exact": False})
+                       "total": total, "cash": cash, "card": card, "items": [], "exact": False,
+                       "pay_unknown": pay_unknown})
     if not checks:
         raise ValueError("В «Отчёте по счетам» не нашёл чеков.")
     return checks
@@ -332,6 +344,10 @@ def _fit(ch):
     k = ch['total'] / got
     fitted = [(c, (p * k).quantize(Decimal(1))) for c, p in items]
     fitted[-1] = (fitted[-1][0], ch['total'] - sum(p for _, p in fitted[:-1]))
+    if any((p > 0) != (ch['total'] > 0) or not p for _, p in fitted):      # сильное сжатие — поровну
+        each = (ch['total'] / len(items)).quantize(Decimal(1))
+        fitted = [(c, each) for c, _ in items]
+        fitted[-1] = (fitted[-1][0], ch['total'] - each * (len(items) - 1))
     ch['items'] = fitted
 
 
@@ -473,6 +489,10 @@ def build_plan(files):
     if plan.missing:
         plan.warnings.append(f"{len(plan.missing)} проданных изделий нет в каталоге — они будут добавлены в каталог "
                              "с остатком 0 (тип и вес — по названию, цена — по продаже), чтобы к ним привязалась история.")
+    unknown_pay = sum(1 for c in plan.checks if c.get('pay_unknown'))
+    if unknown_pay:
+        plan.warnings.append(f"У {unknown_pay} чеков оплата наличными и картой не сходится с суммой чека (другой способ "
+                             "оплаты?) — они будут записаны как «Наличные».")
     if plan.empty_checks:
         plan.warnings.append(f"{len(plan.empty_checks)} чеков не удалось сопоставить с изделиями — не загрузятся.")
     if plan.leftover:
@@ -511,6 +531,11 @@ def apply_plan(cursor, plan: SalesPlan, user_id):
                 uid = cursor.lastrowid
         sellers[name] = uid
     created = {"receipts": 0, "sales": 0, "returns": 0, "unlinked_returns": 0, "products": 0}
+    # два предпросмотра одного периода: дни, загруженные после предпросмотра, пропускаются
+    cursor.execute("""SELECT DISTINCT DATE(created_at) AS d FROM receipts WHERE source = %s
+                      UNION SELECT DISTINCT DATE(return_date) FROM returns WHERE source = %s""", (SOURCE, SOURCE))
+    loaded = {r['d'] for r in cursor.fetchall()}
+    checks = [ch for ch in plan.checks if ch['time'].date() not in loaded]
     products = dict(plan.products)
     for code, m in plan.missing.items():
         cursor.execute("SELECT id, price FROM products WHERE article_number = %s ORDER BY id LIMIT 1", (code,))
@@ -524,7 +549,7 @@ def apply_plan(cursor, plan: SalesPlan, user_id):
             created['products'] += 1
         products[code] = (row['id'], row['price'])
     # сначала все продажи, потом возвраты: возврат дня может относиться к продаже, пробитой в тот же день позже
-    for ch in sorted(plan.checks, key=lambda c: (c['total'] < 0, c['time'])):
+    for ch in sorted(checks, key=lambda c: (c['total'] < 0, c['time'])):
         store_id = plan.stores[ch['store']][0]
         seller = sellers.get(ch['seller'])
         parts, payment = _payments(ch)
@@ -551,21 +576,27 @@ def apply_plan(cursor, plan: SalesPlan, user_id):
             created['receipts'] += 1
         else:
             kind = max(parts, key=lambda p: p[1])[0]
-            for code, price in ch['items']:
+            for n, (code, price) in enumerate(ch['items']):
+                ret_key = f"{external}#{n}"[:96]
+                cursor.execute("SELECT id FROM returns WHERE source = %s AND external_id = %s", (SOURCE, ret_key))
+                if cursor.fetchone():
+                    continue                         # этот возврат уже загружен
                 product_id = products[code][0]
+                # продажа из Паломы: сначала последняя до возврата, иначе — того же дня позже (по сумме чек продажи
+                # дня мог достаться более позднему времени)
                 cursor.execute("""SELECT s.id FROM sales s LEFT JOIN returns r ON r.original_sale_id = s.id
-                                  WHERE s.product_id = %s AND s.sale_date < %s AND r.id IS NULL
-                                  ORDER BY s.sale_date DESC, s.id DESC LIMIT 1 FOR UPDATE""",
-                               (product_id, datetime.combine(ch['time'].date(), datetime.min.time()) + timedelta(days=1)))
-                # по сумме чек продажи того же дня мог достаться позже возврата — продажа дня подходит целиком
+                                  WHERE s.product_id = %s AND s.source = %s AND s.sale_date < %s AND r.id IS NULL
+                                  ORDER BY s.sale_date <= %s DESC, s.sale_date DESC, s.id DESC LIMIT 1 FOR UPDATE""",
+                               (product_id, SOURCE,
+                                datetime.combine(ch['time'].date(), datetime.min.time()) + timedelta(days=1), ch['time']))
                 sale = cursor.fetchone()
                 if not sale:
                     created['unlinked_returns'] += 1
                     continue
                 cursor.execute("""INSERT INTO returns (original_sale_id, product_article, return_price, payment_type,
-                                                       user_id, store_id, return_date, source)
-                                  VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
-                               (sale['id'], code, -price, kind, seller or user_id, store_id, ch['time'], SOURCE))
+                                                       user_id, store_id, return_date, source, external_id)
+                                  VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                               (sale['id'], code, -price, kind, seller or user_id, store_id, ch['time'], SOURCE, ret_key))
                 created['returns'] += 1
     if not created['receipts'] and not created['returns']:
         raise BusinessError("Все чеки уже были загружены раньше.")
