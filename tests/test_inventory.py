@@ -155,6 +155,14 @@ def test_cashiers_join_inventory_from_telegram(tg, fake):
     manager = _uid('manager')
     ok, inv = inventory.start(1, manager)                                        # ЦУМ, начал менеджер
     ok, inv2 = inventory.start(2, _uid('admin'))                                 # Отау Сауда
+    real_send = fake.send_message
+
+    def offline(*a, **kw):
+        raise ConnectionError("нет связи с Telegram")
+    from core.state import bot
+    bot.send_message = offline
+    assert send_inventory_invites() == 0                                         # нет связи — повторим позже
+    bot.send_message = real_send
     fake.calls.clear()
     assert send_inventory_invites() >= 1
     invites = [c for c in fake.calls if c.kind == "send" and "началась инвентаризация" in (c.text or "")]
