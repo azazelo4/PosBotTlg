@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}Инвентаризация №{{ inv.id }}{% endblock %}
+{% block content %}
+<p><a href="/inventory">← Инвентаризация</a></p>
+<h2>Инвентаризация №{{ inv.id }} · {{ inv.store }}</h2>
+{% if inv.status == 'open' %}
+<style>
+  #inv-input { font-size: 1.3rem; }
+  .inv-msg { padding: .9rem 1rem; border-radius: .6rem; margin: .5rem 0 1rem; font-size: 1.1rem; min-height: 3.2rem; }
+  .inv-msg.found { background: #e7f6ec; color: #14532d; } .inv-msg.again { background: #eef2ff; color: #1e3a8a; }
+  .inv-msg.moved { background: #fff7e0; color: #713f12; } .inv-msg.unknown, .inv-msg.error { background: #fdecec; color: #8a1c1c; }
+  @media (prefers-color-scheme: dark) {
+    .inv-msg.found { background: #12331f; color: #c6f0d4; } .inv-msg.again { background: #1b2550; color: #d6dcff; }
+    .inv-msg.moved { background: #3a2c08; color: #fbe5a6; } .inv-msg.unknown, .inv-msg.error { background: #3b1414; color: #f6c4c4; }
+  }
+  .inv-stats { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: .5rem; }
+  .inv-stats b { font-size: 1.6rem; display: block; }
+  #inv-video { width: 100%; max-height: 50vh; object-fit: cover; border-radius: .6rem; background: #000; }
+  #inv-video.hidden { display: none; }
+  #inv-form #inv-input { flex: 1 1 18rem; width: auto !important; }
+</style>
+<p class="muted">Сканируйте изделия подряд — сканер сам нажмёт Enter. Можно вводить артикул вручную. Начал(а):
+  {{ inv.user_name or '' }}, {{ inv.started_at.strftime('%d.%m.%Y %H:%M') }}.</p>
+<div class="inv-stats">
+  <div><span class="muted">Найдено изделий</span><b id="inv-found">{{ inv.found }}</b></div>
+  <div><span class="muted">Неизвестных кодов</span><b id="inv-unknown">{{ inv.unknown }}</b></div>
+</div>
+<form id="inv-form" class="row-actions" autocomplete="off">
+  <input id="inv-input" placeholder="Сканируйте ценник или введите артикул" autofocus aria-label="Код">
+  <button type="submit">Добавить</button>
+  <button type="button" class="secondary outline" id="inv-camera">📷 Камера</button>
+</form>
+<video id="inv-video" class="hidden" playsinline muted></video>
+<div id="inv-msg" class="inv-msg" aria-live="polite"></div>
+
+<div class="row-actions" style="margin-bottom:1rem">
+  <a href="/inventory/{{ inv.id }}/summary" role="button">Итог и применение →</a>
+  <form method="post" action="/inventory/{{ inv.id }}/cancel" onsubmit="return confirm('Отменить инвентаризацию? Сканы удалятся из итога, остатки не изменятся.')">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><button class="secondary outline">Отменить</button>
+  </form>
+</div>
+
+<h4>Последние сканы</h4>
+<div class="table-wrap"><table><tbody id="inv-scans">
+  {% for s in scans %}
+  <tr data-id="{{ s.id }}"><td>{{ s.scanned_at.strftime('%H:%M') }}</td>
+    <td>{% if s.product_id %}{{ s.model or '' }} <span class="muted">{{ s.article_number }}</span>{% if s.store_id != inv.store_id %} <span class="muted">· из «{{ s.store or '—' }}»</span>{% endif %}{% else %}<span class="muted">неизвестный код</span> {{ s.code }}{% endif %}</td>
+    <td><button class="secondary outline inv-del" style="padding:.2rem .6rem;margin:0">убрать</button></td></tr>
+  {% endfor %}
+</tbody></table></div>
+
+<script>
+(() => {
+  const ID = {{ inv.id }}, CSRF = {{ csrf | tojson }}, STORE = {{ inv.store | tojson }};
+  const $ = id => document.getElementById(id);
+  const input = $("inv-input"), msg = $("inv-msg"), list = $("inv-scans");
+  let audio = null;
+  function beep(ok) {
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      const o = audio.createOscillator(), g = audio.createGain();
+      o.frequency.value = ok ? 880 : 220; g.gain.value = .12; o.connect(g); g.connect(audio.destination);
+      o.start(); o.stop(audio.currentTime + (ok ? .09 : .35));
+    } catch (e) {}
+    if (!ok && navigator.vibrate) navigator.vibrate(200);
+  }
+  function show(kind, text) { msg.className = "inv-msg " + kind; msg.textContent = text; }
+  function api(path, body) {
+    return fetch(`/api/inventory/${ID}/${path}`, {method: "POST", headers: {"Content-Type": "application/json", "X-CSRF": CSRF},
+                                                  body: JSON.stringify(body)})
+      .then(async r => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || (r.status === 401 ? "Войдите в админку заново." : "Ошибка " + r.status)); return d; });
+  }
+  function row(text, id) {
+    const tr = document.createElement("tr"); tr.dataset.id = id || "";
+    const t = document.createElement("td"); t.textContent = new Date().toTimeString().slice(0, 5);
+    const w = document.createElement("td"); w.textContent = text;
+    const b = document.createElement("td"); b.innerHTML = '<button class="secondary outline inv-del" style="padding:.2rem .6rem;margin:0">убрать</button>';
+    tr.append(t, w, b); list.prepend(tr);
+    while (list.children.length > 50) list.lastChild.remove();
+  }
+  let busy = Promise.resolve();
+  function send(code) {
+    code = (code || "").trim(); if (!code) return;
+    busy = busy.then(() => api("scan", {code}).then(d => {
+      $("inv-found").textContent = d.found; $("inv-unknown").textContent = d.unknown;
+      const it = d.item || {}, name = [it.model, it.article, it.details].filter(Boolean).join(" · ");
+      if (d.status === "unknown") { show("unknown", "❓ Неизвестный код " + it.code + " — товара с таким кодом нет в базе"); beep(false); row("неизвестный код " + it.code, d.scan_id); }
+      else if (d.status === "again") { show("again", "Уже отсканировано: " + name); beep(true); }
+      else if (d.other_store) { show("moved", "⚠️ " + name + " — числится в «" + (it.store || "—") + "», после применения будет в «" + STORE + "»"); beep(true); row(name + " · из «" + (it.store || "—") + "»", d.scan_id); }
+      else { show("found", "✅ " + name); beep(true); row(name, d.scan_id); }
+    }).catch(e => { show("error", e.message); beep(false); }));
+  }
+  $("inv-form").addEventListener("submit", e => { e.preventDefault(); const v = input.value; input.value = ""; send(v); input.focus(); });
+  list.addEventListener("click", e => {
+    const btn = e.target.closest(".inv-del"); if (!btn) return;
+    const tr = btn.closest("tr"); if (!tr.dataset.id) return;
+    api("unscan", {scan_id: Number(tr.dataset.id)}).then(d => { tr.remove(); $("inv-found").textContent = d.found;
+      $("inv-unknown").textContent = d.unknown; show("again", "Скан убран."); })
+      .catch(e => show("error", e.message));
+    input.focus();
+  });
+  document.addEventListener("click", e => { if (!e.target.closest("input, select, textarea, a, button, video")) input.focus(); });
+
+  // камера телефона: штрихкоды и QR (ZXing, локально); тот же код подряд не считается дважды
+  let reader = null, last = "", lastAt = 0;
+  $("inv-camera").addEventListener("click", async () => {
+    if (reader) { reader.reset(); reader = null; $("inv-video").classList.add("hidden"); $("inv-camera").textContent = "📷 Камера"; return; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return show("error", "Камера недоступна в этом браузере.");
+    if (!window.ZXing) await new Promise((ok, fail) => { const s = document.createElement("script"); s.src = "/static/zxing.min.js"; s.onload = ok; s.onerror = fail; document.head.append(s); }).catch(() => {});
+    if (!window.ZXing) return show("error", "Не удалось загрузить сканер.");
+    const hints = new Map();
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, ["EAN_13", "EAN_8", "UPC_A", "UPC_E", "CODE_128", "CODE_39", "CODE_93", "ITF", "CODABAR", "QR_CODE", "DATA_MATRIX"].map(f => ZXing.BarcodeFormat[f]));
+    reader = new ZXing.BrowserMultiFormatReader(hints, 200);
+    $("inv-video").classList.remove("hidden"); $("inv-camera").textContent = "Выключить камеру";
+    reader.decodeFromConstraints({video: {facingMode: {ideal: "environment"}}}, $("inv-video"), res => {
+      if (!res) return;
+      const code = res.getText(), t = Date.now();
+      if (code === last && t - lastAt < 2500) return;
+      last = code; lastAt = t; send(code);
+    }).catch(() => { show("error", "Камера не запустилась — разрешите доступ к камере."); reader = null; $("inv-video").classList.add("hidden"); $("inv-camera").textContent = "📷 Камера"; });
+  });
+})();
+</script>
+{% else %}
+<article>
+  <p><strong>{{ 'Применена' if inv.status == 'applied' else 'Отменена' }}</strong>
+    {{ inv.finished_at.strftime('%d.%m.%Y %H:%M') if inv.finished_at else '' }}{% if inv.finished_name %} · {{ inv.finished_name }}{% endif %}.</p>
+  {% if inv.result %}
+  <ul>
+    <li>В наличии: <b>{{ inv.result.found }}</b> изделий{% if inv.result.moved %}, из них перенесено из других магазинов — {{ inv.result.moved }}{% endif %}</li>
+    <li>Остаток обнулён у ненайденных: {{ inv.result.zeroed }}</li>
+    <li>Неизвестных кодов: {{ inv.result.unknown }}</li>
+  </ul>
+  {% endif %}
+  <p><a href="/inventory/{{ inv.id }}/summary">Подробности сканов</a></p>
+</article>
+{% endif %}
+{% endblock %}

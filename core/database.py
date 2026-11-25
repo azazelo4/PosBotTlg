@@ -312,7 +312,13 @@ def get_product_by_article(cursor, article_number):
         if row:
             return row
     cursor.execute("SELECT p.*, st.name AS Store FROM products p LEFT JOIN stores st ON st.id = p.store_id WHERE p.article_number = %s ORDER BY p.id LIMIT 1", (article_number,))
-    return cursor.fetchone()
+    row = cursor.fetchone()
+    if row is None and article_number:
+        # штрихкод старого ценника (из прежней программы): касса сканирует его вместо артикула
+        cursor.execute("SELECT p.*, st.name AS Store FROM products p LEFT JOIN stores st ON st.id = p.store_id "
+                       "WHERE p.barcode = %s ORDER BY p.id LIMIT 1", (str(article_number).strip(),))
+        row = cursor.fetchone()
+    return row
 
 
 @with_connection
@@ -356,7 +362,17 @@ def update_product_quantity(cursor, product_article, quantity_change):
 
 PRODUCT_FIELDS = ('article_number', 'store_id', 'metal_type', 'product_type', 'model', 'size', 'fineness', 'inserts',
                   'weight', 'price_per_gram', 'price', 'min_price', 'arrival_date', 'quantity', 'manufacturer',
-                  'commentaries', 'track_stock', 'cost_price', 'is_marked')
+                  'commentaries', 'track_stock', 'cost_price', 'is_marked', 'barcode')
+
+
+def _check_barcode_free(cursor, barcode, product_id=None):
+    """Штрихкод однозначно указывает на товар: один штрихкод — один товар."""
+    if not barcode:
+        return
+    cursor.execute("SELECT article_number FROM products WHERE barcode = %s AND id != %s LIMIT 1", (barcode, product_id or 0))
+    row = cursor.fetchone()
+    if row:
+        raise BusinessError(f"Штрихкод {barcode} уже у товара {row['article_number']}.")
 
 
 @with_transaction
@@ -367,6 +383,7 @@ def add_product_to_db(cursor, product_data: dict):
     data = dict(product_data)
     data.setdefault('arrival_date', today())
     data = {k: v for k, v in data.items() if k in PRODUCT_FIELDS}
+    _check_barcode_free(cursor, data.get('barcode'))
     cols = ", ".join(f"`{k}`" for k in data)
     placeholders = ", ".join(["%s"] * len(data))
     cursor.execute(f"INSERT INTO products ({cols}) VALUES ({placeholders})", list(data.values()))
@@ -441,6 +458,15 @@ def get_product_by_id(cursor, product_id):
 
 
 @with_connection
+def products_by_barcodes(cursor, barcodes):
+    if not barcodes:
+        return []
+    cursor.execute(f"SELECT id, article_number, barcode FROM products WHERE barcode IN ({','.join(['%s'] * len(barcodes))})",
+                   list(barcodes))
+    return cursor.fetchall()
+
+
+@with_connection
 def get_products_by_articles(cursor, articles):
     if not articles:
         return []
@@ -475,6 +501,8 @@ def update_product(cursor, product_id, data: dict):
         cursor.execute("SELECT id FROM products WHERE article_number = %s AND id != %s", (data['article_number'], product_id))
         if cursor.fetchone():
             raise BusinessError(f"Артикул {data['article_number']} уже занят другим товаром.")
+    if 'barcode' in data:
+        _check_barcode_free(cursor, data['barcode'], product_id)
     if data.get('min_price') is not None and data.get('price') is not None and data['min_price'] > data['price']:
         raise BusinessError("Минимальная цена не может быть выше цены.")
     sets = ", ".join(f"`{k}` = %s" for k in data)
@@ -880,6 +908,13 @@ def get_sales_for_return(cursor, article_number, days=60, store_id=None):
         row = cursor.fetchone()
         if row:
             article_number = row['article_number']
+    else:
+        cursor.execute("SELECT id FROM products WHERE article_number = %s LIMIT 1", (article_number,))
+        if not cursor.fetchone():
+            cursor.execute("SELECT article_number FROM products WHERE barcode = %s ORDER BY id LIMIT 1", (article_number,))
+            row = cursor.fetchone()
+            if row:                                       # отсканировали штрихкод старого ценника
+                article_number = row['article_number']
     cursor.execute(f"""
         SELECT s.id AS sale_id, s.sold_price, s.payment_type AS sale_payment_type, s.sale_date,
                p.id AS product_id, p.article_number, p.model AS product_model, p.product_type,
