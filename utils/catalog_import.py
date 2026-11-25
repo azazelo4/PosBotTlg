@@ -363,14 +363,19 @@ def build_plan(data: bytes, filename: str, default_store=None, archive=None) -> 
 
 
 def _dedupe_barcodes(plan):
-    """Один штрихкод — один товар: повтор в файле или штрихкод, занятый другим товаром в базе, не загружается
-    (товар загрузится без него) — предупреждение в предпросмотре."""
+    """Один штрихкод — один товар: повтор в файле, штрихкод, занятый другим товаром в базе, или совпадающий
+    с чужим артикулом не загружается (товар загрузится без него) — предупреждение в предпросмотре."""
     first, dropped = {}, []
+    file_articles = {r['article_number'] for r in plan.rows}
     for r in plan.rows:
         code = r.get('barcode')
         if not code:
             continue
-        if code in first:
+        if code in file_articles and code != r['article_number']:
+            dropped.append(f"{code} ({r['article_number']}, это артикул другого товара)")
+            r['barcode'] = None
+            r['_given'].discard('barcode')
+        elif code in first:
             dropped.append(f"{code} ({r['article_number']}, уже у {first[code]})")
             r['barcode'] = None
             r['_given'].discard('barcode')
@@ -380,7 +385,10 @@ def _dedupe_barcodes(plan):
     taken = {}
     for i in range(0, len(codes), 500):
         for p in products_by_barcodes(codes[i:i + 500]) or []:
-            taken[p['barcode']] = p['article_number']
+            if p['barcode'] in first:
+                taken[p['barcode']] = p['article_number']
+            if p['article_number'] in first:
+                taken[p['article_number']] = p['article_number']
     for r in plan.rows:
         owner = taken.get(r.get('barcode'))
         if owner and owner != r['article_number']:

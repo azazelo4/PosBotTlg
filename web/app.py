@@ -33,7 +33,7 @@ from core import logsafe
 from core import settings_store
 from handlers.buttons import PAYMENT_TYPES, ROLE_TITLES
 from utils import receipt_text
-from core.database import (get_receipt, get_job_run, marking_required, ensure_admin, get_connection, get_stores, get_store_counts, create_store, update_store, set_user_store, init_pool, get_user_by_id, get_user_by_chat_id, search_products, get_product_by_id,
+from core.database import (own_store, get_receipt, get_job_run, marking_required, ensure_admin, get_connection, get_stores, get_store_counts, create_store, update_store, set_user_store, init_pool, get_user_by_id, get_user_by_chat_id, search_products, get_product_by_id,
                       get_product_by_article, get_products_by_articles, get_products_for_labels, add_product_to_db,
                       update_product, get_stock_report_data, get_low_stock_products, get_period_operations,
                       record_sale, get_today_sales_by_user, get_all_users, add_user_to_db, change_user_role_function,
@@ -986,7 +986,7 @@ def _inventory_or_404(inventory_id, user):
 @app.get("/inventory", response_class=HTMLResponse)
 def inventory_list(request: Request, user=Depends(current_user)):
     stores = [st for st in get_stores() or [] if inventory.can_use_store(user, st['id'])]
-    return render(request, "inventory_list.html", user, stores=stores, rows=inventory.recent() or [],
+    return render(request, "inventory_list.html", user, stores=stores, rows=inventory.recent(own_store(user)) or [],
                   default_store=user.get('store_id'))
 
 

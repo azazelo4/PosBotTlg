@@ -59,7 +59,9 @@ def test_barcode_unique_in_form_and_import(tg):
     data = _xlsx([["Артикул", "Наименование", "Тип", "Металл", "Цена", "Магазин", "Штрихкод"],
                   ["P1", "Кольцо", "кольцо", "золото", 1000, "ЦУМ", 2004789000006],      # число из Excel
                   ["P2", "Серьги", "серьги", "золото", 2000, "ЦУМ", "2004789000006"],    # повтор в файле
-                  ["P3", "Цепь", "цепь", "золото", 3000, "ЦУМ", OLD]])                     # занят A100
+                  ["P3", "Цепь", "цепь", "золото", 3000, "ЦУМ", OLD],                      # занят A100
+                  ["P4", "Брошь", "брошь", "золото", 4000, "ЦУМ", "A200"],                 # артикул в базе
+                  ["P5", "Бусы", "бусы", "золото", 5000, "ЦУМ", "P1"]])                    # артикул в файле
     page = manager.post("/import", data={"csrf": csrf, "store": ""},
                         files={"file": ("c.xlsx", data, "application/octet-stream")}).text
     assert "Штрихкод повторяется" in page
@@ -67,7 +69,13 @@ def test_barcode_unique_in_form_and_import(tg):
     manager.post(f"/import/{plan_id}", data={"csrf": csrf, "mode": "all"})
     codes = {r['article_number']: r['barcode'] for r in db_query("SELECT article_number, barcode FROM products")}
     assert codes["P1"] == "2004789000006" and codes["P2"] is None and codes["P3"] is None and codes["A100"] == OLD
+    assert codes["P4"] is None and codes["P5"] is None
     assert get_product_by_article("2004789000006")['article_number'] == "P1"
+    # в карточке: штрихкод, совпадающий с чужим артикулом, не сохраняется
+    from core.database import update_product
+    pid = db_query("SELECT id FROM products WHERE article_number='P2'")[0]['id']
+    ok, msg = update_product(pid, {'barcode': 'A200'})
+    assert not ok and "артикулом" in msg
 
 
 # ---------------------------------------------------------------- инвентаризация

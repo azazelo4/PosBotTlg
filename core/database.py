@@ -369,10 +369,14 @@ def _check_barcode_free(cursor, barcode, product_id=None):
     """Штрихкод однозначно указывает на товар: один штрихкод — один товар."""
     if not barcode:
         return
-    cursor.execute("SELECT article_number FROM products WHERE barcode = %s AND id != %s LIMIT 1", (barcode, product_id or 0))
+    cursor.execute("""SELECT article_number, barcode = %s AS same_barcode FROM products
+                      WHERE (barcode = %s OR article_number = %s) AND id != %s LIMIT 1""",
+                   (barcode, barcode, barcode, product_id or 0))
     row = cursor.fetchone()
     if row:
-        raise BusinessError(f"Штрихкод {barcode} уже у товара {row['article_number']}.")
+        if row['same_barcode']:
+            raise BusinessError(f"Штрихкод {barcode} уже у товара {row['article_number']}.")
+        raise BusinessError(f"Штрихкод {barcode} совпадает с артикулом другого товара.")
 
 
 @with_transaction
@@ -461,8 +465,9 @@ def get_product_by_id(cursor, product_id):
 def products_by_barcodes(cursor, barcodes):
     if not barcodes:
         return []
-    cursor.execute(f"SELECT id, article_number, barcode FROM products WHERE barcode IN ({','.join(['%s'] * len(barcodes))})",
-                   list(barcodes))
+    marks = ','.join(['%s'] * len(barcodes))
+    cursor.execute(f"SELECT id, article_number, barcode FROM products WHERE barcode IN ({marks}) OR article_number IN ({marks})",
+                   list(barcodes) * 2)
     return cursor.fetchall()
 
 
@@ -521,6 +526,8 @@ def import_products(cursor, rows, update_existing=True):
         data = {k: v for k, v in row.items() if k in PRODUCT_FIELDS}
         cursor.execute("SELECT id FROM products WHERE article_number = %s ORDER BY id LIMIT 1 FOR UPDATE", (data['article_number'],))
         existing = cursor.fetchone()
+        if data.get('barcode') and not (existing and not update_existing):
+            _check_barcode_free(cursor, data['barcode'], existing['id'] if existing else None)
         if existing:
             if not update_existing:
                 skipped += 1

@@ -59,12 +59,13 @@ def get(cursor, inventory_id):
 
 
 @with_connection
-def recent(cursor, limit=20):
+def recent(cursor, store_id=None, limit=20):
     cursor.execute("""SELECT i.id, i.status, i.started_at, i.finished_at, st.name AS store, u.name AS user_name,
                              (SELECT COUNT(*) FROM inventory_scans s WHERE s.inventory_id = i.id
                                                                         AND s.product_id IS NOT NULL) AS found
                       FROM inventories i LEFT JOIN stores st ON st.id = i.store_id LEFT JOIN users u ON u.id = i.user_id
-                      ORDER BY i.status = 'open' DESC, i.id DESC LIMIT %s""", (limit,))
+                      WHERE %s IS NULL OR i.store_id = %s
+                      ORDER BY i.status = 'open' DESC, i.id DESC LIMIT %s""", (store_id, store_id, limit))
     return cursor.fetchall()
 
 
@@ -169,7 +170,7 @@ def summary(cursor, inventory_id):
                       WHERE inventory_id = %s AND product_id IS NULL GROUP BY code ORDER BY last DESC""", (inventory_id,))
     unknown = cursor.fetchall()
     cursor.execute("""SELECT p.id, p.article_number, p.model, p.weight, p.size, p.quantity FROM products p
-                      WHERE p.store_id = %s AND p.quantity > 0 AND p.track_stock = 1
+                      WHERE p.store_id = %s AND p.quantity > 0
                         AND NOT EXISTS (SELECT 1 FROM inventory_scans s WHERE s.inventory_id = %s AND s.product_id = p.id)
                       ORDER BY p.article_number""", (store, inventory_id))
     missing = cursor.fetchall()
@@ -209,7 +210,7 @@ def apply(cursor, inventory_id, user_id, zero_missing=True):
     zeroed = 0
     if zero_missing:
         cursor.execute("""UPDATE products p SET p.quantity = 0
-                          WHERE p.store_id = %s AND p.quantity > 0 AND p.track_stock = 1
+                          WHERE p.store_id = %s AND p.quantity > 0
                             AND NOT EXISTS (SELECT 1 FROM inventory_scans s WHERE s.inventory_id = %s
                                                                              AND s.product_id = p.id)""",
                        (store, inventory_id))
