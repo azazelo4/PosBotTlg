@@ -145,3 +145,60 @@ def test_inventory_web_flow_and_access(tg):
     assert admin.get(f"/inventory/{other}").status_code == 200
     r = admin.post(f"/inventory/{other}/cancel", data={"csrf": _csrf(admin, '/inventory')})
     assert "отменена" in r.text
+
+
+# ---------------------------------------------------------------- продавцы помогают сканировать
+
+def test_cashiers_join_inventory_from_telegram(tg, fake):
+    from utils.scheduled_jobs import send_inventory_invites
+    login(tg, CASHIER)
+    manager = _uid('manager')
+    ok, inv = inventory.start(1, manager)                                        # ЦУМ, начал менеджер
+    ok, inv2 = inventory.start(2, _uid('admin'))                                 # Отау Сауда
+    fake.calls.clear()
+    assert send_inventory_invites() >= 1
+    invites = [c for c in fake.calls if c.kind == "send" and "началась инвентаризация" in (c.text or "")]
+    cashier_invites = [c for c in invites if c.chat_id == CASHIER]
+    assert len(cashier_invites) == 1 and "ЦУМ" in cashier_invites[0].text      # только свой магазин
+    assert cashier_invites[0].markup.keyboard[0][0].web_app.url == "https://pos.test/scan"
+    assert not [c for c in invites if c.chat_id == MANAGER]                      # начавшему не пишем
+    fake.calls.clear()
+    assert send_inventory_invites() == 0                                         # один раз
+
+    client = TestClient(app)
+    h = {"X-Telegram-Init-Data": init_data(CASHIER)}
+    assert client.get("/scan").status_code == 200
+    assert client.get("/api/app/me", headers=h).json()["inventory"] == ["ЦУМ"]
+    lst = client.get("/api/scan", headers=h).json()["inventories"]
+    assert [i["id"] for i in lst] == [inv]                                       # чужой магазин не виден
+    d = client.post(f"/api/scan/{inv}", json={"code": "A100"}, headers=h).json()
+    assert d["status"] == "found" and d["scan_id"]
+    assert client.post(f"/api/scan/{inv2}", json={"code": "A200"}, headers=h).status_code == 404
+    _, other = inventory.scan(inv, "A300", manager)                              # скан менеджера
+    r = client.post(f"/api/scan/{inv}/unscan", json={"scan_id": other["scan_id"]}, headers=h)
+    assert r.status_code == 400 and "свой" in r.json()["error"]
+    mine = client.get("/api/scan", headers=h).json()["inventories"][0]
+    assert mine["found"] == 2 and len(mine["mine"]) == 1                         # видит только свои сканы
+    assert "A100" in mine["mine"][0]["name"]
+    assert client.post(f"/api/scan/{inv}/unscan", json={"scan_id": d["scan_id"]}, headers=h).json()["removed"] == 1
+    # итог и применение — не для продавца
+    assert client.get(f"/inventory/{inv}/summary", headers=h, follow_redirects=False).status_code in (303, 401, 403)
+    inventory.apply(inv, manager)
+    assert client.get("/api/scan", headers=h).json()["inventories"] == []
+    assert client.post(f"/api/scan/{inv}", json={"code": "A100"}, headers=h).status_code == 404
+
+
+def test_cashiers_join_inventory_from_pc_kassa(tg, monkeypatch):
+    from test_kassa import kassa_login
+    from web import kassa
+    monkeypatch.setattr(kassa, "bot_username", lambda: "pos_test_bot")
+    client = TestClient(app)
+    ok, inv = inventory.start(1, _uid('manager'))
+    assert client.get("/api/scan", headers={"X-Kassa": "1"}).status_code == 401  # не вошёл на кассу
+    kassa_login(tg, client)
+    assert client.get("/kassa/api/me").json()["inventory"] == ["ЦУМ"]
+    assert client.get("/api/scan").status_code == 400                            # без заголовка кассы
+    assert [i["id"] for i in client.get("/api/scan", headers={"X-Kassa": "1"}).json()["inventories"]] == [inv]
+    d = client.post(f"/api/scan/{inv}", json={"code": "A100"}, headers={"X-Kassa": "1"}).json()
+    assert d["status"] == "found"
+    assert db_query("SELECT u.chat_id FROM inventory_scans s JOIN users u ON u.id=s.user_id")[0]["chat_id"] == CASHIER

@@ -1194,6 +1194,7 @@ def api_me(user=Depends(app_user)):
     start_dt, end_dt = day_bounds(today(), today())
     sales = get_today_sales_by_user(user['id'], start_dt, end_dt) or []
     return {"name": user['name'], "role": user['role'],
+            "inventory": [r['store'] for r in inventory.joinable(user)],
             "today": [{"id": s['id'], "time": s['sale_date'].strftime('%H:%M'), "article": s['article_number'],
                        "model": s['model'], "price": int(s['sold_price']), "payment": s['payment_type']} for s in sales]}
 
@@ -1238,6 +1239,73 @@ async def api_sale(request: Request, user=Depends(app_user)):
         raise HTTPException(400, result)
     logger.info("Mini App: продажа #%s, %s за %s (%s)", result, product['article_number'], price, user['id'])
     return {"sale_id": result, "price": int(price), "payment": payment, "model": product['model']}
+
+
+# ---------------------------------------------------------------- помощь в инвентаризации (продавцы)
+# Страница /scan открывается из Telegram (Mini App, вход по initData) или на кассе ПК (сессия кассы). Продавец
+# только сканирует в открытую инвентаризацию своего магазина и убирает свои ошибочные сканы; начинает, смотрит
+# итог и применяет — менеджер или администратор в админке.
+
+def scan_user(request: Request):
+    if request.headers.get("X-Telegram-Init-Data"):
+        return app_user(request), None
+    kassa.same_origin(request)
+    user = kassa.kassa_user(request)
+    return user, kassa.kassa_store_id(request, user)
+
+
+def _joined(inventory_id, who):
+    user, store_id = who
+    inv = next((r for r in inventory.joinable(user, store_id) if r['id'] == inventory_id), None)
+    if not inv:
+        raise HTTPException(404, "Инвентаризация завершена или идёт в другом магазине.")
+    return inv
+
+
+def _mine(inventory_id, user_id):
+    out = []
+    for s in inventory.scans(inventory_id, 30, user_id) or []:
+        name = " · ".join(str(x) for x in (s.get('model'), s.get('article_number')) if x) or f"неизвестный код {s['code']}"
+        out.append({"id": s['id'], "time": s['scanned_at'].strftime('%H:%M'), "name": name})
+    return out
+
+
+@app.get("/scan", response_class=HTMLResponse)
+def scan_page(request: Request):
+    return templates.TemplateResponse(request, "inv_scan.html", {})
+
+
+@app.get("/api/scan")
+def scan_list(who=Depends(scan_user)):
+    user, store_id = who
+    rows = []
+    for r in inventory.joinable(user, store_id):
+        inv = inventory.get(r['id']) or {}
+        rows.append({"id": r['id'], "store": r['store'], "found": int(inv.get('found') or 0),
+                     "unknown": int(inv.get('unknown') or 0), "mine": _mine(r['id'], user['id'])})
+    return {"name": user['name'], "inventories": rows}
+
+
+@app.post("/api/scan/{inventory_id}")
+async def scan_code(request: Request, inventory_id: int, who=Depends(scan_user)):
+    _joined(inventory_id, who)
+    body = await _json_object(request)
+    ok, result = inventory.scan(inventory_id, str(body.get("code") or ""), who[0]['id'])
+    if not ok:
+        raise HTTPException(400, result)
+    return result
+
+
+@app.post("/api/scan/{inventory_id}/unscan")
+async def scan_undo(request: Request, inventory_id: int, who=Depends(scan_user)):
+    _joined(inventory_id, who)
+    body = await _json_object(request)
+    ok, result = inventory.unscan(inventory_id, parse_int(str(body.get("scan_id") or "")) or 0, who[0]['id'])
+    if not ok:
+        raise HTTPException(400, result)
+    if not result['removed']:
+        raise HTTPException(400, "Можно убрать только свой скан.")
+    return result
 
 
 # ---------------------------------------------------------------- первоначальная настройка и настройки

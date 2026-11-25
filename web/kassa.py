@@ -30,6 +30,7 @@ from utils.common import now, today, day_bounds, parse_money, parse_float, money
 from utils import receipt_text
 from utils.labels import details_line
 from services import photos
+from services import inventory
 from utils.report_generator import build_summary
 from core.logsafe import describe
 
@@ -227,6 +228,7 @@ def me(request: Request, user=Depends(kassa_user)):
         "stores": [{"id": s['id'], "name": s['name']} for s in stores],
         "payment_types": list(PAYMENT_TYPES), "metal_types": list(METAL_TYPES),
         "org": config.ORG_NAME or "",
+        "inventory": [r['store'] for r in inventory.joinable(user, kassa_store_id(request, user))],
     }
 
 

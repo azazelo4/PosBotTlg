@@ -213,3 +213,26 @@ def send_customer_receipts():
         customers.mark_sent(row['id'])
         sent += 1
     return sent
+
+
+def send_inventory_invites():
+    """Менеджер начал инвентаризацию в админке — продавцам магазина приходит приглашение помочь сканировать."""
+    from services import inventory
+    sent = 0
+    for inv in inventory.pending_invites() or []:
+        text = (f"📦 В магазине «{h(inv['store'] or '')}» началась инвентаризация. Помогите отсканировать изделия.\n\n"
+                "На компьютере: касса → кнопка «📦 Инвентаризация» вверху.")
+        url = config.mini_app_url()
+        kb = None
+        if url:
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("📷 Сканировать телефоном",
+                                              web_app=types.WebAppInfo(f"{config.WEB_URL}/scan")))
+        for chat_id in inv['staff']:
+            try:
+                bot.send_message(chat_id, text, reply_markup=kb, parse_mode="HTML")
+                sent += 1
+            except Exception as e:
+                logger.warning("Приглашение на инвентаризацию #%s в чат %s не доставлено: %s", inv['id'], chat_id, describe(e))
+        inventory.mark_notified(inv['id'])
+    return sent

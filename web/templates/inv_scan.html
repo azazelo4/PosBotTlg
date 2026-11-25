@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>Инвентаризация</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root {
+      --bg: var(--tg-theme-bg-color, #fff); --text: var(--tg-theme-text-color, #111);
+      --hint: var(--tg-theme-hint-color, #888); --link: var(--tg-theme-link-color, #2481cc);
+      --btn: var(--tg-theme-button-color, #2481cc); --btn-text: var(--tg-theme-button-text-color, #fff);
+      --card: var(--tg-theme-secondary-bg-color, #f2f2f5); --danger: var(--tg-theme-destructive-text-color, #d33);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0 auto; max-width: 640px; padding: 16px; font: 16px/1.4 -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+           background: var(--bg); color: var(--text); }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    a { color: var(--link); }
+    .card { background: var(--card); border-radius: 14px; padding: 14px; margin-bottom: 12px; }
+    .muted { color: var(--hint); font-size: 14px; }
+    .hidden { display: none !important; }
+    button, input { font: inherit; }
+    .btn { width: 100%; border: 0; border-radius: 12px; padding: 14px; background: var(--btn); color: var(--btn-text);
+           font-weight: 600; cursor: pointer; }
+    .btn.secondary { background: transparent; color: var(--link); border: 1px solid var(--link); }
+    .row { display: flex; gap: 8px; margin-top: 10px; }
+    .row input { flex: 1; min-width: 0; }
+    .row .btn { width: auto; padding: 12px 16px; }
+    input { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--hint); background: var(--bg); color: var(--text); }
+    .stats { display: flex; gap: 16px; margin: 8px 0 12px; }
+    .stats b { font-size: 24px; display: block; }
+    .msg { border-radius: 12px; padding: 12px; margin: 10px 0; min-height: 48px; background: var(--card); }
+    .msg.found { background: #d9f2df; color: #145c26; } .msg.moved { background: #fff1cc; color: #6b4b00; }
+    .msg.unknown, .msg.error { background: #fde0e0; color: #8a1c1c; } .msg.again { background: var(--card); }
+    video { width: 100%; max-height: 45vh; object-fit: cover; border-radius: 12px; background: #000; margin-top: 10px; }
+    .scan { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0;
+            border-bottom: 1px solid var(--bg); font-size: 14px; }
+    .scan span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+    .scan small { color: var(--hint); margin-right: 6px; }
+    .scan button { border: 0; background: transparent; color: var(--danger); cursor: pointer; padding: 4px 8px; }
+    .pick { margin-top: 8px; }
+  </style>
+</head>
+<body>
+<div id="loading" class="muted">Загрузка…</div>
+
+<div id="none" class="card hidden">
+  <h1>Инвентаризации нет</h1>
+  <p class="muted" id="none-text">Сейчас в вашем магазине инвентаризация не идёт. Её начинает менеджер или администратор
+    в админке — бот пришлёт сообщение, и здесь появится сканирование.</p>
+  <a id="back-none" href="#">← Касса</a>
+</div>
+
+<div id="choose" class="hidden">
+  <h1>Инвентаризация</h1>
+  <p class="muted">Выберите магазин:</p>
+  <div id="choose-list"></div>
+</div>
+
+<div id="work" class="hidden">
+  <h1 id="title">Инвентаризация</h1>
+  <div class="muted">Сканируйте изделия подряд: штрихкод старого ценника, QR нового ценника или код маркировки.</div>
+  <div class="stats">
+    <div><b id="found">0</b><span class="muted">найдено всего</span></div>
+    <div><b id="unknown">0</b><span class="muted">неизвестных кодов</span></div>
+    <div><b id="my">0</b><span class="muted">моих сканов</span></div>
+  </div>
+  <button class="btn" id="camera">📷 Сканировать камерой</button>
+  <video id="video" class="hidden" playsinline muted></video>
+  <form class="row" id="form" autocomplete="off">
+    <input id="code" placeholder="Сканер или артикул вручную" enterkeyhint="done" autocapitalize="characters">
+    <button class="btn" type="submit">OK</button>
+  </form>
+  <div class="msg" id="msg">Готово к сканированию.</div>
+  <div class="card">
+    <strong>Мои сканы</strong>
+    <div id="list"></div>
+  </div>
+  <p class="muted">Итог и применение — у менеджера в админке. <a id="back-work" href="#">← Касса</a></p>
+</div>
+
+<script>
+(() => {
+  const tg = window.Telegram && window.Telegram.WebApp;
+  let init = tg && tg.initData;
+  try { if (init) sessionStorage.setItem("posbot_init", init); else init = sessionStorage.getItem("posbot_init") || ""; } catch (e) {}
+  const inTelegram = !!init;
+  const $ = id => document.getElementById(id);
+  const back = inTelegram ? "/app" : "/kassa";
+  $("back-none").href = $("back-work").href = back;
+  if (tg && tg.initData) { tg.ready(); tg.expand(); }
+
+  function api(path, body) {
+    const headers = {"Content-Type": "application/json"};
+    if (inTelegram) headers["X-Telegram-Init-Data"] = init; else headers["X-Kassa"] = "1";
+    const opts = body === undefined ? {headers} : {method: "POST", headers, body: JSON.stringify(body)};
+    return fetch(path, opts).then(async r => {
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { const e = new Error(d.error || "Ошибка " + r.status); e.status = r.status; throw e; }
+      return d;
+    });
+  }
+
+  let ID = null, STORE = "", my = 0, audio = null;
+  function beep(ok) {
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      const o = audio.createOscillator(), g = audio.createGain();
+      o.frequency.value = ok ? 880 : 220; g.gain.value = .12; o.connect(g); g.connect(audio.destination);
+      o.start(); o.stop(audio.currentTime + (ok ? .09 : .35));
+    } catch (e) {}
+    if (tg && tg.initData && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred(ok ? "success" : "error");
+    else if (!ok && navigator.vibrate) navigator.vibrate(200);
+  }
+  function show(kind, text) { $("msg").className = "msg " + kind; $("msg").textContent = text; }
+  function counts(d) { $("found").textContent = d.found; $("unknown").textContent = d.unknown; $("my").textContent = my; }
+  function row(s, top) {
+    const div = document.createElement("div"); div.className = "scan"; div.dataset.id = s.id;
+    const t = document.createElement("small"); t.textContent = s.time;
+    const n = document.createElement("span"); n.textContent = s.name;
+    const b = document.createElement("button"); b.type = "button"; b.textContent = "убрать"; b.className = "del";
+    div.append(t, n, b);
+    if (top) $("list").prepend(div); else $("list").append(div);
+    while ($("list").children.length > 30) $("list").lastChild.remove();
+  }
+  const hhmm = () => new Date().toTimeString().slice(0, 5);
+
+  function open(inv) {
+    ID = inv.id; STORE = inv.store || ""; my = inv.mine.length;
+    $("title").textContent = "Инвентаризация · " + STORE;
+    $("list").replaceChildren(); inv.mine.forEach(s => row(s, false)); counts(inv);
+    ["loading", "none", "choose"].forEach(x => $(x).classList.add("hidden")); $("work").classList.remove("hidden");
+    if (!inTelegram) $("code").focus();
+  }
+
+  function load() {
+    api("/api/scan").then(d => {
+      $("loading").classList.add("hidden");
+      if (!d.inventories.length) return $("none").classList.remove("hidden");
+      if (d.inventories.length === 1) return open(d.inventories[0]);
+      const box = $("choose-list"); box.replaceChildren();
+      d.inventories.forEach(inv => {
+        const b = document.createElement("button"); b.className = "btn secondary pick"; b.textContent = inv.store;
+        b.onclick = () => open(inv); box.append(b);
+      });
+      $("choose").classList.remove("hidden");
+    }).catch(e => {
+      $("loading").classList.add("hidden"); $("none").classList.remove("hidden");
+      $("none-text").textContent = e.status === 401 && !inTelegram
+        ? "Сначала войдите на кассу на этом компьютере (QR-код на экране кассы), затем вернитесь сюда." : e.message;
+    });
+  }
+
+  let busy = Promise.resolve();
+  function send(code) {
+    code = (code || "").trim(); if (!code || !ID) return;
+    busy = busy.then(() => api(`/api/scan/${ID}`, {code}).then(d => {
+      const it = d.item || {}, name = [it.model, it.article, it.details].filter(Boolean).join(" · ");
+      if (d.scan_id) my += 1;
+      counts(d);
+      if (d.status === "unknown") { show("unknown", "❓ Неизвестный код " + it.code + " — отложите изделие для менеджера"); beep(false); row({id: d.scan_id, time: hhmm(), name: "неизвестный код " + it.code}, true); }
+      else if (d.status === "again") { show("again", "Уже отсканировано: " + name); beep(true); }
+      else if (d.other_store) { show("moved", "⚠️ " + name + " — числится в «" + (it.store || "—") + "», будет в «" + STORE + "»"); beep(true); row({id: d.scan_id, time: hhmm(), name}, true); }
+      else { show("found", "✅ " + name); beep(true); row({id: d.scan_id, time: hhmm(), name}, true); }
+    }).catch(e => { show("error", e.message); beep(false); if (e.status === 404) setTimeout(() => location.reload(), 1500); }));
+  }
+
+  $("form").addEventListener("submit", e => { e.preventDefault(); const v = $("code").value; $("code").value = ""; send(v); if (!inTelegram) $("code").focus(); });
+  $("list").addEventListener("click", e => {
+    const b = e.target.closest(".del"); if (!b) return;
+    const div = b.closest(".scan");
+    api(`/api/scan/${ID}/unscan`, {scan_id: Number(div.dataset.id)}).then(d => { div.remove(); my = Math.max(0, my - 1); counts(d); show("again", "Скан убран."); })
+      .catch(e => show("error", e.message));
+  });
+
+  let reader = null, last = "", lastAt = 0;
+  function stopCamera() { if (reader) { try { reader.reset(); } catch (e) {} reader = null; } $("video").classList.add("hidden"); $("camera").textContent = "📷 Сканировать камерой"; }
+  $("camera").addEventListener("click", async () => {
+    if (reader) return stopCamera();
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return show("error", "Камера недоступна на этом устройстве.");
+    if (!window.ZXing) await new Promise((ok, fail) => { const s = document.createElement("script"); s.src = "/static/zxing.min.js"; s.onload = ok; s.onerror = fail; document.head.append(s); }).catch(() => {});
+    if (!window.ZXing) return show("error", "Не удалось загрузить сканер.");
+    const hints = new Map();
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, ["EAN_13", "EAN_8", "UPC_A", "UPC_E", "CODE_128", "CODE_39", "CODE_93", "ITF", "CODABAR", "QR_CODE", "DATA_MATRIX"].map(f => ZXing.BarcodeFormat[f]));
+    reader = new ZXing.BrowserMultiFormatReader(hints, 200);
+    $("video").classList.remove("hidden"); $("camera").textContent = "Выключить камеру";
+    reader.decodeFromConstraints({video: {facingMode: {ideal: "environment"}}}, $("video"), res => {
+      if (!res) return;
+      const code = res.getText(), t = Date.now();
+      if (code === last && t - lastAt < 2500) return;
+      last = code; lastAt = t; send(code);
+    }).catch(() => { show("error", "Камера не запустилась — разрешите доступ к камере."); stopCamera(); });
+  });
+  document.addEventListener("visibilitychange", () => { if (document.hidden) stopCamera(); });
+  load();
+})();
+</script>
+</body>
+</html>

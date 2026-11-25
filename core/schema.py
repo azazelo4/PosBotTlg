@@ -326,6 +326,7 @@ TABLES = {
           `finished_at` datetime DEFAULT NULL,
           `finished_by` int DEFAULT NULL,
           `result` text DEFAULT NULL,
+          `notified` tinyint(1) NOT NULL DEFAULT 0,
           PRIMARY KEY (`id`),
           KEY `idx_inventories_store` (`store_id`, `status`)
         ) {CHARSET}""",
@@ -385,6 +386,7 @@ COLUMNS = [
     ("products", "is_marked", "tinyint(1) NOT NULL DEFAULT 0"),
     # штрихкод с ценника прежней программы (EAN и т. п.) — касса находит товар и по нему
     ("products", "barcode", "varchar(64) DEFAULT NULL"),
+    ("inventories", "notified", "tinyint(1) NOT NULL DEFAULT 0"),
     ("sales", "mark_code_id", "int DEFAULT NULL"),
     ("trade_ins", "new_mark_code_id", "int DEFAULT NULL"),
     # фискализация: заводской номер кассы Webkassa (ЗНК) у магазина

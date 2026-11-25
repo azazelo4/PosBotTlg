@@ -126,13 +126,14 @@ def scan(cursor, inventory_id, raw_code, user_id):
 
 
 @with_transaction
-def unscan(cursor, inventory_id, scan_id):
-    """Убрать ошибочный скан (не то изделие, чужая витрина)."""
+def unscan(cursor, inventory_id, scan_id, user_id=None):
+    """Убрать ошибочный скан (не то изделие, чужая витрина). С user_id — только свой скан (продавец)."""
     cursor.execute("SELECT status FROM inventories WHERE id = %s FOR UPDATE", (inventory_id,))
     inv = cursor.fetchone()
     if not inv or inv['status'] != 'open':
         raise BusinessError("Инвентаризация уже завершена.")
-    cursor.execute("DELETE FROM inventory_scans WHERE id = %s AND inventory_id = %s", (scan_id, inventory_id))
+    cursor.execute("DELETE FROM inventory_scans WHERE id = %s AND inventory_id = %s AND (%s IS NULL OR user_id = %s)",
+                   (scan_id, inventory_id, user_id, user_id))
     removed = cursor.rowcount
     cursor.execute("SELECT SUM(product_id IS NOT NULL) AS found, SUM(product_id IS NULL) AS unknown "
                    "FROM inventory_scans WHERE inventory_id = %s", (inventory_id,))
@@ -141,12 +142,48 @@ def unscan(cursor, inventory_id, scan_id):
 
 
 @with_connection
-def scans(cursor, inventory_id, limit=30):
+def open_list(cursor, store_id=None):
+    """Открытые инвентаризации (одного магазина или всех) — к ним присоединяются продавцы."""
+    cursor.execute("""SELECT i.id, i.store_id, st.name AS store FROM inventories i LEFT JOIN stores st ON st.id = i.store_id
+                      WHERE i.status = 'open' AND (%s IS NULL OR i.store_id = %s) ORDER BY i.id""", (store_id, store_id))
+    return cursor.fetchall()
+
+
+def joinable(user, store_id=None):
+    """Открытые инвентаризации, в которые сотрудник может сканировать: своего магазина (закреплён) или выбранного
+    на кассе; незакреплённый без выбора — все."""
+    own = own_store(user)
+    rows = open_list(own or store_id) or []
+    return [r for r in rows if not own or r['store_id'] == own]
+
+
+@with_connection
+def pending_invites(cursor):
+    """Начатые инвентаризации, о которых ещё не сообщили продавцам магазина: [{id, store, staff: [chat_id…]}]."""
+    cursor.execute("""SELECT i.id, i.store_id, i.user_id, st.name AS store FROM inventories i
+                      LEFT JOIN stores st ON st.id = i.store_id WHERE i.status = 'open' AND i.notified = 0""")
+    rows = cursor.fetchall()
+    for r in rows:
+        cursor.execute("""SELECT chat_id FROM users WHERE is_active = 1 AND role IN ('cashier', 'manager') AND chat_id > 0
+                          AND (store_id = %s OR store_id IS NULL) AND id != %s""", (r['store_id'], r['user_id']))
+        r['staff'] = [u['chat_id'] for u in cursor.fetchall()]
+    return rows
+
+
+@with_transaction
+def mark_notified(cursor, inventory_id):
+    cursor.execute("UPDATE inventories SET notified = 1 WHERE id = %s", (inventory_id,))
+    return True, None
+
+
+@with_connection
+def scans(cursor, inventory_id, limit=30, user_id=None):
     cursor.execute("""SELECT s.id, s.code, s.scanned_at, s.product_id, p.article_number, p.model, p.weight, p.size,
                              p.store_id, st.name AS store, u.name AS user_name
                       FROM inventory_scans s LEFT JOIN products p ON p.id = s.product_id
                       LEFT JOIN stores st ON st.id = p.store_id LEFT JOIN users u ON u.id = s.user_id
-                      WHERE s.inventory_id = %s ORDER BY s.id DESC LIMIT %s""", (inventory_id, limit))
+                      WHERE s.inventory_id = %s AND (%s IS NULL OR s.user_id = %s)
+                      ORDER BY s.id DESC LIMIT %s""", (inventory_id, user_id, user_id, limit))
     return cursor.fetchall()
 
 
