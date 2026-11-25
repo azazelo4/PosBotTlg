@@ -126,13 +126,18 @@
   <p><strong>{{ 'Применена' if inv.status == 'applied' else 'Отменена' }}</strong>
     {{ inv.finished_at.strftime('%d.%m.%Y %H:%M') if inv.finished_at else '' }}{% if inv.finished_name %} · {{ inv.finished_name }}{% endif %}.</p>
   {% if inv.result %}
+  {% set q = '/products?store=' ~ inv.store_id ~ '&mark=' %}
   <ul>
-    <li>В наличии: <b>{{ inv.result.found }}</b> изделий{% if inv.result.moved %}, из них перенесено из других магазинов — {{ inv.result.moved }}{% endif %}</li>
-    <li>Остаток обнулён у ненайденных: {{ inv.result.zeroed }}</li>
+    <li>В наличии: <b>{{ inv.result.found }}</b> изделий{% if inv.result.checked is defined %}:
+      <a href="{{ q }}checked">проверено {{ inv.result.checked }}</a>,
+      <a href="{{ q }}added">выявлено {{ inv.result.added }}</a>,
+      <a href="{{ q }}moved">перемещено {{ inv.result.moved }}</a>{% elif inv.result.moved %}, из них перенесено из других магазинов — {{ inv.result.moved }}{% endif %}</li>
+    <li>Остаток снижен до 0 у ненайденных: <a href="{{ q }}missing">{{ inv.result.zeroed }} — требуют уточнения</a></li>
     <li>Неизвестных кодов: {{ inv.result.unknown }}</li>
   </ul>
   {% endif %}
-  <p><a href="/inventory/{{ inv.id }}/summary">Подробности сканов</a></p>
+  <p class="muted">Метки видны в списке товаров (фильтр «Инвентаризация») и в карточке товара; следующая инвентаризация
+    магазина их обновит.</p>
 </article>
 {% endif %}
 {% endblock %}

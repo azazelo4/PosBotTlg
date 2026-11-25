@@ -279,13 +279,17 @@ PAGE_SIZE = 50
 
 
 @app.get("/products", response_class=HTMLResponse)
-def products(request: Request, q: str = "", store: str = "", stock: str = "", page: int = 1, user=Depends(current_user)):
+def products(request: Request, q: str = "", store: str = "", stock: str = "", mark: str = "", page: int = 1,
+             user=Depends(current_user)):
     in_stock = {"yes": True, "no": False}.get(stock)
+    mark = mark if mark in inventory.MARKS else ""
     page = max(page, 1)
     store_id = parse_int(store) if store else None
-    rows, total = search_products(q.strip() or None, store_id, in_stock, PAGE_SIZE, (page - 1) * PAGE_SIZE) or ([], 0)
+    rows, total = search_products(q.strip() or None, store_id, in_stock, PAGE_SIZE, (page - 1) * PAGE_SIZE,
+                                  inv_mark=mark or None) or ([], 0)
     thumbs = {pid: photos.signed_url(ph) for pid, ph in (photos.main_photos([r['id'] for r in rows]) or {}).items()}
     return render(request, "products.html", user, rows=rows, total=total, q=q, store=store_id, stock=stock, page=page,
+                  mark=mark, marks=inventory.MARKS,
                   thumbs=thumbs,
                   pages=max((total + PAGE_SIZE - 1) // PAGE_SIZE, 1), stores=get_stores() or [], details=details_line)
 
@@ -352,6 +356,7 @@ def _form_ctx(product=None):
     gallery = [{**ph, "thumb": photos.signed_url(ph), "full": photos.signed_url(ph, thumb=False)}
                for ph in (photos.for_product(product['id']) or [] if product.get('id') else [])]
     return {"product": product, "stores": get_stores() or [], "types": PRODUCT_TYPES, "metals": METAL_TYPES,
+            "marks": inventory.MARKS,
             "photos": gallery, "max_photos": photos.MAX_PER_PRODUCT}
 
 
@@ -373,8 +378,15 @@ async def _save_photos(request, form, product_id, user):
 
 @app.get("/products/new", response_class=HTMLResponse)
 def product_new(request: Request, user=Depends(current_user)):
-    return render(request, "product_form.html", user, **_form_ctx({'track_stock': 1, 'quantity': 1,
-                                                                     'arrival_date': today()}))
+    # из итога инвентаризации: «+ Добавить товар» для кода, которого нет в базе
+    qp = request.query_params
+    product = {'track_stock': 1, 'quantity': 1, 'arrival_date': today(),
+               'barcode': re.sub(r"\s+", "", qp.get('barcode', ''))[:64] or None,
+               'article_number': qp.get('article_number', '').strip()[:64] or None,
+               'store_id': parse_int(qp.get('store_id', '')) or None}
+    if qp.get('quantity') == '0':
+        product['quantity'] = 0
+    return render(request, "product_form.html", user, **_form_ctx(product))
 
 
 @app.post("/products/new")
@@ -407,14 +419,30 @@ async def product_save(request: Request, product_id: int, user=Depends(current_u
     check_csrf(request, form.get("csrf"))
     data, errors = _product_form_data(form)
     if not errors:
+        before = get_product_by_id(product_id) or {}
         ok, msg = update_product(product_id, data)
         if ok:
             flash(request, msg)
+            if before.get('inv_mark') == 'missing' and data['quantity'] > 0:    # нашлось — уточнено
+                inventory.resolve(product_id, user['name'])
             await _save_photos(request, form, product_id, user)
             return RedirectResponse(f"/products/{product_id}", status_code=303)
         errors.append(msg)
     data['id'] = product_id
     return render(request, "product_form.html", user, errors=errors, **_form_ctx(data))
+
+
+@app.post("/products/{product_id}/inventory-resolved")
+def product_inventory_resolved(request: Request, product_id: int, csrf: str = Form(""), user=Depends(current_user)):
+    check_csrf(request, csrf)
+    product = get_product_by_id(product_id)
+    if not product:
+        raise HTTPException(404, "Товар не найден.")
+    if not inventory.can_use_store(user, product.get('store_id')):
+        raise HTTPException(403, "Товар другого магазина.")
+    ok, msg = inventory.resolve(product_id, user['name'])
+    flash(request, msg, "ok" if ok else "error")
+    return RedirectResponse(f"/products/{product_id}", status_code=303)
 
 
 @app.post("/products/{product_id}/photos/{photo_id}")
@@ -1052,15 +1080,14 @@ async def inventory_unscan(request: Request, inventory_id: int, user=Depends(cur
 
 
 @app.post("/inventory/{inventory_id}/apply")
-def inventory_apply(request: Request, inventory_id: int, csrf: str = Form(""), zero_missing: str = Form(""),
-                    user=Depends(current_user)):
+def inventory_apply(request: Request, inventory_id: int, csrf: str = Form(""), user=Depends(current_user)):
     check_csrf(request, csrf)
     _inventory_or_404(inventory_id, user)
-    ok, result = inventory.apply(inventory_id, user['id'], zero_missing=bool(zero_missing))
+    ok, result = inventory.apply(inventory_id, user['id'])
     if ok:
-        flash(request, f"Инвентаризация применена: в наличии {result['found']} изделий"
-                       + (f", из них перенесено из других магазинов {result['moved']}" if result['moved'] else "")
-                       + (f"; остаток обнулён у {result['zeroed']} ненайденных" if result['zeroed'] else "") + ".")
+        flash(request, f"Инвентаризация применена: в наличии {result['found']} изделий (проверено {result['checked']}, "
+                       f"выявлено {result['added']}, перемещено {result['moved']}); остаток снижен до 0 у "
+                       f"{result['zeroed']} ненайденных — они отмечены «требует уточнения».")
     else:
         flash(request, result, "error")
     return RedirectResponse(f"/inventory/{inventory_id}", status_code=303)
@@ -1194,6 +1221,7 @@ def api_me(user=Depends(app_user)):
     start_dt, end_dt = day_bounds(today(), today())
     sales = get_today_sales_by_user(user['id'], start_dt, end_dt) or []
     return {"name": user['name'], "role": user['role'],
+            "inventory": [r['store'] for r in inventory.joinable(user)],
             "today": [{"id": s['id'], "time": s['sale_date'].strftime('%H:%M'), "article": s['article_number'],
                        "model": s['model'], "price": int(s['sold_price']), "payment": s['payment_type']} for s in sales]}
 
@@ -1238,6 +1266,73 @@ async def api_sale(request: Request, user=Depends(app_user)):
         raise HTTPException(400, result)
     logger.info("Mini App: продажа #%s, %s за %s (%s)", result, product['article_number'], price, user['id'])
     return {"sale_id": result, "price": int(price), "payment": payment, "model": product['model']}
+
+
+# ---------------------------------------------------------------- помощь в инвентаризации (продавцы)
+# Страница /scan открывается из Telegram (Mini App, вход по initData) или на кассе ПК (сессия кассы). Продавец
+# только сканирует в открытую инвентаризацию своего магазина и убирает свои ошибочные сканы; начинает, смотрит
+# итог и применяет — менеджер или администратор в админке.
+
+def scan_user(request: Request):
+    if request.headers.get("X-Telegram-Init-Data"):
+        return app_user(request), None
+    kassa.same_origin(request)
+    user = kassa.kassa_user(request)
+    return user, kassa.kassa_store_id(request, user)
+
+
+def _joined(inventory_id, who):
+    user, store_id = who
+    inv = next((r for r in inventory.joinable(user, store_id) if r['id'] == inventory_id), None)
+    if not inv:
+        raise HTTPException(404, "Инвентаризация завершена или идёт в другом магазине.")
+    return inv
+
+
+def _mine(inventory_id, user_id):
+    out = []
+    for s in inventory.scans(inventory_id, 30, user_id) or []:
+        name = " · ".join(str(x) for x in (s.get('model'), s.get('article_number')) if x) or f"неизвестный код {s['code']}"
+        out.append({"id": s['id'], "time": s['scanned_at'].strftime('%H:%M'), "name": name})
+    return out
+
+
+@app.get("/scan", response_class=HTMLResponse)
+def scan_page(request: Request):
+    return templates.TemplateResponse(request, "inv_scan.html", {})
+
+
+@app.get("/api/scan")
+def scan_list(who=Depends(scan_user)):
+    user, store_id = who
+    rows = []
+    for r in inventory.joinable(user, store_id):
+        inv = inventory.get(r['id']) or {}
+        rows.append({"id": r['id'], "store": r['store'], "found": int(inv.get('found') or 0),
+                     "unknown": int(inv.get('unknown') or 0), "mine": _mine(r['id'], user['id'])})
+    return {"name": user['name'], "inventories": rows}
+
+
+@app.post("/api/scan/{inventory_id}")
+async def scan_code(request: Request, inventory_id: int, who=Depends(scan_user)):
+    _joined(inventory_id, who)
+    body = await _json_object(request)
+    ok, result = inventory.scan(inventory_id, str(body.get("code") or ""), who[0]['id'])
+    if not ok:
+        raise HTTPException(400, result)
+    return result
+
+
+@app.post("/api/scan/{inventory_id}/unscan")
+async def scan_undo(request: Request, inventory_id: int, who=Depends(scan_user)):
+    _joined(inventory_id, who)
+    body = await _json_object(request)
+    ok, result = inventory.unscan(inventory_id, parse_int(str(body.get("scan_id") or "")) or 0, who[0]['id'])
+    if not ok:
+        raise HTTPException(400, result)
+    if not result['removed']:
+        raise HTTPException(400, "Можно убрать только свой скан.")
+    return result
 
 
 # ---------------------------------------------------------------- первоначальная настройка и настройки

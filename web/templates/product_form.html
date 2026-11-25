@@ -6,6 +6,19 @@
   {% if product.id %}<a href="/labels?articles={{ product.article_number | urlencode }}" role="button" class="secondary outline">Ценник</a>{% endif %}
 </div>
 {% for e in errors or [] %}<div class="flash error">{{ e }}</div>{% endfor %}
+{% if product.id and product.inv_mark %}
+<div class="flash {{ {'missing': 'error', 'added': 'info', 'moved': 'info'}.get(product.inv_mark, 'ok') }}" style="display:flex;flex-wrap:wrap;gap:.6rem;align-items:center">
+  <span>📦 Инвентаризация{% if product.inv_mark_id %} <a href="/inventory/{{ product.inv_mark_id }}">№{{ product.inv_mark_id }}</a>{% endif %}
+    {% if product.inv_mark_at %}от {{ product.inv_mark_at.strftime('%d.%m.%Y') }}{% endif %}:
+    <b>{{ marks.get(product.inv_mark, product.inv_mark) }}</b>{% if product.inv_mark_note %} <span class="muted">({{ product.inv_mark_note }})</span>{% endif %}</span>
+  {% if product.inv_mark == 'missing' %}
+  <form method="post" action="/products/{{ product.id }}/inventory-resolved" class="inline" style="margin:0">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit" class="secondary outline" style="padding:.2rem .7rem;margin:0"
+            title="Разобрались: продано без пробития, списано, в ремонте… Если нашлось — укажите остаток ниже и сохраните.">✔ Уточнено</button>
+  </form>{% endif %}
+</div>
+{% endif %}
 
 <form method="post" enctype="multipart/form-data">
   <input type="hidden" name="csrf" value="{{ csrf }}">

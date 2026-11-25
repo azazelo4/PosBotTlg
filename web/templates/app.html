@@ -54,6 +54,8 @@
 
 <div id="search">
   <h1>Продажа</h1>
+  <div class="card hidden" id="inv-banner">📦 <b>Идёт инвентаризация</b> <span id="inv-store"></span><br>
+    <a href="/scan">Помочь сканировать изделия →</a></div>
   <button class="btn scan" id="scan-btn">📷 Сканировать ценник</button>
   <label for="article">или введите артикул</label>
   <div class="row">
@@ -163,6 +165,8 @@ function sell() {
 
 function loadToday() {
   api('/api/app/me').then(me => {
+    $('inv-banner').classList.toggle('hidden', !(me.inventory && me.inventory.length));
+    $('inv-store').textContent = (me.inventory || []).join(', ');
     const box = $('today'); box.replaceChildren();
     let total = 0;
     me.today.forEach(s => {
@@ -232,6 +236,7 @@ if (!tg || !tg.initData) {
   $('outside').classList.remove('hidden'); $('search').classList.add('hidden');
 } else {
   tg.ready(); tg.expand();
+  try { sessionStorage.setItem('posbot_init', tg.initData); } catch (e) {}
   $('scan-btn').onclick = startScan;
   $('scan-close').onclick = stopScan;
   $('find-btn').onclick = () => find($('article').value);

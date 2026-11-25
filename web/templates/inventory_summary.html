@@ -3,53 +3,93 @@
 {% block content %}
 <p><a href="/inventory/{{ inv.id }}">← {{ 'К сканированию' if inv.status == 'open' else 'Инвентаризация №' ~ inv.id }}</a></p>
 <h2>Итог инвентаризации №{{ inv.id }} · {{ inv.store }}</h2>
-{% macro line(r) %}{{ r.model or '' }} <span class="muted">{{ r.article_number }}{% if r.weight %} · {{ '%g' % r.weight }} г{% endif %}{% if r.size %} · р. {{ r.size }}{% endif %}</span>{% endmacro %}
+{% macro line(r) %}{% if r.id %}<a href="/products/{{ r.id }}">{{ r.model or r.article_number }}</a>{% else %}{{ r.model or '' }}{% endif %}
+  <span class="muted">{{ r.article_number }}{% if r.weight %} · {{ '%g' % r.weight }} г{% endif %}{% if r.size %} · р. {{ r.size }}{% endif %}</span>{% endmacro %}
+{% macro more(items) %}{% if items|length > limit %}<p class="muted">…и ещё {{ items|length - limit }}</p>{% endif %}{% endmacro %}
+
+{% if inv.status != 'open' %}
+<div class="flash info">Инвентаризация {{ 'применена' if inv.status == 'applied' else 'отменена' }}. Ниже — пересчёт по текущей
+  базе; что было сделано — на странице <a href="/inventory/{{ inv.id }}">инвентаризации</a> и в метках товаров.</div>
+{% endif %}
+
 <div class="grid">
-  <article><div class="muted">Найдено изделий</div><div class="stat">{{ s.found }}</div>
-    <small class="muted">{{ s.restocked }} из них сейчас с остатком 0 — получат 1</small></article>
-  <article><div class="muted">Из других магазинов</div><div class="stat">{{ s.moved|length }}</div>
-    <small class="muted">будут перенесены в «{{ inv.store }}»</small></article>
-  <article><div class="muted">Не найдено</div><div class="stat">{{ s.missing|length }}</div>
-    <small class="muted">числятся в «{{ inv.store }}» с остатком, но не отсканированы</small></article>
-  <article><div class="muted">Неизвестные коды</div><div class="stat">{{ s.unknown|length }}</div>
-    <small class="muted">товара с таким кодом нет в базе</small></article>
+  <article><div class="muted">❌ Будет снижено до 0</div><div class="stat">{{ s.missing|length }}</div>
+    <small class="muted">не найдены — метка «требует уточнения»</small></article>
+  <article><div class="muted">➕ Будет добавлено</div><div class="stat">{{ s.added|length }}</div>
+    <small class="muted">по базе 0 — станет 1, метка «выявлено»</small></article>
+  <article><div class="muted">🔁 Будет перенесено</div><div class="stat">{{ s.moved|length }}</div>
+    <small class="muted">из других магазинов в «{{ inv.store }}»</small></article>
+  <article><div class="muted">✔️ Есть в базе</div><div class="stat">{{ s.checked|length + s.reduced|length }}</div>
+    <small class="muted">метка «проверено»{% if s.reduced %}; у {{ s.reduced|length }} остаток уменьшится{% else %}, без изменений{% endif %}</small></article>
+  <article><div class="muted">❓ Нет в базе</div><div class="stat">{{ s.unknown|length }}</div>
+    <small class="muted">добавьте товар и отсканируйте ещё раз</small></article>
 </div>
+
+{% if s.missing %}
+<article class="flash error" style="margin-bottom:1rem">
+  <strong>⚠️ Остаток будет снижен до 0 у {{ s.missing|length }} позиций.</strong>
+  Они числятся в «{{ inv.store }}», но не отсканированы. Проверьте сейф, витрину, ремонт — и досканируйте найденное
+  до применения. После применения у них будет метка «не найдено — требует уточнения».
+</article>
+<h4>❌ Будет снижено до 0 ({{ s.missing|length }})</h4>
+<div class="table-wrap"><table><thead><tr><th>Изделие</th><th class="num">Сейчас</th><th class="num">Станет</th></tr></thead><tbody>
+  {% for r in s.missing[:limit] %}<tr><td>{{ line(r) }}</td><td class="num">{{ r.quantity }}</td><td class="num"><b>0</b></td></tr>{% endfor %}
+</tbody></table></div>{{ more(s.missing) }}
+{% endif %}
+
+{% if s.unknown %}
+<h4>❓ Нет в базе ({{ s.unknown|length }})</h4>
+<p class="muted">Ни у одного товара нет такого кода: изделие не загружено в каталог или у товара не указан штрихкод
+  старого ценника. Добавьте товар (код подставится) или впишите штрихкод в карточку существующего, затем отсканируйте
+  изделие ещё раз — оно попадёт в «Будет добавлено».</p>
+<div class="table-wrap"><table><tbody>{% for u in s.unknown[:limit] %}
+  <tr><td><code>{{ u.code }}</code></td><td class="muted">{{ u.n }} раз, последний {{ u.last.strftime('%H:%M') }}</td>
+    <td>{% if inv.status == 'open' %}<a role="button" class="secondary outline" style="padding:.2rem .7rem;margin:0"
+      href="/products/new?{{ u.suggest | urlencode }}&store_id={{ inv.store_id }}&quantity=0" target="_blank">+ Добавить товар</a>{% endif %}</td></tr>{% endfor %}</tbody></table></div>
+{{ more(s.unknown) }}
+{% endif %}
+
+{% if s.reduced %}
+<h4>🔽 Есть в базе, остаток уменьшится ({{ s.reduced|length }})</h4>
+<div class="table-wrap"><table><tbody>{% for r in s.reduced[:limit] %}
+  <tr><td>{{ line(r) }}</td><td class="muted">{{ r.note }}</td><td class="num">{{ r.quantity }} → <b>{{ r.new_qty }}</b></td></tr>{% endfor %}</tbody></table></div>{{ more(s.reduced) }}
+{% endif %}
+
+{% if s.added %}
+<h4>➕ Будет добавлено ({{ s.added|length }}) — по базе 0, станет 1</h4>
+<div class="table-wrap"><table><tbody>{% for r in s.added[:limit] %}
+  <tr><td>{{ line(r) }}</td><td class="num">0 → <b>{{ r.new_qty }}</b></td></tr>{% endfor %}</tbody></table></div>{{ more(s.added) }}
+{% endif %}
+
+{% if s.moved %}
+<h4>🔁 Будет перенесено в «{{ inv.store }}» ({{ s.moved|length }})</h4>
+<div class="table-wrap"><table><tbody>{% for r in s.moved[:limit] %}
+  <tr><td>{{ line(r) }}</td><td class="muted">сейчас: {{ r.store or 'без магазина' }}, {{ r.quantity }} шт.</td>
+    <td class="num">→ <b>{{ r.new_qty }}</b></td></tr>{% endfor %}</tbody></table></div>{{ more(s.moved) }}
+{% endif %}
+
+{% if s.sold_after %}
+<h4>Проданы после скана ({{ s.sold_after|length }}) — остаток будет 0</h4>
+<ul>{% for r in s.sold_after[:limit] %}<li>{{ line(r) }}</li>{% endfor %}</ul>
+{% endif %}
+
+{% if s.checked %}
+<details><summary>✔️ Есть в базе, без изменений ({{ s.checked|length }})</summary>
+<div class="table-wrap"><table><tbody>{% for r in s.checked[:limit] %}
+  <tr><td>{{ line(r) }}</td><td class="muted">{{ r.note }}</td></tr>{% endfor %}</tbody></table></div>{{ more(s.checked) }}
+</details>
+{% endif %}
 
 {% if inv.status == 'open' %}
 <article>
   <form method="post" action="/inventory/{{ inv.id }}/apply"
-        data-confirm="Применить инвентаризацию? Остатки магазина «{{ inv.store }}» изменятся." onsubmit="return confirm(this.dataset.confirm)">
+        data-confirm="Применить инвентаризацию магазина «{{ inv.store }}»?&#10;&#10;Снизить до 0: {{ s.missing|length }}&#10;Добавить: {{ s.added|length }}&#10;Перенести: {{ s.moved|length }}{% if s.reduced %}&#10;Уменьшить остаток: {{ s.reduced|length }}{% endif %}&#10;Без изменений: {{ s.checked|length }}"
+        onsubmit="return confirm(this.dataset.confirm)">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <label><input type="checkbox" name="zero_missing" checked> Обнулить остаток у ненайденных ({{ s.missing|length }})</label>
     <button type="submit">Применить</button>
   </form>
-  <small class="muted">Найденные изделия получат остаток 1 и магазин «{{ inv.store }}». Изделие, проданное уже после скана,
-    остаток не получит. Коды маркировки и цены не меняются.</small>
+  <small class="muted">Найденные изделия получат остаток 1 и магазин «{{ inv.store }}», ненайденные — остаток 0 с меткой
+    «требует уточнения». Изделие, проданное после скана, остаток не получит. Коды маркировки и цены не меняются.</small>
 </article>
-{% endif %}
-
-{% if s.sold_after %}
-<h4>Проданы после скана ({{ s.sold_after|length }}) — остаток не получат</h4>
-<ul>{% for r in s.sold_after[:limit] %}<li>{{ line(r) }}</li>{% endfor %}</ul>
-{% endif %}
-
-{% if s.moved %}
-<h4>Из других магазинов ({{ s.moved|length }})</h4>
-<div class="table-wrap"><table><tbody>{% for r in s.moved[:limit] %}
-  <tr><td>{{ line(r) }}</td><td class="muted">сейчас: {{ r.store or 'без магазина' }}</td></tr>{% endfor %}</tbody></table></div>
-{% endif %}
-
-{% if s.unknown %}
-<h4>Неизвестные коды ({{ s.unknown|length }})</h4>
-<p class="muted">Такого кода нет ни у одного товара: изделие не загружено в каталог или у товара не указан штрихкод
-  старого ценника. Найдите изделие, добавьте его (или впишите штрихкод в карточку товара) и отсканируйте ещё раз.</p>
-<div class="table-wrap"><table><tbody>{% for u in s.unknown[:limit] %}
-  <tr><td><code>{{ u.code }}</code></td><td class="muted">{{ u.n }} раз, последний {{ u.last.strftime('%H:%M') }}</td></tr>{% endfor %}</tbody></table></div>
-{% endif %}
-
-{% if s.missing %}
-<h4>Не найдено ({{ s.missing|length }}{% if s.missing|length > limit %}, показаны первые {{ limit }}{% endif %})</h4>
-<div class="table-wrap"><table><tbody>{% for r in s.missing[:limit] %}
-  <tr><td>{{ line(r) }}</td><td class="num">{{ r.quantity }} шт.</td></tr>{% endfor %}</tbody></table></div>
 {% endif %}
 {% endblock %}

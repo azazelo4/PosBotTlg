@@ -127,7 +127,8 @@ def make_settings_watcher(restart=_restart_process):
 def start_scheduler():
     from utils.common import tz
     from utils.scheduled_jobs import (scheduled_daily_report, send_low_stock_notification, catch_up_daily_reports,
-                                      telegram_heartbeat, fiscal_tick, send_customer_receipts)
+                                      telegram_heartbeat, fiscal_tick, send_customer_receipts,
+                                      send_inventory_invites)
     scheduler = BackgroundScheduler(timezone=tz())
     soon = datetime.now(tz()) + timedelta(seconds=START_DELAY_SECONDS)
     report_time = _parse_hhmm(config.DAILY_REPORT_TIME, "DAILY_REPORT_TIME")
@@ -147,6 +148,8 @@ def start_scheduler():
     scheduler.add_job(fiscal_tick, 'interval', seconds=FISCAL_POLL_SECONDS, id='fiscal_queue', coalesce=True,
                       max_instances=1)
     scheduler.add_job(send_customer_receipts, 'interval', seconds=FISCAL_POLL_SECONDS * 2, id='customer_receipts',
+                      coalesce=True, max_instances=1)
+    scheduler.add_job(send_inventory_invites, 'interval', seconds=FISCAL_POLL_SECONDS * 2, id='inventory_invites',
                       coalesce=True, max_instances=1)
     scheduler.add_job(telegram_heartbeat, 'interval', minutes=HEARTBEAT_MINUTES, id='telegram_heartbeat',
                       next_run_time=soon, coalesce=True, max_instances=1)

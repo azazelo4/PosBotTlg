@@ -20,6 +20,10 @@
     <option value="yes" {% if stock == 'yes' %}selected{% endif %}>В наличии</option>
     <option value="no" {% if stock == 'no' %}selected{% endif %}>Нет в наличии</option>
   </select>
+  <select name="mark" aria-label="Инвентаризация">
+    <option value="">Инвентаризация: любая метка</option>
+    {% for k, title in marks.items() %}<option value="{{ k }}" {% if mark == k %}selected{% endif %}>{{ title }}</option>{% endfor %}
+  </select>
   <button type="submit">Найти</button>
 </form>
 
@@ -36,7 +40,9 @@
       {% if thumbs %}<td>{% if thumbs.get(p.id) %}<a href="/products/{{ p.id }}"><img src="{{ thumbs[p.id] }}" alt="" loading="lazy"
         style="width:48px;height:48px;object-fit:cover;border-radius:6px;display:block"></a>{% endif %}</td>{% endif %}
       <td><a href="/products/{{ p.id }}">{{ p.article_number }}</a></td>
-      <td>{{ p.model }}<br><small class="muted">{{ p.product_type }}{% if p.inserts %} · {{ p.inserts }}{% endif %}</small></td>
+      <td>{{ p.model }}<br><small class="muted">{{ p.product_type }}{% if p.inserts %} · {{ p.inserts }}{% endif %}</small>
+        {% if p.inv_mark in ('missing', 'added', 'moved') %}<br><small {% if p.inv_mark == 'missing' %}style="color:var(--pico-del-color)"{% endif %} title="{{ p.inv_mark_note or '' }}">
+          {{ {'missing': '❌ требует уточнения', 'added': '➕ выявлено', 'moved': '🔁 перемещено'}[p.inv_mark] }}{% if p.inv_mark_at %} · {{ p.inv_mark_at.strftime('%d.%m') }}{% endif %}</small>{% endif %}</td>
       <td><small>{{ details(p) }}</small></td>
       <td>{{ p.Store }}</td>
       <td class="num">{{ p.price | money }}</td>
@@ -54,9 +60,9 @@
 
 {% if pages > 1 %}
 <nav class="row-actions" style="justify-content:center">
-  {% if page > 1 %}<a href="?q={{ q | urlencode }}&store={{ store or '' }}&stock={{ stock }}&page={{ page - 1 }}">← Назад</a>{% endif %}
+  {% if page > 1 %}<a href="?q={{ q | urlencode }}&store={{ store or '' }}&stock={{ stock }}&mark={{ mark }}&page={{ page - 1 }}">← Назад</a>{% endif %}
   <span class="muted">Стр. {{ page }} из {{ pages }}</span>
-  {% if page < pages %}<a href="?q={{ q | urlencode }}&store={{ store or '' }}&stock={{ stock }}&page={{ page + 1 }}">Вперёд →</a>{% endif %}
+  {% if page < pages %}<a href="?q={{ q | urlencode }}&store={{ store or '' }}&stock={{ stock }}&mark={{ mark }}&page={{ page + 1 }}">Вперёд →</a>{% endif %}
 </nav>
 {% endif %}
 <script>

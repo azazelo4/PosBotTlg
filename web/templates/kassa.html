@@ -192,6 +192,7 @@
     <span class="org">{{ org }}</span>
     <span id="store-box"></span>
     <span class="spacer"></span>
+    <a class="btn primary hidden" id="inv-link" href="/scan" title="Идёт инвентаризация — помочь сканировать">📦 Инвентаризация</a>
     <span><span class="muted">Кассир:</span> <b id="who"></b></span>
     <a class="muted" href="/help/kassir" target="_blank">Справка</a>
     <button class="btn" id="osk-toggle" title="Экранная клавиатура для сенсорного экрана" aria-pressed="false">⌨ Клавиатура</button>
@@ -313,10 +314,17 @@ async function start() {
   $("#app").classList.remove("hidden");
   $("#who").textContent = me.name;
   renderStore();
+  showInventory();
   $("#ops").innerHTML = OPS.map(([key, title], i) => `<button data-op="${key}">${title} <kbd>Alt+${i + 1}</kbd></button>`).join("");
   $("#ops").onclick = e => { const b = e.target.closest("button"); if (b) open(b.dataset.op); };
   open(current);
   refreshSide();
+}
+
+function showInventory() {
+  const on = !!(me && me.inventory && me.inventory.length);
+  $("#inv-link").classList.toggle("hidden", !on);
+  if (on) $("#inv-link").title = "Идёт инвентаризация: " + me.inventory.join(", ") + " — помочь сканировать";
 }
 
 function renderStore() {
@@ -330,7 +338,8 @@ function renderStore() {
     (me.store_id ? "" : '<option value="">— выберите —</option>') +
     me.stores.map(s => `<option value="${s.id}" ${s.id === me.store_id ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</select>`;
   $("#store").onchange = async e => {
-    try { await api("store", {store_id: Number(e.target.value)}); me.store_id = Number(e.target.value); renderStore(); refreshSide(); }
+    try { await api("store", {store_id: Number(e.target.value)}); me.store_id = Number(e.target.value); renderStore(); refreshSide();
+          api("me").then(m => { me.inventory = m.inventory; showInventory(); }).catch(() => {}); }
     catch (err) { toast(err.message, "err"); }
   };
 }
