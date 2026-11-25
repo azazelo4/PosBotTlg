@@ -89,9 +89,14 @@ TABLES = {
           `cost_price` decimal(12,0) DEFAULT NULL,
           `is_marked` tinyint(1) NOT NULL DEFAULT 0,
           `barcode` varchar(64) DEFAULT NULL,
+          `inv_mark` enum('checked','added','moved','missing','resolved') DEFAULT NULL,
+          `inv_mark_at` datetime DEFAULT NULL,
+          `inv_mark_id` int DEFAULT NULL,
+          `inv_mark_note` varchar(255) DEFAULT NULL,
           PRIMARY KEY (`id`),
           KEY `idx_products_article` (`article_number`),
           KEY `idx_products_barcode` (`barcode`),
+          KEY `idx_products_inv_mark` (`inv_mark`),
           KEY `idx_products_store` (`store_id`)
         ) {CHARSET}""",
     "receipts": f"""
@@ -386,6 +391,10 @@ COLUMNS = [
     ("products", "is_marked", "tinyint(1) NOT NULL DEFAULT 0"),
     # штрихкод с ценника прежней программы (EAN и т. п.) — касса находит товар и по нему
     ("products", "barcode", "varchar(64) DEFAULT NULL"),
+    ("products", "inv_mark", "enum('checked','added','moved','missing','resolved') DEFAULT NULL"),
+    ("products", "inv_mark_at", "datetime DEFAULT NULL"),
+    ("products", "inv_mark_id", "int DEFAULT NULL"),
+    ("products", "inv_mark_note", "varchar(255) DEFAULT NULL"),
     ("inventories", "notified", "tinyint(1) NOT NULL DEFAULT 0"),
     ("sales", "mark_code_id", "int DEFAULT NULL"),
     ("trade_ins", "new_mark_code_id", "int DEFAULT NULL"),
@@ -417,6 +426,7 @@ INDEXES = [
     ("sales", "idx_sales_date", "(`sale_date`)"),
     ("products", "idx_products_article", "(`article_number`)"),
     ("products", "idx_products_barcode", "(`barcode`)"),
+    ("products", "idx_products_inv_mark", "(`inv_mark`)"),
     ("sales", "idx_sales_receipt", "(`receipt_id`)"),
     ("receipts", "idx_receipts_customer", "(`customer_id`)"),
 ]

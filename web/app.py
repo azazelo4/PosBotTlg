@@ -279,13 +279,17 @@ PAGE_SIZE = 50
 
 
 @app.get("/products", response_class=HTMLResponse)
-def products(request: Request, q: str = "", store: str = "", stock: str = "", page: int = 1, user=Depends(current_user)):
+def products(request: Request, q: str = "", store: str = "", stock: str = "", mark: str = "", page: int = 1,
+             user=Depends(current_user)):
     in_stock = {"yes": True, "no": False}.get(stock)
+    mark = mark if mark in inventory.MARKS else ""
     page = max(page, 1)
     store_id = parse_int(store) if store else None
-    rows, total = search_products(q.strip() or None, store_id, in_stock, PAGE_SIZE, (page - 1) * PAGE_SIZE) or ([], 0)
+    rows, total = search_products(q.strip() or None, store_id, in_stock, PAGE_SIZE, (page - 1) * PAGE_SIZE,
+                                  inv_mark=mark or None) or ([], 0)
     thumbs = {pid: photos.signed_url(ph) for pid, ph in (photos.main_photos([r['id'] for r in rows]) or {}).items()}
     return render(request, "products.html", user, rows=rows, total=total, q=q, store=store_id, stock=stock, page=page,
+                  mark=mark, marks=inventory.MARKS,
                   thumbs=thumbs,
                   pages=max((total + PAGE_SIZE - 1) // PAGE_SIZE, 1), stores=get_stores() or [], details=details_line)
 
@@ -352,6 +356,7 @@ def _form_ctx(product=None):
     gallery = [{**ph, "thumb": photos.signed_url(ph), "full": photos.signed_url(ph, thumb=False)}
                for ph in (photos.for_product(product['id']) or [] if product.get('id') else [])]
     return {"product": product, "stores": get_stores() or [], "types": PRODUCT_TYPES, "metals": METAL_TYPES,
+            "marks": inventory.MARKS,
             "photos": gallery, "max_photos": photos.MAX_PER_PRODUCT}
 
 
@@ -373,8 +378,15 @@ async def _save_photos(request, form, product_id, user):
 
 @app.get("/products/new", response_class=HTMLResponse)
 def product_new(request: Request, user=Depends(current_user)):
-    return render(request, "product_form.html", user, **_form_ctx({'track_stock': 1, 'quantity': 1,
-                                                                     'arrival_date': today()}))
+    # из итога инвентаризации: «+ Добавить товар» для кода, которого нет в базе
+    qp = request.query_params
+    product = {'track_stock': 1, 'quantity': 1, 'arrival_date': today(),
+               'barcode': re.sub(r"\s+", "", qp.get('barcode', ''))[:64] or None,
+               'article_number': qp.get('article_number', '').strip()[:64] or None,
+               'store_id': parse_int(qp.get('store_id', '')) or None}
+    if qp.get('quantity') == '0':
+        product['quantity'] = 0
+    return render(request, "product_form.html", user, **_form_ctx(product))
 
 
 @app.post("/products/new")
@@ -407,14 +419,25 @@ async def product_save(request: Request, product_id: int, user=Depends(current_u
     check_csrf(request, form.get("csrf"))
     data, errors = _product_form_data(form)
     if not errors:
+        before = get_product_by_id(product_id) or {}
         ok, msg = update_product(product_id, data)
         if ok:
             flash(request, msg)
+            if before.get('inv_mark') == 'missing' and data['quantity'] > 0:    # нашлось — уточнено
+                inventory.resolve(product_id, user['name'])
             await _save_photos(request, form, product_id, user)
             return RedirectResponse(f"/products/{product_id}", status_code=303)
         errors.append(msg)
     data['id'] = product_id
     return render(request, "product_form.html", user, errors=errors, **_form_ctx(data))
+
+
+@app.post("/products/{product_id}/inventory-resolved")
+def product_inventory_resolved(request: Request, product_id: int, csrf: str = Form(""), user=Depends(current_user)):
+    check_csrf(request, csrf)
+    ok, msg = inventory.resolve(product_id, user['name'])
+    flash(request, msg, "ok" if ok else "error")
+    return RedirectResponse(f"/products/{product_id}", status_code=303)
 
 
 @app.post("/products/{product_id}/photos/{photo_id}")
@@ -1052,15 +1075,14 @@ async def inventory_unscan(request: Request, inventory_id: int, user=Depends(cur
 
 
 @app.post("/inventory/{inventory_id}/apply")
-def inventory_apply(request: Request, inventory_id: int, csrf: str = Form(""), zero_missing: str = Form(""),
-                    user=Depends(current_user)):
+def inventory_apply(request: Request, inventory_id: int, csrf: str = Form(""), user=Depends(current_user)):
     check_csrf(request, csrf)
     _inventory_or_404(inventory_id, user)
-    ok, result = inventory.apply(inventory_id, user['id'], zero_missing=bool(zero_missing))
+    ok, result = inventory.apply(inventory_id, user['id'])
     if ok:
-        flash(request, f"Инвентаризация применена: в наличии {result['found']} изделий"
-                       + (f", из них перенесено из других магазинов {result['moved']}" if result['moved'] else "")
-                       + (f"; остаток обнулён у {result['zeroed']} ненайденных" if result['zeroed'] else "") + ".")
+        flash(request, f"Инвентаризация применена: в наличии {result['found']} изделий (проверено {result['checked']}, "
+                       f"выявлено {result['added']}, перемещено {result['moved']}); остаток снижен до 0 у "
+                       f"{result['zeroed']} ненайденных — они отмечены «требует уточнения».")
     else:
         flash(request, result, "error")
     return RedirectResponse(f"/inventory/{inventory_id}", status_code=303)

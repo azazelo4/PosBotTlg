@@ -187,34 +187,75 @@ def scans(cursor, inventory_id, limit=30, user_id=None):
     return cursor.fetchall()
 
 
+MARKS = {
+    'checked': "проверено",
+    'added': "выявлено при инвентаризации",
+    'moved': "перемещено при инвентаризации",
+    'missing': "не найдено — остаток 0, требует уточнения",
+    'resolved': "уточнено после инвентаризации",
+}
+
+
+def suggest_new(code):
+    """Неизвестный код → поля нового товара: длинный цифровой код — штрихкод старого ценника, иначе артикул."""
+    if code.isdigit() and len(code) >= 8:
+        return {"barcode": code}
+    return {"article_number": code}
+
+
+def _classify(row, store):
+    """Найденное изделие → (метка, примечание, новый остаток)."""
+    qty, sold = row['quantity'] or 0, int(row['sold_after'] or 0)
+    if row['store_id'] != store:
+        mark, note = 'moved', f"из «{row['store'] or 'без магазина'}»" + (f", было {qty} шт." if qty != 1 else "")
+    elif qty < 1:
+        mark, note = 'added', "по базе было 0"
+    else:
+        mark, note = 'checked', (f"по базе было {qty} шт." if qty != 1 else "")
+    if sold:
+        note = "; ".join(x for x in (note, "продано после скана") if x)
+    return mark, note, max(0, 1 - sold)
+
+
+_FOUND_SQL = """SELECT p.id, p.article_number, p.model, p.weight, p.size, p.quantity, p.store_id, st.name AS store,
+                       (SELECT COUNT(*) FROM sales sa LEFT JOIN returns r ON r.original_sale_id = sa.id
+                        WHERE sa.product_id = p.id AND sa.sale_date >= s.scanned_at AND r.id IS NULL) AS sold_after
+                FROM inventory_scans s JOIN products p ON p.id = s.product_id
+                LEFT JOIN stores st ON st.id = p.store_id
+                WHERE s.inventory_id = %s ORDER BY p.article_number"""
+_MISSING_SQL = """SELECT p.id, p.article_number, p.model, p.weight, p.size, p.quantity FROM products p
+                  WHERE p.store_id = %s AND p.quantity > 0
+                    AND NOT EXISTS (SELECT 1 FROM inventory_scans s WHERE s.inventory_id = %s AND s.product_id = p.id)
+                  ORDER BY p.article_number"""
+
+
 @with_connection
 def summary(cursor, inventory_id):
-    """Что изменится при применении: найдено, перенос из других магазинов, неизвестные коды, не найдено, продано
-    после скана."""
+    """Что изменится при применении — по группам: снижено до 0 (не найдено), добавлено (по базе было 0), перенесено
+    из других магазинов, проверено без изменений, нет в базе (предложить добавить), продано после скана."""
     cursor.execute("SELECT * FROM inventories WHERE id = %s", (inventory_id,))
     inv = cursor.fetchone()
     if not inv:
         return None
     store = inv['store_id']
-    cursor.execute("""SELECT p.id, p.article_number, p.model, p.weight, p.size, p.quantity, p.store_id, st.name AS store,
-                             (SELECT COUNT(*) FROM sales sa LEFT JOIN returns r ON r.original_sale_id = sa.id
-                              WHERE sa.product_id = p.id AND sa.sale_date >= s.scanned_at AND r.id IS NULL) AS sold_after
-                      FROM inventory_scans s JOIN products p ON p.id = s.product_id
-                      LEFT JOIN stores st ON st.id = p.store_id
-                      WHERE s.inventory_id = %s ORDER BY p.article_number""", (inventory_id,))
+    cursor.execute(_FOUND_SQL, (inventory_id,))
     found = cursor.fetchall()
+    groups = {'checked': [], 'added': [], 'moved': []}
+    for r in found:
+        r['mark'], r['note'], r['new_qty'] = _classify(r, store)
+        groups[r['mark']].append(r)
     cursor.execute("""SELECT code, COUNT(*) AS n, MAX(scanned_at) AS last FROM inventory_scans
                       WHERE inventory_id = %s AND product_id IS NULL GROUP BY code ORDER BY last DESC""", (inventory_id,))
     unknown = cursor.fetchall()
-    cursor.execute("""SELECT p.id, p.article_number, p.model, p.weight, p.size, p.quantity FROM products p
-                      WHERE p.store_id = %s AND p.quantity > 0
-                        AND NOT EXISTS (SELECT 1 FROM inventory_scans s WHERE s.inventory_id = %s AND s.product_id = p.id)
-                      ORDER BY p.article_number""", (store, inventory_id))
+    for u in unknown:
+        u['suggest'] = suggest_new(u['code'])
+    cursor.execute(_MISSING_SQL, (store, inventory_id))
     missing = cursor.fetchall()
     return {
         "found": len(found),
-        "moved": [r for r in found if r['store_id'] != store],
-        "restocked": sum(1 for r in found if (r['quantity'] or 0) < 1 and not r['sold_after']),
+        "checked": groups['checked'],
+        "added": groups['added'],
+        "moved": groups['moved'],
         "sold_after": [r for r in found if r['sold_after']],
         "unknown": unknown,
         "missing": missing,
@@ -222,44 +263,54 @@ def summary(cursor, inventory_id):
 
 
 @with_transaction
-def apply(cursor, inventory_id, user_id, zero_missing=True):
-    """Применить итог. Найденные: магазин инвентаризации, остаток 1 (0 — если после скана продано). Ненайденные
-    товары магазина с остатком: 0 (если zero_missing). (True, итог)."""
+def apply(cursor, inventory_id, user_id):
+    """Применить итог. Найденные: магазин инвентаризации, остаток 1 (0 — если после скана продано) и метка
+    «проверено» / «выявлено» / «перемещено». Ненайденные товары магазина с остатком: остаток 0 и метка «не найдено —
+    требует уточнения». (True, итог)."""
     cursor.execute("SELECT * FROM inventories WHERE id = %s FOR UPDATE", (inventory_id,))
     inv = cursor.fetchone()
     if not inv or inv['status'] != 'open':
         raise BusinessError("Инвентаризация уже завершена.")
-    store = inv['store_id']
-    cursor.execute("SELECT COUNT(*) AS n FROM inventory_scans WHERE inventory_id = %s AND product_id IS NOT NULL",
-                   (inventory_id,))
-    found = cursor.fetchone()['n']
+    store, moment = inv['store_id'], now()
+    cursor.execute(_FOUND_SQL + " FOR UPDATE", (inventory_id,))
+    found = cursor.fetchall()
     if not found:
         raise BusinessError("Ничего не отсканировано — применять нечего.")
-    cursor.execute("""SELECT COUNT(*) AS n FROM inventory_scans s JOIN products p ON p.id = s.product_id
-                      WHERE s.inventory_id = %s AND (p.store_id IS NULL OR p.store_id != %s)""", (inventory_id, store))
-    moved = cursor.fetchone()['n']
-    cursor.execute("""UPDATE products p JOIN inventory_scans s ON s.product_id = p.id AND s.inventory_id = %s
-                      SET p.store_id = %s,
-                          p.quantity = GREATEST(0, 1 - (SELECT COUNT(*) FROM sales sa
-                                                        LEFT JOIN returns r ON r.original_sale_id = sa.id
-                                                        WHERE sa.product_id = p.id AND sa.sale_date >= s.scanned_at
-                                                          AND r.id IS NULL))""", (inventory_id, store))
-    zeroed = 0
-    if zero_missing:
-        cursor.execute("""UPDATE products p SET p.quantity = 0
-                          WHERE p.store_id = %s AND p.quantity > 0
-                            AND NOT EXISTS (SELECT 1 FROM inventory_scans s WHERE s.inventory_id = %s
-                                                                             AND s.product_id = p.id)""",
-                       (store, inventory_id))
-        zeroed = cursor.rowcount
+    counts = {'checked': 0, 'added': 0, 'moved': 0}
+    updates = []
+    for r in found:
+        mark, note, qty = _classify(r, store)
+        counts[mark] += 1
+        updates.append((store, qty, mark, moment, inventory_id, note[:255] or None, r['id']))
+    cursor.executemany("""UPDATE products SET store_id = %s, quantity = %s, inv_mark = %s, inv_mark_at = %s,
+                                              inv_mark_id = %s, inv_mark_note = %s WHERE id = %s""", updates)
+    # примечание — до обнуления: в UPDATE MySQL присваивает слева направо
+    cursor.execute("""UPDATE products p SET p.inv_mark_note = CONCAT('по базе было ', p.quantity, ' шт.'),
+                                            p.quantity = 0, p.inv_mark = 'missing', p.inv_mark_at = %s, p.inv_mark_id = %s
+                      WHERE p.store_id = %s AND p.quantity > 0
+                        AND NOT EXISTS (SELECT 1 FROM inventory_scans s WHERE s.inventory_id = %s AND s.product_id = p.id)""",
+                   (moment, inventory_id, store, inventory_id))
+    zeroed = cursor.rowcount
     cursor.execute("SELECT COUNT(DISTINCT code) AS n FROM inventory_scans WHERE inventory_id = %s AND product_id IS NULL",
                    (inventory_id,))
     unknown = cursor.fetchone()['n']
-    result = {"found": found, "moved": moved, "zeroed": zeroed, "unknown": unknown}
+    result = {"found": len(found), **counts, "zeroed": zeroed, "unknown": unknown}
     cursor.execute("UPDATE inventories SET status = 'applied', finished_at = %s, finished_by = %s, result = %s WHERE id = %s",
-                   (now(), user_id, json.dumps(result), inventory_id))
+                   (moment, user_id, json.dumps(result), inventory_id))
     logger.info("Инвентаризация #%s применена пользователем %s: %s", inventory_id, user_id, result)
     return True, result
+
+
+@with_transaction
+def resolve(cursor, product_id, user_name):
+    """Менеджер разобрался с ненайденным изделием (нашлось, продано без пробития, списано) — снять «требует уточнения».
+    Остаток при этом не меняется: если нашлось, его исправляют в карточке."""
+    cursor.execute("""UPDATE products SET inv_mark = 'resolved', inv_mark_at = %s,
+                             inv_mark_note = LEFT(CONCAT(COALESCE(CONCAT(inv_mark_note, '; '), ''), 'уточнил(а) ', %s), 255)
+                      WHERE id = %s AND inv_mark = 'missing'""", (now(), user_name or "менеджер", product_id))
+    if not cursor.rowcount:
+        raise BusinessError("Товар не ждёт уточнения.")
+    return True, "Отмечено: уточнено."
 
 
 @with_transaction

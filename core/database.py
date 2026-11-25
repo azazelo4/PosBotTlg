@@ -434,9 +434,12 @@ def get_enum_or_distinct_values(cursor, table_name, column_name, add_other_optio
 
 
 @with_connection
-def search_products(cursor, query=None, store=None, in_stock=None, limit=50, offset=0):
+def search_products(cursor, query=None, store=None, in_stock=None, limit=50, offset=0, inv_mark=None):
     """Поиск товаров для админки. Возвращает (строки, всего)."""
     where, params = [], []
+    if inv_mark:
+        where.append("p.inv_mark = %s")
+        params.append(inv_mark)
     if query:
         where.append("(p.article_number LIKE %s OR p.model LIKE %s)")
         params += [f"%{query}%", f"%{query}%"]
