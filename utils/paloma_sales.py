@@ -586,9 +586,11 @@ def apply_plan(cursor, plan: SalesPlan, user_id):
                 # дня мог достаться более позднему времени)
                 cursor.execute("""SELECT s.id FROM sales s LEFT JOIN returns r ON r.original_sale_id = s.id
                                   WHERE s.product_id = %s AND s.source = %s AND s.sale_date < %s AND r.id IS NULL
-                                  ORDER BY s.sale_date <= %s DESC, s.sale_date DESC, s.id DESC LIMIT 1 FOR UPDATE""",
+                                  ORDER BY s.store_id <=> %s DESC, s.sale_date <= %s DESC, s.sale_date DESC, s.id DESC
+                                  LIMIT 1 FOR UPDATE""",
                                (product_id, SOURCE,
-                                datetime.combine(ch['time'].date(), datetime.min.time()) + timedelta(days=1), ch['time']))
+                                datetime.combine(ch['time'].date(), datetime.min.time()) + timedelta(days=1),
+                                store_id, ch['time']))
                 sale = cursor.fetchone()
                 if not sale:
                     created['unlinked_returns'] += 1
