@@ -104,7 +104,8 @@ def _catch_up(report_time, moment):
     sent = []
     day = max(last_day + timedelta(days=1), due - timedelta(days=CATCH_UP_DAYS - 1))
     while day <= due:
-        ops = get_period_operations(*day_bounds(day, day))
+        # загруженные из Паломы продажи — не повод досылать отчёт за прошлый день
+        ops = get_period_operations(*day_bounds(day, day), include_imported=False)
         if ops is None:
             break                                    # БД недоступна — попробуем в следующий раз
         if any(ops.values()):

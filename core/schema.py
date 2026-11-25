@@ -110,8 +110,11 @@ TABLES = {
           `payment_type` varchar(32) NOT NULL,
           `customer_id` int DEFAULT NULL,
           `public_token` char(32) DEFAULT NULL,
+          `source` varchar(16) DEFAULT NULL,
+          `external_id` varchar(96) DEFAULT NULL,
           PRIMARY KEY (`id`),
           UNIQUE KEY `uq_receipts_token` (`public_token`),
+          UNIQUE KEY `uq_receipts_external` (`source`, `external_id`),
           KEY `idx_receipts_date` (`created_at`),
           KEY `idx_receipts_store` (`store_id`),
           CONSTRAINT `receipts_user_fk` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
@@ -147,6 +150,7 @@ TABLES = {
           `receipt_id` int DEFAULT NULL,
           `list_price` decimal(12,0) DEFAULT NULL,
           `mark_code_id` int DEFAULT NULL,
+          `source` varchar(16) DEFAULT NULL,
           PRIMARY KEY (`id`),
           KEY `idx_sales_receipt` (`receipt_id`),
           KEY `product_id` (`product_id`),
@@ -166,8 +170,11 @@ TABLES = {
           `user_id` int NOT NULL,
           `store_id` int DEFAULT NULL,
           `return_date` datetime NOT NULL,
+          `source` varchar(16) DEFAULT NULL,
+          `external_id` varchar(96) DEFAULT NULL,
           PRIMARY KEY (`id`),
           UNIQUE KEY `uq_returns_sale` (`original_sale_id`),
+          UNIQUE KEY `uq_returns_external` (`source`, `external_id`),
           KEY `idx_returns_date` (`return_date`),
           CONSTRAINT `returns_sale_fk` FOREIGN KEY (`original_sale_id`) REFERENCES `sales` (`id`),
           CONSTRAINT `returns_user_fk` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
@@ -396,6 +403,12 @@ COLUMNS = [
     ("products", "inv_mark_id", "int DEFAULT NULL"),
     ("products", "inv_mark_note", "varchar(255) DEFAULT NULL"),
     ("inventories", "notified", "tinyint(1) NOT NULL DEFAULT 0"),
+    # импорт продаж из прежней программы (Палома): source = 'paloma'
+    ("receipts", "source", "varchar(16) DEFAULT NULL"),
+    ("receipts", "external_id", "varchar(96) DEFAULT NULL"),
+    ("sales", "source", "varchar(16) DEFAULT NULL"),
+    ("returns", "source", "varchar(16) DEFAULT NULL"),
+    ("returns", "external_id", "varchar(96) DEFAULT NULL"),
     ("sales", "mark_code_id", "int DEFAULT NULL"),
     ("trade_ins", "new_mark_code_id", "int DEFAULT NULL"),
     # фискализация: заводской номер кассы Webkassa (ЗНК) у магазина
@@ -429,6 +442,8 @@ INDEXES = [
     ("products", "idx_products_inv_mark", "(`inv_mark`)"),
     ("sales", "idx_sales_receipt", "(`receipt_id`)"),
     ("receipts", "idx_receipts_customer", "(`customer_id`)"),
+    ("receipts", "uq_receipts_external", "UNIQUE (`source`, `external_id`)"),
+    ("returns", "uq_returns_external", "UNIQUE (`source`, `external_id`)"),
 ]
 
 
@@ -546,7 +561,9 @@ def ensure_schema(connection, default_stores=None):
         for table, index, cols in INDEXES:
             if not _index_exists(cursor, table, index):
                 logger.info("Миграция: добавляю индекс %s.%s", table, index)
-                cursor.execute(f"ALTER TABLE `{table}` ADD INDEX `{index}` {cols}")
+                unique = cols.startswith("UNIQUE ")
+                cols = cols.removeprefix("UNIQUE ")
+                cursor.execute(f"ALTER TABLE `{table}` ADD {'UNIQUE ' if unique else ''}INDEX `{index}` {cols}")
         cursor.execute("SET FOREIGN_KEY_CHECKS = 1")
         connection.commit()
         logger.info("Схема БД проверена и актуальна.")

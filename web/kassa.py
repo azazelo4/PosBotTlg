@@ -523,7 +523,7 @@ def _journal(ops):
 def shift(request: Request, user=Depends(kassa_user)):
     store_id = kassa_store_id(request, user)
     d = today()
-    ops = get_period_operations(*day_bounds(d, d), store_id=store_id)
+    ops = get_period_operations(*day_bounds(d, d), store_id=store_id, include_imported=False)
     if ops is None:
         raise HTTPException(500, "Ошибка базы данных. Попробуйте ещё раз.")
     summary = build_summary(ops)

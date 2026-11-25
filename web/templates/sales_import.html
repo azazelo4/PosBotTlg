@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Импорт продаж из Паломы{% endblock %}
+{% block content %}
+<h2>Импорт продаж из Паломы</h2>
+{% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+
+{% if not plan %}
+<article>
+  <form method="post" enctype="multipart/form-data">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Два отчёта Паломы за один период — «Акт реализации» и «Отчёт по счетам» (.xls, как выгружает Палома, или сохранённые в .xlsx)
+      <input type="file" name="files" accept=".xls,.xlsx,.html,.htm" multiple required></label>
+    <button type="submit">Проверить файлы</button>
+  </form>
+  <small class="muted">Сначала покажу предпросмотр. В базу ничего не попадёт, пока вы не подтвердите.</small>
+</article>
+<details open>
+  <summary>Как это работает</summary>
+  <ul>
+    <li><strong>«Акт реализации»</strong> — что продано: по дням, код товара, количество, сумма, возвраты.
+      <strong>«Отчёт по счетам»</strong> — чеки: время, сотрудник, торговый объект, оплата наличными и картой.</li>
+    <li>Изделия раскладываются по чекам своего дня по сумме. Если по сумме чек однозначно не подобрать, изделия дня
+      распределяются по оставшимся чекам, а цены подгоняются под сумму чека — итоги дня, чеков и оплат совпадают с Паломой.</li>
+    <li>Изделия ищутся по коду товара Паломы (артикул в каталоге) или штрихкоду — сначала загрузите каталог.</li>
+    <li><strong>Остатки не меняются</strong>, в Webkassa ничего не отправляется, сегодняшние «наличные в кассе» и итоги
+      смены не затрагиваются. В отчётах, аналитике и при возврате — как обычные продажи.</li>
+    <li>Продавцы сопоставляются с сотрудниками по имени; кого нет — записываются как «Имя (Палома)» без доступа к боту.</li>
+    <li>Повторная загрузка безопасна: дни, уже загруженные из Паломы, пропускаются.</li>
+  </ul>
+</details>
+{% else %}
+
+{% for e in plan.errors %}<div class="flash error">{{ e }}</div>{% endfor %}
+{% for w in plan.warnings %}<div class="flash info">{{ w }}</div>{% endfor %}
+
+{% if plan_id %}
+<p class="muted">Период: {{ plan.period[0] | ddmmyyyy }} — {{ plan.period[1] | ddmmyyyy }}</p>
+<div class="grid">
+  <article><div class="muted">Чеков продажи</div><div class="stat">{{ plan.stats.checks }}</div>
+    <small class="muted">{{ plan.stats.sales }} изделий на {{ plan.stats.sales_sum | money }}</small></article>
+  <article><div class="muted">Возвратов</div><div class="stat">{{ plan.stats.returns }}</div>
+    <small class="muted">на {{ plan.stats.returns_sum | money }}</small></article>
+  <article><div class="muted">Оплата</div><div class="stat" style="font-size:1.1rem">{{ (plan.stats.cash) | money }}</div>
+    <small class="muted">наличными; картой {{ plan.stats.card | money }}</small></article>
+  <article><div class="muted">Чеков с изделиями точно по сумме</div><div class="stat">{{ plan.stats.exact }}</div>
+    <small class="muted">ещё {{ plan.stats.fitted }} — с распределением цен по сумме чека</small></article>
+</div>
+
+<div class="grid">
+  <article>
+    <strong>Магазины</strong>
+    <ul>{% for name, st in plan.stores.items() %}<li>{{ name or '—' }} → <b>{{ st[1] }}</b></li>{% endfor %}</ul>
+  </article>
+  <article>
+    <strong>Продавцы</strong>
+    <ul>{% for name, s in plan.sellers.items() %}<li>{{ name or '—' }} → {% if s[0] %}<b>{{ s[1] }}</b>{% else %}
+      «{{ s[1] }}» <small class="muted">(будет создан без доступа к боту)</small>{% endif %}</li>{% endfor %}</ul>
+  </article>
+</div>
+
+<article>
+  <form method="post" action="/sales-import/{{ plan_id }}"
+        data-confirm="Загрузить {{ plan.stats.checks }} чеков и {{ plan.stats.returns }} возвратов из Паломы?"
+        onsubmit="this.querySelector('button').setAttribute('aria-busy','true'); return confirm(this.dataset.confirm)">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit">Загрузить</button>
+  </form>
+</article>
+{% endif %}
+
+{% if missing %}
+<h4>Будут добавлены в каталог ({{ plan.missing | length }}{% if plan.missing | length > missing | length %}, показаны {{ missing | length }}{% endif %})</h4>
+<p class="muted">Эти изделия продавались, но их нет в каталоге. Чтобы к ним привязалась история продаж, они будут
+  добавлены с остатком 0: тип и вес — по названию, цена — по продаже. Проверьте их потом в «Товарах».</p>
+<div class="table-wrap"><table><tbody>{% for code, m in missing %}
+  <tr><td><code>{{ code }}</code></td><td>{{ m.name }}</td><td class="num">{{ m.units }} шт.</td><td class="num">{{ m.sum | money }}</td></tr>{% endfor %}</tbody></table></div>
+{% endif %}
+
+<p><a href="/sales-import">← Загрузить другие файлы</a></p>
+{% endif %}
+{% endblock %}
