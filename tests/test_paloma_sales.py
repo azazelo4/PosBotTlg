@@ -172,3 +172,40 @@ def test_act_saved_as_xlsx():
     act = paloma_sales.parse_act(paloma_sales.read_rows(buf.getvalue(), "act.xlsx"))
     assert [(a['code'], a['qty'], int(a['sum']), a['ret_qty'], int(a['ret_sum'])) for a in act] == [
         ("A100", 2, 200000, 1, 100000)]
+
+
+def test_extra_reports_are_skipped(tg):
+    """Выгрузили все отчёты подряд: лишние («Кассовая ведомость», второй акт) пропускаются, а не ломают импорт."""
+    junk = "<table><tr><td>Отчет:</td><td>Кассовая ведомость</td></tr><tr><th>№</th><th>Вид оплаты</th></tr></table>".encode()
+    files = _files()
+    plan = paloma_sales.build_plan(files + [(junk, "1795615310.xls"), (files[0][0], "again.xls")])
+    assert not plan.errors, plan.errors
+    assert any("пропущены: 1795615310.xls, again.xls (такой же «Акт реализации»)" in w for w in plan.warnings)
+    other = _act([(D1, [("A100", "Кольцо", 1, 99000, 0, 0)])])                        # другой акт — не молча
+    plan = paloma_sales.build_plan(files + [(other, "other.xls")])
+    assert any("два разных «Акт реализации»" in e for e in plan.errors)
+    pdf = paloma_sales.build_plan(files + [(b"%PDF-1.4", "scan.pdf")])                # нечитаемый лишний файл
+    assert not pdf.errors and any("scan.pdf" in w for w in pdf.warnings)
+
+
+def test_act_by_store_with_date_column():
+    """Вариант акта «по торговым точкам»: группа — магазин, дата в колонке каждой строки."""
+    html = ("<table><thead><tr><th rowspan='2'>&nbsp;</th><th rowspan='2'>№ п/п</th><th rowspan='2'>Дата</th>"
+            "<th rowspan='2'>Код товара</th><th rowspan='2'>Наименование</th>"
+            "<th rowspan='2'>Кол-во</th><th colspan='2'>Продажа</th><th colspan='3'>Возвраты</th></tr>"
+            "<tr><th>Цена</th><th>Сумма</th><th>Кол-во</th><th>Цена</th><th>Сумма</th></tr></thead><tbody>"
+            "<tr><td></td><td>1.</td><td colspan='30'>Торговая точка: Магазин ЦУМ</td></tr>"
+            f"<tr><td></td><td>1.1.</td><td>{_ru(D1)}</td><td>A100</td><td>Кольцо</td><td>1</td><td>121 000</td>"
+            "<td>121 000</td><td>0</td><td>0</td><td>0</td></tr></tbody></table>").encode()
+    act = paloma_sales.parse_act(paloma_sales.read_rows(html, "act.xls"))
+    assert [(a['day'], a['code'], int(a['sum'])) for a in act] == [(D1, "A100", 121000)]
+
+
+def test_act_bad_date_is_an_error():
+    rows = [["", "№ п/п", "Дата", "Код товара", "Наименование", "Кол-во", "Продажа / Цена", "Продажа / Сумма"],
+            ["", "1.1.", "31.02.2026", "A100", "Кольцо", 1, 100, 100]]
+    try:
+        paloma_sales.parse_act(rows)
+        assert False, "ожидалась ошибка"
+    except ValueError as e:
+        assert "не понял дату «31.02.2026»" in str(e)
