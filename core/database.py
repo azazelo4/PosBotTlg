@@ -1075,9 +1075,10 @@ def recent_cash_operations(cursor, limit=30, store_id=None):
 # ---------------------------------------------------------------- отчёты
 
 @with_connection
-def get_period_operations(cursor, start_dt, end_dt, store_id=None, include_imported=True):
+def get_period_operations(cursor, start_dt, end_dt, store_id=None, include_imported=True, user_id=None):
     """Все операции за полуинтервал [start_dt, end_dt) для отчёта; store_id — фильтр по магазину.
     include_imported=False — без продаж и возвратов, загруженных из прежней программы (итоги смены, касса).
+    user_id — только операции этого сотрудника (отчёт продавца «мои продажи»).
 
     Магазин операции: продажа — магазин товара на момент продажи, возврат — магазин продажи,
     trade-in — магазин нового товара, скупка и инкассация — магазин сотрудника (или выбранный).
@@ -1088,7 +1089,10 @@ def get_period_operations(cursor, start_dt, end_dt, store_id=None, include_impor
         flt = f" AND {alias}.store_id = %s" if store_id else ""
         if not include_imported and alias in ("s", "r"):
             flt += f" AND {alias}.source IS NULL"
-        cursor.execute(sql.replace("{STORE_FILTER}", flt), (start_dt, end_dt) + ((store_id,) if store_id else ()))
+        if user_id:
+            flt += f" AND {alias}.user_id = %s"
+        cursor.execute(sql.replace("{STORE_FILTER}", flt),
+                       (start_dt, end_dt) + ((store_id,) if store_id else ()) + ((user_id,) if user_id else ()))
         return cursor.fetchall()
 
     result['sales'] = run("""

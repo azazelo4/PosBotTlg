@@ -304,7 +304,7 @@ $("#login-refresh").onclick = newQr;
 let me = null;
 const OPS = [
   ["sale", "Продажа"], ["return", "Возврат"], ["buyback", "Скупка"], ["tradein", "Trade-In"],
-  ["withdrawal", "Инкассация"], ["shift", "Итоги смены"],
+  ["withdrawal", "Инкассация"], ["shift", "Итоги смены"], ["mysales", "Мои продажи"],
 ];
 let current = "sale";
 
@@ -864,6 +864,54 @@ VIEWS.shift = async root => {
       '<tr><td colspan="6" class="muted">Операций за сегодня нет</td></tr>'}</table>`;
 };
 
+// ------------------------------------------------------------ Мои продажи (за любой период)
+VIEWS.mysales = root => {
+  const iso = d => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  const now = new Date(), y = new Date(now); y.setDate(now.getDate() - 1);
+  const monday = new Date(now); monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+  const first = new Date(now.getFullYear(), now.getMonth(), 1);
+  const prevEnd = new Date(first); prevEnd.setDate(0); const prevStart = new Date(prevEnd.getFullYear(), prevEnd.getMonth(), 1);
+  const PRESETS = {"Сегодня": [now, now], "Вчера": [y, y], "Эта неделя": [monday, now], "Этот месяц": [first, now],
+                   "Прошлый месяц": [prevStart, prevEnd]};
+  root.innerHTML = `<h2>Мои продажи</h2>
+    <div class="row" id="ms-presets"></div>
+    <div class="row" style="margin-top:10px">
+      <label>с <input type="date" id="ms-start" value="${iso(now)}" max="${iso(now)}"></label>
+      <label>по <input type="date" id="ms-end" value="${iso(now)}" max="${iso(now)}"></label>
+      <button class="btn primary" id="ms-go">Показать</button>
+      <a class="btn" id="ms-xlsx" href="#">Excel</a>
+    </div>
+    <div class="msg err hidden"></div>
+    <div id="ms-out"></div>`;
+  choices($("#ms-presets", root), Object.keys(PRESETS), "Сегодня", v => {
+    $("#ms-start", root).value = iso(PRESETS[v][0]); $("#ms-end", root).value = iso(PRESETS[v][1]); load();
+  }, false);
+  async function load() {
+    const q = `start=${$("#ms-start", root).value}&end=${$("#ms-end", root).value}`;
+    $("#ms-xlsx", root).href = "/kassa/api/my-sales.xlsx?" + q;
+    showErr(root, ""); $("#ms-out", root).innerHTML = '<p class="muted">Загрузка…</p>';
+    let s;
+    try { s = await api("my-sales?" + q); } catch (e) { $("#ms-out", root).innerHTML = ""; return showErr(root, e.message); }
+    $("#ms-out", root).innerHTML = `<p class="muted">${esc(s.period)} · ${esc(me.name)}</p>
+      <div class="stats">
+        <div class="stat"><span class="muted">Продажи (${s.sales_count} поз., ${s.receipts_count} чек.)</span><b class="num">${fmt(s.sales_total)}</b></div>
+        <div class="stat"><span class="muted">Средний чек</span><b class="num">${fmt(s.sales_avg)}</b></div>
+        <div class="stat"><span class="muted">Возвраты (${s.returns_count})</span><b class="num">${fmt(s.returns_total)}</b></div>
+        <div class="stat"><span class="muted">За вычетом возвратов</span><b class="num">${fmt(s.net_sales)}</b></div>
+      </div>
+      <h3>По способам оплаты</h3>
+      <table>${Object.entries(s.by_payment).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${v.count} шт.</td><td class="amount num">${fmt(v.total)}</td></tr>`).join("") || '<tr><td class="muted">Продаж нет</td></tr>'}</table>
+      <h3>Операции</h3>
+      <table><tr><th>Время</th><th>Операция</th><th>Что</th><th>Оплата</th><th class="amount">Сумма</th></tr>${
+        s.journal.map(o => `<tr><td class="num">${esc(o.time)}</td><td>${esc(o.kind)}</td><td>${esc(o.what)}</td><td>${esc(o.payment)}</td>
+          <td class="amount num ${o.amount < 0 ? "neg" : ""}">${fmt(o.amount)}</td></tr>`).join("") ||
+        '<tr><td colspan="5" class="muted">Операций за период нет</td></tr>'}</table>
+      ${s.more ? `<p class="muted">…и ещё ${s.more} — полный список в Excel.</p>` : ""}`;
+  }
+  $("#ms-go", root).onclick = load;
+  load();
+};
+
 // ------------------------------------------------------------ правая колонка
 async function refreshSide() {
   let s;
@@ -879,7 +927,7 @@ async function refreshSide() {
 // ------------------------------------------------------------ клавиатура
 document.addEventListener("keydown", e => {
   if (!me || $("#app").classList.contains("hidden") || $("#confirm").open) return;
-  if (e.altKey && /^[1-6]$/.test(e.key)) { e.preventDefault(); open(OPS[Number(e.key) - 1][0]); return; }
+  if (e.altKey && /^[1-7]$/.test(e.key)) { e.preventDefault(); open(OPS[Number(e.key) - 1][0]); return; }
   const panel = $("#panel");
   if (e.key === "Escape" && panel.escape) { e.preventDefault(); panel.escape(); return; }
   if (current === "sale" && panel.hotkey && panel.hotkey(e)) e.preventDefault();

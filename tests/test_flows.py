@@ -239,9 +239,9 @@ def test_report_today_includes_all_operations(tg):
     tg.send(CASHIER, "Пропустить"); tg.send(CASHIER, "3000"); tg.send(CASHIER, "Наличные"); tg.send(CASHIER, "Подтвердить")
     tg.send(CASHIER, "Инкассация"); tg.send(CASHIER, "100000"); tg.send(CASHIER, "Пропустить"); tg.send(CASHIER, "Подтвердить")
 
-    tg.send(CASHIER, "Отчеты")
-    assert "По какому магазину" in tg.texts(tg.send(CASHIER, "Сегодня"))
-    calls = tg.send(CASHIER, "Все магазины")
+    tg.send(ADMIN, "Отчеты")                  # отчёт по магазинам — у менеджера и администратора
+    assert "По какому магазину" in tg.texts(tg.send(ADMIN, "Сегодня"))
+    calls = tg.send(ADMIN, "Все магазины")
     text = tg.texts(calls)
     # разбивка: A100 продан в ЦУМ, A200 — в Отау Сауда (и возвращён там же)
     assert "<b>По магазинам</b>" in text
