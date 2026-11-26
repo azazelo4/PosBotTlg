@@ -877,10 +877,11 @@ def _record_receipt(cursor, items, user_id, payment_type, store_id=None, custome
     for (product_id, price, _), code in zip(items, codes):
         p = products[product_id]
         cursor.execute("""INSERT INTO sales (product_id, user_id, sale_date, sold_price, payment_type, store_id,
-                                             receipt_id, list_price, mark_code_id, below_min)
-                          VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                                             receipt_id, list_price, mark_code_id, below_min, sale_min_price)
+                          VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                        (product_id, user_id, moment, price, payment_type, p['store_id'] or store_id, receipt_id,
-                        p['price'], code['id'] if code else None, 1 if price < (p['min_price'] or 0) else 0))
+                        p['price'], code['id'] if code else None, 1 if price < (p['min_price'] or 0) else 0,
+                        p['min_price']))
         sale_ids.append(cursor.lastrowid)
         if code:
             cursor.execute("UPDATE product_codes SET status = 'sold', sale_id = %s, updated_at = %s WHERE id = %s",
@@ -1059,12 +1060,12 @@ def create_trade_in_record(cursor, new_product_article, new_sale_price, old_item
     cursor.execute("""INSERT INTO trade_ins (old_product_article, old_item_description, old_metal_type, old_weight,
                                              old_item_value, new_product_article, new_sale_price, price_difference,
                                              payment_type_difference, user_id, store_id, trade_in_date, new_mark_code_id,
-                                             below_min)
-                      VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                                             below_min, sale_min_price)
+                      VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                    (old_product_article, old_item_description, old_metal_type, old_weight, old_item_value,
                     new_product_article, new_sale_price, price_difference, payment_type_difference,
                     user_id, store_id, now(), code['id'] if code else None,
-                    1 if new_sale_price < (new_product['min_price'] or 0) else 0))
+                    1 if new_sale_price < (new_product['min_price'] or 0) else 0, new_product['min_price']))
     trade_in_id = cursor.lastrowid
     if code:
         cursor.execute("UPDATE product_codes SET status = 'sold', sale_id = NULL, note = %s, updated_at = %s WHERE id = %s",
@@ -1141,7 +1142,7 @@ def get_period_operations(cursor, start_dt, end_dt, store_id=None, include_impor
         SELECT s.id, s.receipt_id, s.sale_date, s.sold_price, s.payment_type, s.store_id, st.name AS store,
                p.article_number, p.product_type, p.model, p.size, p.metal_type, p.weight,
                COALESCE(s.list_price, p.price) AS list_price, p.cost_price, u.name AS user_name, r.id AS return_id,
-               mc.code AS mark_code, s.below_min, p.min_price
+               mc.code AS mark_code, s.below_min, COALESCE(s.sale_min_price, p.min_price) AS min_price
         FROM sales s
         JOIN products p ON s.product_id = p.id
         LEFT JOIN product_codes mc ON mc.id = s.mark_code_id
@@ -1173,6 +1174,7 @@ def get_period_operations(cursor, start_dt, end_dt, store_id=None, include_impor
                t.old_item_value, t.new_product_article,
                (SELECT p.model FROM products p WHERE p.article_number = t.new_product_article ORDER BY p.id LIMIT 1) AS new_model,
                t.new_sale_price, t.price_difference, t.payment_type_difference, t.store_id, st.name AS store,
+               t.below_min, t.sale_min_price AS min_price,
                u.name AS user_name
         FROM trade_ins t
         LEFT JOIN stores st ON st.id = t.store_id

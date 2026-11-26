@@ -52,8 +52,9 @@ def build_summary(ops):
     deposited = sum((_d(d['amount']) for d in deposits), D0)
 
     sales_total = sum((_d(s['sold_price']) for s in sales), D0)
-    below = [s for s in sales if s.get('below_min')]
-    below_gap = sum((max(D0, _d(s.get('min_price')) - _d(s['sold_price'])) for s in below), D0)
+    below = [(s['sold_price'], s.get('min_price')) for s in sales if s.get('below_min')]
+    below += [(t['new_sale_price'], t.get('min_price')) for t in trade_ins if t.get('below_min')]
+    below_gap = sum((max(D0, _d(m) - _d(price)) for price, m in below), D0)
     # чек — несколько позиций одной оплатой; старые продажи без чека считаются чеком из одной позиции
     receipts_count = len({s.get('receipt_id') or -s['id'] for s in sales})
     returns_total = sum((_d(r['return_price']) for r in returns), D0)
@@ -238,10 +239,12 @@ def build_excel(ops, summary, start, end, store_name=None, breakdown=None, user_
              b['buyback_price'], b['payment_type'], b['store'], b['user_name']) for b in ops['buybacks']])
     _sheet(wb, "Trade-In",
            ["№", "Дата", "Сдано: артикул", "Сдано: описание", "Металл", "Вес, г", "Оценка", "Новый: артикул",
-            "Новый: модель", "Цена нового", "Доплата (+ клиент, − мы)", "Оплата доплаты", "Магазин", "Сотрудник"],
+            "Новый: модель", "Цена нового", "Доплата (+ клиент, − мы)", "Оплата доплаты", "Магазин", "Сотрудник",
+            "Ниже мин. цены"],
            [(t['id'], t['trade_in_date'], t['old_product_article'] or "", t['old_item_description'], t['old_metal_type'],
              t['old_weight'], t['old_item_value'], t['new_product_article'], t['new_model'], t['new_sale_price'],
-             t['price_difference'], t['payment_type_difference'], t['store'], t['user_name']) for t in ops['trade_ins']])
+             t['price_difference'], t['payment_type_difference'], t['store'], t['user_name'],
+             f"да (мин. {int(t['min_price'] or 0)})" if t.get('below_min') else "") for t in ops['trade_ins']])
     _sheet(wb, "Инкассация",
            ["№", "Дата", "Сумма", "Комментарий", "Магазин", "Сотрудник"],
            [(w['id'], w['withdrawal_date'], w['amount'], w['comment'], w['store'], w['user_name']) for w in ops['withdrawals']])

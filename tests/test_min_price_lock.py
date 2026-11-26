@@ -46,6 +46,10 @@ def test_lock_blocks_cashier_not_manager(tg):
     ok, _ = create_trade_in_record("A100", 100000, 50000, 50000, "Наличные", _uid('admin'), 1,
                                    old_item_description="кольцо", old_metal_type="золото", old_weight=2)
     assert ok and db_query("SELECT below_min FROM trade_ins")[0]['below_min'] == 1
+    db_query("UPDATE products SET min_price=1000 WHERE article_number='A100'")   # мин. цену потом снизили
+    text, _, _ = generate_period_report(today(), today())
+    # продажа менеджера 100 000 (мин. 120 000) + Trade-In 100 000 (мин. 120 000) — по цене на момент продажи
+    assert "Ниже минимальной цены: 2 шт., в сумме на 40 000 ₸ дешевле минимума" in text
 
 
 def test_card_and_bulk_toggle(tg):
