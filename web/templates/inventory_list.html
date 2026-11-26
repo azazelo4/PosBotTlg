@@ -23,7 +23,8 @@
   <tbody>{% for r in rows %}
     <tr><td><a href="/inventory/{{ r.id }}">№{{ r.id }}</a></td><td>{{ r.store }}</td><td>{{ r.started_at.strftime('%d.%m.%Y %H:%M') }}</td>
       <td>{{ r.user_name or '' }}</td><td class="num">{{ r.found }}</td>
-      <td>{{ {'open': 'идёт', 'applied': 'применена', 'cancelled': 'отменена'}[r.status] }}{% if r.finished_at %} {{ r.finished_at.strftime('%d.%m.%Y') }}{% endif %}</td></tr>
+      <td>{{ {'open': 'идёт', 'applied': 'применена', 'cancelled': 'отменена'}[r.status] }}{% if r.finished_at %} {{ r.finished_at.strftime('%d.%m.%Y') }}{% endif %}
+        {% if r.status == 'cancelled' %} · <a href="/inventory/{{ r.id }}">возобновить</a>{% endif %}</td></tr>
   {% endfor %}</tbody>
 </table></div>
 {% endif %}

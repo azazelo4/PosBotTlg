@@ -40,9 +40,6 @@
 
 <div class="row-actions" style="margin-bottom:1rem">
   <a href="/inventory/{{ inv.id }}/summary" role="button">Итог и применение →</a>
-  <form method="post" action="/inventory/{{ inv.id }}/cancel" onsubmit="return confirm('Отменить инвентаризацию? Сканы удалятся из итога, остатки не изменятся.')">
-    <input type="hidden" name="csrf" value="{{ csrf }}"><button class="secondary outline">Отменить</button>
-  </form>
 </div>
 
 <h4>Последние сканы</h4>
@@ -173,8 +170,17 @@
     <li>Неизвестных кодов: {{ inv.result.unknown }}</li>
   </ul>
   {% endif %}
+  {% if inv.status == 'applied' %}
   <p class="muted">Метки видны в списке товаров (фильтр «Инвентаризация») и в карточке товара; следующая инвентаризация
     магазина их обновит.</p>
+  {% else %}
+  <p>Отсканировано изделий: <b>{{ inv.found }}</b>{% if inv.unknown %}, неизвестных кодов: {{ inv.unknown }}{% endif %}.
+    Сканы сохранены — инвентаризацию можно вернуть в работу и продолжить с того же места.</p>
+  <form method="post" action="/inventory/{{ inv.id }}/resume"
+        onsubmit="return confirm('Возобновить инвентаризацию №{{ inv.id }}? Если в магазине уже начали новую, её сканы перенесутся сюда.')">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">↩ Возобновить</button>
+  </form>
+  {% endif %}
 </article>
 {% endif %}
 {% endblock %}

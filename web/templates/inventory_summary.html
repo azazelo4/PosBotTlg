@@ -107,5 +107,15 @@
   <small class="muted">Найденные изделия получат остаток 1 и магазин «{{ inv.store }}», ненайденные — остаток 0 с меткой
     «требует уточнения». Изделие, проданное после скана, остаток не получит. Коды маркировки и цены не меняются.</small>
 </article>
+<details style="margin-top:1.5rem">
+  <summary class="muted">Отменить инвентаризацию</summary>
+  <form method="post" action="/inventory/{{ inv.id }}/cancel"
+        data-confirm="Отменить инвентаризацию №{{ inv.id }}? {{ s.found }} отсканированных изделий не будут применены, остатки не изменятся. Отменённую можно возобновить."
+        onsubmit="return confirm(this.dataset.confirm)">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit" class="secondary outline">Отменить инвентаризацию</button>
+  </form>
+  <small class="muted">Сканы сохраняются: отменённую инвентаризацию можно вернуть кнопкой «↩ Возобновить».</small>
+</details>
 {% endif %}
 {% endblock %}

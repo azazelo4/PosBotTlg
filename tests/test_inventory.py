@@ -252,7 +252,7 @@ def test_photo_during_inventory(tg):
     from test_photos import _img
     manager = _web(tg, MANAGER)
     ok, inv = inventory.start(1, _uid('manager'))
-    csrf = _csrf(manager, f"/inventory/{inv}")
+    csrf = _csrf(manager, f"/inventory/{inv}/summary")
     h = {"X-CSRF": csrf}
     d = manager.post(f"/api/inventory/{inv}/scan", json={"code": "A100"}, headers=h).json()
     assert d["item"]["id"] == _pid("A100") and d["item"]["photos"] == 0
@@ -284,6 +284,43 @@ def test_photo_during_inventory(tg):
     r = manager.post(f"/api/inventory/{inv}/photo", data={"product_id": _pid("A100")},
                      files={"photo": ("p.jpg", _img(), "image/jpeg")}, headers=h)
     assert r.status_code in (400, 404)
+
+
+def test_resume_cancelled_inventory(tg):
+    admin = _uid('admin')
+    ok, inv = inventory.start(1, admin)
+    inventory.scan(inv, "A100", admin)
+    inventory.scan(inv, "4600000000001", admin)
+    client = _web(tg, MANAGER)
+    csrf = _csrf(client, f"/inventory/{inv}/summary")
+    assert "Отменить инвентаризацию" in client.get(f"/inventory/{inv}/summary").text
+    assert "/cancel" not in client.get(f"/inventory/{inv}").text             # не рядом с полем сканирования
+    client.post(f"/inventory/{inv}/cancel", data={"csrf": csrf})
+    page = client.get(f"/inventory/{inv}").text
+    assert "↩ Возобновить" in page and "Отсканировано изделий: <b>1</b>" in page
+    # тем временем начали заново и отсканировали A300 и снова A100
+    ok, fresh = inventory.start(1, admin)
+    assert fresh != inv
+    inventory.scan(fresh, "A300", admin)
+    inventory.scan(fresh, "A100", admin)
+    inventory.scan(fresh, "4600000000001", admin)                               # тот же неизвестный код
+    r = client.post(f"/inventory/{inv}/resume", data={"csrf": csrf})
+    assert "Инвентаризация возобновлена" in r.text and "Перенесено сканов из начатой заново: 1" in r.text
+    got = inventory.get(inv)
+    assert got['status'] == "open" and got['found'] == 2 and got['unknown'] == 1 and got['notified'] == 1
+    assert inventory.get(fresh)['status'] == "cancelled" and inventory.get(fresh)['found'] == 0
+    assert inventory.start(1, admin) == (True, inv)                             # продолжают ту же
+    assert not inventory.resume(inv, admin)[0]                                  # уже открыта
+
+    # после применения более новой — старую не возобновить
+    ok, old = inventory.start(2, admin)
+    inventory.scan(old, "A200", admin)
+    inventory.cancel(old, admin)
+    ok, newer = inventory.start(2, admin)
+    inventory.scan(newer, "A200", admin)
+    assert inventory.apply(newer, admin)[0]
+    ok, msg = inventory.resume(old, admin)
+    assert not ok and f"уже применена инвентаризация №{newer}" in msg
 
 
 def test_sold_but_found(tg):
