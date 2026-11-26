@@ -337,10 +337,20 @@ def resume(cursor, inventory_id, user_id):
     inv = cursor.fetchone()
     if not inv or inv['status'] != 'cancelled':
         raise BusinessError("Возобновить можно только отменённую инвентаризацию.")
+    cursor.execute("SELECT id FROM inventories WHERE store_id = %s AND status = 'applied' AND id > %s LIMIT 1",
+                   (inv['store_id'], inventory_id))
+    newer = cursor.fetchone()
+    if newer:
+        raise BusinessError(f"После неё в магазине уже применена инвентаризация №{newer['id']} — старые сканы "
+                            "устарели. Начните новую.")
     cursor.execute("SELECT id FROM inventories WHERE store_id = %s AND status = 'open' AND id != %s FOR UPDATE",
                    (inv['store_id'], inventory_id))
     moved = 0
     for other in cursor.fetchall():
+        # неизвестный код, уже отсканированный здесь, — не дублировать (у них product_id NULL, UNIQUE не сработает)
+        cursor.execute("""DELETE n FROM inventory_scans n JOIN inventory_scans o
+                            ON o.inventory_id = %s AND o.product_id IS NULL AND o.code = n.code
+                          WHERE n.inventory_id = %s AND n.product_id IS NULL""", (inventory_id, other['id']))
         cursor.execute("UPDATE IGNORE inventory_scans SET inventory_id = %s WHERE inventory_id = %s",
                        (inventory_id, other['id']))
         moved += cursor.rowcount

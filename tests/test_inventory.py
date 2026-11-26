@@ -303,6 +303,7 @@ def test_resume_cancelled_inventory(tg):
     assert fresh != inv
     inventory.scan(fresh, "A300", admin)
     inventory.scan(fresh, "A100", admin)
+    inventory.scan(fresh, "4600000000001", admin)                               # тот же неизвестный код
     r = client.post(f"/inventory/{inv}/resume", data={"csrf": csrf})
     assert "Инвентаризация возобновлена" in r.text and "Перенесено сканов из начатой заново: 1" in r.text
     got = inventory.get(inv)
@@ -310,3 +311,13 @@ def test_resume_cancelled_inventory(tg):
     assert inventory.get(fresh)['status'] == "cancelled" and inventory.get(fresh)['found'] == 0
     assert inventory.start(1, admin) == (True, inv)                             # продолжают ту же
     assert not inventory.resume(inv, admin)[0]                                  # уже открыта
+
+    # после применения более новой — старую не возобновить
+    ok, old = inventory.start(2, admin)
+    inventory.scan(old, "A200", admin)
+    inventory.cancel(old, admin)
+    ok, newer = inventory.start(2, admin)
+    inventory.scan(newer, "A200", admin)
+    assert inventory.apply(newer, admin)[0]
+    ok, msg = inventory.resume(old, admin)
+    assert not ok and f"уже применена инвентаризация №{newer}" in msg
