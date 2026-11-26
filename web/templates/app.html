@@ -103,7 +103,7 @@
 const tg = window.Telegram && window.Telegram.WebApp;
 const $ = id => document.getElementById(id);
 const fmt = n => Number(n).toLocaleString('ru-RU').replace(/,/g, ' ') + ' ₸';
-let product = null, payment = null;
+let product = null, payment = null, canBelowMin = false;
 
 function api(path, opts = {}) {
   return fetch(path, {...opts, headers: {'Content-Type': 'application/json', 'X-Telegram-Init-Data': tg.initData, ...(opts.headers || {})}})
@@ -152,7 +152,7 @@ function find(article) {
 
 function sell() {
   const price = parseInt(String($('price').value).replace(/\D/g, ''), 10);
-  if (price < product.min_price) { $('sale-err').textContent = 'Сумма ниже минимальной цены ' + fmt(product.min_price) + '.'; return; }
+  if (product.min_lock && !canBelowMin && price < product.min_price) { $('sale-err').textContent = 'Для этого товара запрещена продажа ниже минимальной цены ' + fmt(product.min_price) + '.'; return; }
   tg.showConfirm('Продать ' + product.model + ' за ' + fmt(price) + ' (' + payment + ')?', ok => {
     if (!ok) return;
     tg.MainButton.showProgress();
@@ -165,6 +165,7 @@ function sell() {
 
 function loadToday() {
   api('/api/app/me').then(me => {
+    canBelowMin = me.role === 'admin' || me.role === 'manager';
     $('inv-banner').classList.toggle('hidden', !(me.inventory && me.inventory.length));
     $('inv-store').textContent = (me.inventory || []).join(', ');
     const box = $('today'); box.replaceChildren();

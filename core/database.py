@@ -11,7 +11,7 @@ from mysql.connector import pooling, Error
 from core import config
 from core.config import DB_HOST, DB_PORT, DB_USER, DB_PASS, DB_NAME
 from utils import mark_codes
-from utils.common import now, today, normalize_phone
+from utils.common import now, today, normalize_phone, money
 
 logger = logging.getLogger(__name__)
 
@@ -362,7 +362,40 @@ def update_product_quantity(cursor, product_article, quantity_change):
 
 PRODUCT_FIELDS = ('article_number', 'store_id', 'metal_type', 'product_type', 'model', 'size', 'fineness', 'inserts',
                   'weight', 'price_per_gram', 'price', 'min_price', 'arrival_date', 'quantity', 'manufacturer',
-                  'commentaries', 'track_stock', 'cost_price', 'is_marked', 'barcode')
+                  'commentaries', 'track_stock', 'cost_price', 'is_marked', 'barcode', 'min_price_lock')
+
+
+PRICE_OVERRIDE_ROLES = ('admin', 'manager')     # продают ниже минимальной цены даже при запрете
+
+
+def min_price_blocked(product, price, role):
+    """Продажа ниже минимальной цены запрещена: у товара включён запрет, а продаёт не менеджер/администратор."""
+    return (bool(product.get('min_price_lock')) and role not in PRICE_OVERRIDE_ROLES
+            and price < (product.get('min_price') or 0))
+
+
+def min_price_message(product):
+    return (f"{product['article_number']}: для этого товара запрещена продажа ниже минимальной цены "
+            f"{money(product['min_price'])}. Продать дешевле может менеджер.")
+
+
+def _role(cursor, user_id):
+    cursor.execute("SELECT role FROM users WHERE id = %s", (user_id,))
+    row = cursor.fetchone()
+    return row['role'] if row else None
+
+
+@with_transaction
+def set_min_price_lock(cursor, product_ids, locked):
+    """Включить/выключить запрет продажи ниже минимальной цены у товаров. (True, изменено)."""
+    ids = sorted({int(i) for i in product_ids})
+    changed = 0
+    for i in range(0, len(ids), 1000):
+        part = ids[i:i + 1000]
+        cursor.execute(f"UPDATE products SET min_price_lock = %s WHERE id IN ({','.join(['%s'] * len(part))})",
+                       [1 if locked else 0] + part)
+        changed += cursor.rowcount
+    return True, changed
 
 
 def _check_barcode_free(cursor, barcode, product_id=None):
@@ -434,9 +467,12 @@ def get_enum_or_distinct_values(cursor, table_name, column_name, add_other_optio
 
 
 @with_connection
-def search_products(cursor, query=None, store=None, in_stock=None, limit=50, offset=0, inv_mark=None):
+def search_products(cursor, query=None, store=None, in_stock=None, limit=50, offset=0, inv_mark=None, min_lock=None):
     """Поиск товаров для админки. Возвращает (строки, всего)."""
     where, params = [], []
+    if min_lock is not None:
+        where.append("p.min_price_lock = %s")
+        params.append(1 if min_lock else 0)
     if inv_mark:
         where.append("p.inv_mark = %s")
         params.append(inv_mark)
@@ -792,10 +828,11 @@ def _record_receipt(cursor, items, user_id, payment_type, store_id=None, custome
         raise BusinessError(f"В одном чеке — не больше {MAX_RECEIPT_ITEMS} позиций.")
     items = [(it[0], it[1], it[2] if len(it) > 2 else None) for it in items]
     products, need, codes, taken = {}, {}, [], set()
+    role = _role(cursor, user_id)
     for product_id, price, raw_code in items:
         if product_id not in products:
-            cursor.execute("SELECT id, article_number, model, price, min_price, quantity, store_id, is_marked "
-                           "FROM products WHERE id = %s FOR UPDATE", (product_id,))
+            cursor.execute("SELECT id, article_number, model, price, min_price, min_price_lock, quantity, store_id, "
+                           "is_marked FROM products WHERE id = %s FOR UPDATE", (product_id,))
             row = cursor.fetchone()
             if not row:
                 raise BusinessError("Товар не найден.")
@@ -806,8 +843,8 @@ def _record_receipt(cursor, items, user_id, payment_type, store_id=None, custome
             raise BusinessError(f"Недостаточно товара {p['article_number']} на складе (остаток {p['quantity'] or 0}).")
         if price is None or price <= 0:
             raise BusinessError(f"Укажите сумму для {p['article_number']}.")
-        if price < (p['min_price'] or 0):
-            raise BusinessError(f"{p['article_number']}: сумма {int(price)} ниже минимальной цены {int(p['min_price'])}.")
+        if min_price_blocked(p, price, role):
+            raise BusinessError(min_price_message(p))
         if raw_code:
             codes.append(_take_code(cursor, raw_code, p, taken))
         elif marking_required(p):
@@ -840,10 +877,10 @@ def _record_receipt(cursor, items, user_id, payment_type, store_id=None, custome
     for (product_id, price, _), code in zip(items, codes):
         p = products[product_id]
         cursor.execute("""INSERT INTO sales (product_id, user_id, sale_date, sold_price, payment_type, store_id,
-                                             receipt_id, list_price, mark_code_id)
-                          VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                                             receipt_id, list_price, mark_code_id, below_min)
+                          VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                        (product_id, user_id, moment, price, payment_type, p['store_id'] or store_id, receipt_id,
-                        p['price'], code['id'] if code else None))
+                        p['price'], code['id'] if code else None, 1 if price < (p['min_price'] or 0) else 0))
         sale_ids.append(cursor.lastrowid)
         if code:
             cursor.execute("UPDATE product_codes SET status = 'sold', sale_id = %s, updated_at = %s WHERE id = %s",
@@ -1005,8 +1042,11 @@ def create_trade_in_record(cursor, new_product_article, new_sale_price, old_item
                            payment_type_difference, user_id, store_id, old_product_article=None,
                            old_item_description=None, old_metal_type=None, old_weight=None, new_mark_code=None):
     new_id = _change_quantity(cursor, new_product_article, -1)
-    cursor.execute("SELECT id, article_number, store_id, is_marked FROM products WHERE id = %s", (new_id,))
+    cursor.execute("SELECT id, article_number, store_id, is_marked, min_price, min_price_lock FROM products "
+                   "WHERE id = %s", (new_id,))
     new_product = cursor.fetchone()
+    if min_price_blocked(new_product, new_sale_price, _role(cursor, user_id)):
+        raise BusinessError(min_price_message(new_product))
     store_id = new_product['store_id'] or store_id  # магазин нового товара
     _check_store(cursor, user_id, new_product['store_id'])
     code = None
@@ -1018,11 +1058,13 @@ def create_trade_in_record(cursor, new_product_article, new_sale_price, old_item
         _change_quantity(cursor, old_product_article, 1)
     cursor.execute("""INSERT INTO trade_ins (old_product_article, old_item_description, old_metal_type, old_weight,
                                              old_item_value, new_product_article, new_sale_price, price_difference,
-                                             payment_type_difference, user_id, store_id, trade_in_date, new_mark_code_id)
-                      VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                                             payment_type_difference, user_id, store_id, trade_in_date, new_mark_code_id,
+                                             below_min)
+                      VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                    (old_product_article, old_item_description, old_metal_type, old_weight, old_item_value,
                     new_product_article, new_sale_price, price_difference, payment_type_difference,
-                    user_id, store_id, now(), code['id'] if code else None))
+                    user_id, store_id, now(), code['id'] if code else None,
+                    1 if new_sale_price < (new_product['min_price'] or 0) else 0))
     trade_in_id = cursor.lastrowid
     if code:
         cursor.execute("UPDATE product_codes SET status = 'sold', sale_id = NULL, note = %s, updated_at = %s WHERE id = %s",
@@ -1099,7 +1141,7 @@ def get_period_operations(cursor, start_dt, end_dt, store_id=None, include_impor
         SELECT s.id, s.receipt_id, s.sale_date, s.sold_price, s.payment_type, s.store_id, st.name AS store,
                p.article_number, p.product_type, p.model, p.size, p.metal_type, p.weight,
                COALESCE(s.list_price, p.price) AS list_price, p.cost_price, u.name AS user_name, r.id AS return_id,
-               mc.code AS mark_code
+               mc.code AS mark_code, s.below_min, p.min_price
         FROM sales s
         JOIN products p ON s.product_id = p.id
         LEFT JOIN product_codes mc ON mc.id = s.mark_code_id

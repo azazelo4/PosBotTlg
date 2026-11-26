@@ -52,9 +52,10 @@ def test_sale_full_flow_with_kaspi(tg):
     tg.send(CASHIER, "Касса")
     tg.send(CASHIER, "Продажа")
     assert "нет в наличии" in tg.texts(tg.send(CASHIER, "A300"))
+    db_query("UPDATE products SET min_price_lock=1 WHERE article_number='A100'")   # 🔒 запрет у товара
     calls = tg.send(CASHIER, "A100")
     assert "150 000 ₸" in reply_buttons(calls[-1])
-    assert "ниже минимальной" in tg.texts(tg.send(CASHIER, "100000"))
+    assert "запрещена продажа ниже минимальной" in tg.texts(tg.send(CASHIER, "100000"))
     tg.send(CASHIER, "150 000 ₸")
     tg.send(CASHIER, "Kaspi")
     calls = tg.send(CASHIER, "Подтвердить")

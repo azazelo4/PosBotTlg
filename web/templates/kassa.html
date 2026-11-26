@@ -384,7 +384,7 @@ function productCard(p) {
     <div class="title">${esc(p.model || p.type || "")}</div>
     <div class="muted">арт. ${esc(p.article)} · ${esc(p.details || "")}${p.inserts ? " · " + esc(p.inserts) : ""}</div>
     <div class="meta"><span class="price num">${fmt(p.price)}</span>
-      <span>мин. <b class="num">${fmt(p.min_price)}</b></span>
+      <span>мин. <b class="num">${fmt(p.min_price)}</b>${p.min_lock ? " 🔒" : ""}</span>
       <span>остаток <b>${p.quantity}</b> шт.</span><span class="muted">${esc(p.store || "")}</span>${
       p.code ? `<span class="muted">🏷 код ${esc(p.code_short)}</span>` : ""}</div>
   </div></div>`;
@@ -603,7 +603,7 @@ VIEWS.sale = root => {
     for (let i = 0; i < cart.length; i++) {
       const p = cart[i].product, price = priceOf(i);
       if (!price || price <= 0) { render(i); return showErr(root, `Введите сумму для ${p.article}.`); }
-      if (price < p.min_price) { render(i); return showErr(root, `${p.article}: сумма ниже минимальной цены ${fmt(p.min_price)}.`); }
+      if (p.min_lock && !me.can_below_min && price < p.min_price) { render(i); return showErr(root, `${p.article}: для этого товара запрещена продажа ниже минимальной цены ${fmt(p.min_price)}.`); }
       items.push({article: p.article, price, product: p, code: cart[i].code});
     }
     const sum = items.reduce((s, it) => s + it.price, 0);
@@ -802,7 +802,8 @@ VIEWS.tradein = root => {
     if (!o || o <= 0) return showErr(root, "Введите оценку сдаваемого изделия.");
     if (!product) return showErr(root, "Найдите новый товар по артикулу.");
     if (product.quantity <= 0) return showErr(root, "Нового товара нет в наличии.");
-    if (!n || n < product.min_price) return showErr(root, `Цена нового товара — не ниже ${fmt(product.min_price)}.`);
+    if (!n || n <= 0) return showErr(root, "Введите цену нового товара.");
+    if (product.min_lock && !me.can_below_min && n < product.min_price) return showErr(root, `Для этого товара запрещена продажа ниже минимальной цены ${fmt(product.min_price)}.`);
     if (d !== 0 && !payment) return showErr(root, "Выберите способ оплаты разницы.");
     showErr(root, "");
     confirmAndRun("Подтвердите Trade-In", [

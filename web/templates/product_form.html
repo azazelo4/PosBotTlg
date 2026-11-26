@@ -60,6 +60,9 @@
   <label>Комментарий<input name="commentaries" value="{{ product.commentaries or '' }}" maxlength="500"></label>
   <label>Штрихкод старого ценника<input name="barcode" value="{{ product.barcode or '' }}" maxlength="64" autocomplete="off"
     placeholder="например, 2004788000007"><small class="muted">Если на изделии ценник прежней программы: касса найдёт товар и по этому штрихкоду.</small></label>
+  <label><input type="checkbox" name="min_price_lock" role="switch" {% if product.min_price_lock %}checked{% endif %}>
+    🔒 Запрет продажи ниже минимальной цены <small class="muted">(кассир не продаст дешевле; менеджер и администратор —
+    могут). Без запрета продажа дешевле проходит, но отмечается в отчёте.</small></label>
   <label><input type="checkbox" name="track_stock" role="switch" {% if product.track_stock %}checked{% endif %}>
     Уведомлять, когда остаток станет низким</label>
   <label><input type="checkbox" name="is_marked" role="switch" {% if product.is_marked %}checked{% endif %}>

@@ -114,6 +114,7 @@ def test_post_requires_kassa_header(tg, client):
 def test_sale(tg, client):
     kassa_login(tg, client)
     assert client.get("/kassa/api/product", params={"article": "A100"}).json()["price"] == 150000
+    db_query("UPDATE products SET min_price_lock=1 WHERE article_number='A100'")
     r = post(client, "sale", {"article": "A100", "price": "100 000", "payment": "Kaspi"})
     assert r.status_code == 400 and "ниже минимальной" in r.json()["error"]
     assert post(client, "sale", {"article": "A100", "price": 140000, "payment": "Bitcoin"}).status_code == 400
