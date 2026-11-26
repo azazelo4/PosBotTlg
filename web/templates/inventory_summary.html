@@ -37,6 +37,22 @@
 </tbody></table></div>{{ more(s.missing) }}
 {% endif %}
 
+{% if s.sold_found %}
+<article class="flash info" style="margin-bottom:1rem">
+  <strong>⚠️ Числится проданным, но найдено: {{ s.sold_found|length }}.</strong> По базе эти изделия проданы (продажа
+  без возврата), а их нашли в магазине. Возможно, продажу пробили не по тому изделию или возврат не оформили. После
+  применения они получат остаток 1 с пометкой «числится проданным» — проверьте продажу.
+</article>
+<h4>⚠️ Числится проданным, но найдено ({{ s.sold_found|length }})</h4>
+<div class="table-wrap"><table><thead><tr><th>Изделие</th><th>Продажа</th><th>Продавец</th><th class="num">Сумма</th></tr></thead><tbody>
+  {% for r in s.sold_found[:limit] %}<tr><td>{{ line(r) }}</td>
+    <td>{{ r.sold_sale.sale_date.strftime('%d.%m.%Y %H:%M') }}{% if r.sold_sale.receipt_id %}, чек №{{ r.sold_sale.receipt_id }}{% endif %}
+      {% if r.sold_sale.source == 'paloma' %}<small class="muted">(Палома)</small>{% endif %}
+      {% if r.sold_sale.store %}<small class="muted">· {{ r.sold_sale.store }}</small>{% endif %}</td>
+    <td>{{ r.sold_sale.user_name or '—' }}</td><td class="num">{{ r.sold_sale.sold_price | money }}</td></tr>{% endfor %}
+</tbody></table></div>{{ more(s.sold_found) }}
+{% endif %}
+
 {% if s.unknown %}
 <h4>❓ Нет в базе ({{ s.unknown|length }})</h4>
 <p class="muted">Ни у одного товара нет такого кода: изделие не загружено в каталог или у товара не указан штрихкод
@@ -83,7 +99,7 @@
 {% if inv.status == 'open' %}
 <article>
   <form method="post" action="/inventory/{{ inv.id }}/apply"
-        data-confirm="Применить инвентаризацию магазина «{{ inv.store }}»?&#10;&#10;Снизить до 0: {{ s.missing|length }}&#10;Добавить: {{ s.added|length }}&#10;Перенести: {{ s.moved|length }}{% if s.reduced %}&#10;Уменьшить остаток: {{ s.reduced|length }}{% endif %}&#10;Без изменений: {{ s.checked|length }}"
+        data-confirm="Применить инвентаризацию магазина «{{ inv.store }}»?&#10;&#10;Снизить до 0: {{ s.missing|length }}&#10;Добавить: {{ s.added|length }}&#10;Перенести: {{ s.moved|length }}{% if s.sold_found %}&#10;Числятся проданными, но найдены: {{ s.sold_found|length }}{% endif %}{% if s.reduced %}&#10;Уменьшить остаток: {{ s.reduced|length }}{% endif %}&#10;Без изменений: {{ s.checked|length }}"
         onsubmit="return confirm(this.dataset.confirm)">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <button type="submit">Применить</button>
