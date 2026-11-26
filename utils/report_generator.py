@@ -52,10 +52,14 @@ def build_summary(ops):
     deposited = sum((_d(d['amount']) for d in deposits), D0)
 
     sales_total = sum((_d(s['sold_price']) for s in sales), D0)
+    below = [s for s in sales if s.get('below_min')]
+    below_gap = sum((max(D0, _d(s.get('min_price')) - _d(s['sold_price'])) for s in below), D0)
     # чек — несколько позиций одной оплатой; старые продажи без чека считаются чеком из одной позиции
     receipts_count = len({s.get('receipt_id') or -s['id'] for s in sales})
     returns_total = sum((_d(r['return_price']) for r in returns), D0)
     return {
+        'below_min_count': len(below),
+        'below_min_gap': below_gap,
         'sales_count': len(sales),
         'sales_total': sales_total,
         'receipts_count': receipts_count,
@@ -113,6 +117,9 @@ def summary_text(summary, start, end, store_name=None, breakdown=None, user_name
         lines.append(f"Чеков: {summary['receipts_count']}, средний чек {money(summary['sales_avg'])}")
     for pt, (cnt, total) in sorted(summary['sales_by_payment'].items()):
         lines.append(f"  • {h(pt)}: {cnt} шт., {money(total)}")
+    if summary.get('below_min_count'):
+        lines.append(f"⚠️ Ниже минимальной цены: {summary['below_min_count']} шт., в сумме на "
+                     f"{money(summary['below_min_gap'])} дешевле минимума")
     if summary['returns_count']:
         lines.append(f"Возвраты: {summary['returns_count']} шт. на {money(summary['returns_total'])}")
         lines.append(f"Продажи за вычетом возвратов: <b>{money(summary['net_sales'])}</b>")
@@ -183,6 +190,8 @@ def build_excel(ops, summary, start, end, store_name=None, breakdown=None, user_
         ("Возвраты, шт.", summary['returns_count']),
         ("Возвраты, сумма", summary['returns_total']),
         ("Продажи за вычетом возвратов", summary['net_sales']),
+        ("Продано ниже минимальной цены, шт.", summary['below_min_count']),
+        ("На сколько дешевле минимума", summary['below_min_gap']),
         ("Скупка, шт.", summary['buybacks_count']),
         ("Скупка, сумма", summary['buybacks_total']),
         ("Trade-In, шт.", summary['trade_ins_count']),
@@ -213,10 +222,11 @@ def build_excel(ops, summary, start, end, store_name=None, breakdown=None, user_
 
     _sheet(wb, "Продажи",
            ["№", "Чек", "Дата", "Артикул", "Тип", "Модель", "Размер", "Металл", "Вес, г", "Цена по прайсу",
-            "Сумма продажи", "Оплата", "Магазин", "Продавец", "Возврат", "Код маркировки"],
+            "Сумма продажи", "Оплата", "Магазин", "Продавец", "Возврат", "Код маркировки", "Ниже мин. цены"],
            [(s['id'], s.get('receipt_id') or "", s['sale_date'], s['article_number'], s['product_type'], s['model'], s['size'], s['metal_type'],
              s['weight'], s['list_price'], s['sold_price'], s.get('payment_label') or s['payment_type'], s['store'], s['user_name'],
-             f"№{s['return_id']}" if s['return_id'] else "", (s.get('mark_code') or '').replace('\x1d', '')) for s in ops['sales']])
+             f"№{s['return_id']}" if s['return_id'] else "", (s.get('mark_code') or '').replace('\x1d', ''),
+             f"да (мин. {int(s['min_price'] or 0)})" if s.get('below_min') else "") for s in ops['sales']])
     _sheet(wb, "Возвраты",
            ["№", "Дата", "Продажа №", "Дата продажи", "Артикул", "Модель", "Сумма продажи", "Сумма возврата", "Выплата",
             "Магазин", "Сотрудник"],

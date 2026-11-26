@@ -20,6 +20,11 @@
     <option value="yes" {% if stock == 'yes' %}selected{% endif %}>В наличии</option>
     <option value="no" {% if stock == 'no' %}selected{% endif %}>Нет в наличии</option>
   </select>
+  <select name="lock" aria-label="Запрет ниже минимальной цены">
+    <option value="">Мин. цена: любой режим</option>
+    <option value="on" {% if lock == 'on' %}selected{% endif %}>🔒 Запрет ниже мин. цены</option>
+    <option value="off" {% if lock == 'off' %}selected{% endif %}>🔓 Без запрета</option>
+  </select>
   <select name="mark" aria-label="Инвентаризация">
     <option value="">Инвентаризация: любая метка</option>
     {% for k, title in marks.items() %}<option value="{{ k }}" {% if mark == k %}selected{% endif %}>{{ title }}</option>{% endfor %}
@@ -36,7 +41,7 @@
   <tbody>
   {% for p in rows %}
     <tr>
-      <td><input type="checkbox" class="pick" value="{{ p.article_number }}" onchange="sync()" aria-label="Выбрать {{ p.article_number }}"></td>
+      <td><input type="checkbox" class="pick" value="{{ p.article_number }}" data-id="{{ p.id }}" onchange="sync()" aria-label="Выбрать {{ p.article_number }}"></td>
       {% if thumbs %}<td>{% if thumbs.get(p.id) %}<a href="/products/{{ p.id }}"><img src="{{ thumbs[p.id] }}" alt="" loading="lazy"
         style="width:48px;height:48px;object-fit:cover;border-radius:6px;display:block"></a>{% endif %}</td>{% endif %}
       <td><a href="/products/{{ p.id }}">{{ p.article_number }}</a></td>
@@ -46,7 +51,7 @@
       <td><small>{{ details(p) }}</small></td>
       <td>{{ p.Store }}</td>
       <td class="num">{{ p.price | money }}</td>
-      <td class="num muted">{{ p.min_price | money }}</td>
+      <td class="num muted">{{ p.min_price | money }}{% if p.min_price_lock %} <span title="Запрет продажи ниже минимальной цены">🔒</span>{% endif %}</td>
       <td class="num"><span class="badge {% if p.quantity <= 0 %}zero{% endif %}">{{ p.quantity }}</span></td>
     </tr>
   {% else %}
@@ -55,17 +60,41 @@
   </tbody>
 </table></div>
 <input type="hidden" name="articles" id="picked">
-<button type="submit" id="labels-btn" class="secondary" disabled>Ценники для выбранных</button>
+<div class="row-actions">
+  <button type="submit" id="labels-btn" class="secondary" disabled>Ценники для выбранных</button>
+  <button type="button" class="secondary outline" onclick="minLock('lock')">🔒 Запрет ниже мин. цены</button>
+  <button type="button" class="secondary outline" onclick="minLock('unlock')">🔓 Снять запрет</button>
+</div>
+</form>
+<form method="post" action="/products/min-lock" id="lock-form" hidden>
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="op"><input type="hidden" name="scope"><input type="hidden" name="ids">
+  <input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="store" value="{{ store or '' }}">
+  <input type="hidden" name="stock" value="{{ stock }}"><input type="hidden" name="mark" value="{{ mark }}">
+  <input type="hidden" name="lock" value="{{ lock }}">
 </form>
 
 {% if pages > 1 %}
 <nav class="row-actions" style="justify-content:center">
-  {% if page > 1 %}<a href="?q={{ q | urlencode }}&store={{ store or '' }}&stock={{ stock }}&mark={{ mark }}&page={{ page - 1 }}">← Назад</a>{% endif %}
+  {% if page > 1 %}<a href="?q={{ q | urlencode }}&store={{ store or '' }}&stock={{ stock }}&mark={{ mark }}&lock={{ lock }}&page={{ page - 1 }}">← Назад</a>{% endif %}
   <span class="muted">Стр. {{ page }} из {{ pages }}</span>
-  {% if page < pages %}<a href="?q={{ q | urlencode }}&store={{ store or '' }}&stock={{ stock }}&mark={{ mark }}&page={{ page + 1 }}">Вперёд →</a>{% endif %}
+  {% if page < pages %}<a href="?q={{ q | urlencode }}&store={{ store or '' }}&stock={{ stock }}&mark={{ mark }}&lock={{ lock }}&page={{ page + 1 }}">Вперёд →</a>{% endif %}
 </nav>
 {% endif %}
 <script>
+const TOTAL = {{ total }};
+function minLock(action) {
+  const ids = [...document.querySelectorAll('.pick:checked')].map(c => c.dataset.id);
+  const f = document.getElementById('lock-form'), what = action === 'lock' ? 'Включить запрет продажи ниже минимальной цены' : 'Снять запрет продажи ниже минимальной цены';
+  if (ids.length) {
+    if (!confirm(`${what} у выбранных товаров (${ids.length})?`)) return;
+    f.scope.value = 'ids'; f.ids.value = ids.join(',');
+  } else {
+    if (!TOTAL || !confirm(`Товары не выбраны. ${what} у ВСЕХ товаров по текущему фильтру (${TOTAL})?`)) return;
+    f.scope.value = 'all';
+  }
+  f.op.value = action; f.submit();
+}
 function sync() {
   const picked = [...document.querySelectorAll('.pick:checked')].map(c => c.value);
   document.getElementById('picked').value = picked.join(' ');

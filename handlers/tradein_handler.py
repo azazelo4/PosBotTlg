@@ -6,10 +6,10 @@
 import logging
 
 from handlers.buttons import create_cancel_markup, create_confirmation_markup, create_payment_type_markup, PAYMENT_TYPES, BTN_CONFIRM
-from core.database import create_trade_in_record
+from core.database import create_trade_in_record, min_price_blocked, min_price_message
 from handlers.common import (CASH_ROLES, CustomerItemIntake, in_state, is_button, user_ids, cash_menu,
                              register_simple_cancel, product_line, ask_money, read_money, resolve_for_sale)
-from core.state import bot, user_state, get_op, start_op, end_op, cancel_current_operation
+from core.state import bot, user_state, user_data, get_op, start_op, end_op, cancel_current_operation
 from utils.common import money, h
 
 logger = logging.getLogger(__name__)
@@ -74,9 +74,9 @@ def on_new_price(message):
     if price is None:
         bot.send_message(chat_id, "Введите цену числом.", reply_markup=create_cancel_markup())
         return
-    min_price = op['new_product']['min_price'] or 0
-    if price < min_price:
-        bot.send_message(chat_id, f"Цена {money(price)} ниже минимальной {money(min_price)}. Введите другую.", reply_markup=create_cancel_markup())
+    if min_price_blocked(op['new_product'], price, (user_data.get(chat_id) or {}).get('role')):
+        bot.send_message(chat_id, min_price_message(op['new_product']) + " Введите другую цену.",
+                         reply_markup=create_cancel_markup())
         return
     op['new_price'] = price
     op['difference'] = price - op['old_value']

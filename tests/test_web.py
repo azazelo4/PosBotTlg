@@ -209,8 +209,10 @@ def test_mini_app_sale_flow(tg, client, unbound_staff):
     p2 = client.get("/api/app/product", params={"article": "0000000012345"}, headers=headers).json()
     assert p2["article"] == "12345"
     assert client.get("/api/app/product", params={"article": "000"}, headers=headers).status_code == 404
+    db_query("UPDATE products SET min_price_lock=1 WHERE article_number='A100'")
     r = client.post("/api/app/sale", json={"article": "A100", "price": 100000, "payment": "Kaspi"}, headers=headers)
     assert r.status_code == 400 and "ниже минимальной" in r.json()["error"]
+    db_query("UPDATE products SET min_price_lock=0 WHERE article_number='A100'")
     r = client.post("/api/app/sale", json={"article": "A100", "price": 145000, "payment": "Bitcoin"}, headers=headers)
     assert r.status_code == 400
     r = client.post("/api/app/sale", json={"article": "A100", "price": 145000, "payment": "Kaspi"}, headers=headers)

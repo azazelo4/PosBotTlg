@@ -33,7 +33,7 @@ from core import logsafe
 from core import settings_store
 from handlers.buttons import PAYMENT_TYPES, ROLE_TITLES
 from utils import receipt_text
-from core.database import (own_store, get_receipt, get_job_run, marking_required, ensure_admin, get_connection, get_stores, get_store_counts, create_store, update_store, set_user_store, init_pool, get_user_by_id, get_user_by_chat_id, search_products, get_product_by_id,
+from core.database import (own_store, min_price_blocked, min_price_message, set_min_price_lock, get_receipt, get_job_run, marking_required, ensure_admin, get_connection, get_stores, get_store_counts, create_store, update_store, set_user_store, init_pool, get_user_by_id, get_user_by_chat_id, search_products, get_product_by_id,
                       get_product_by_article, get_products_by_articles, get_products_for_labels, add_product_to_db,
                       update_product, get_stock_report_data, get_low_stock_products, get_period_operations,
                       record_sale, get_today_sales_by_user, get_all_users, add_user_to_db, change_user_role_function,
@@ -280,19 +280,47 @@ PAGE_SIZE = 50
 
 
 @app.get("/products", response_class=HTMLResponse)
-def products(request: Request, q: str = "", store: str = "", stock: str = "", mark: str = "", page: int = 1,
-             user=Depends(current_user)):
+def products(request: Request, q: str = "", store: str = "", stock: str = "", mark: str = "", lock: str = "",
+             page: int = 1, user=Depends(current_user)):
     in_stock = {"yes": True, "no": False}.get(stock)
     mark = mark if mark in inventory.MARKS else ""
+    lock = lock if lock in ("on", "off") else ""
     page = max(page, 1)
     store_id = parse_int(store) if store else None
     rows, total = search_products(q.strip() or None, store_id, in_stock, PAGE_SIZE, (page - 1) * PAGE_SIZE,
-                                  inv_mark=mark or None) or ([], 0)
+                                  inv_mark=mark or None, min_lock={"on": True, "off": False}.get(lock)) or ([], 0)
     thumbs = {pid: photos.signed_url(ph) for pid, ph in (photos.main_photos([r['id'] for r in rows]) or {}).items()}
     return render(request, "products.html", user, rows=rows, total=total, q=q, store=store_id, stock=stock, page=page,
-                  mark=mark, marks=inventory.MARKS,
+                  mark=mark, marks=inventory.MARKS, lock=lock,
                   thumbs=thumbs,
                   pages=max((total + PAGE_SIZE - 1) // PAGE_SIZE, 1), stores=get_stores() or [], details=details_line)
+
+
+@app.post("/products/min-lock")
+async def products_min_lock(request: Request, user=Depends(current_user)):
+    """Запрет продажи ниже минимальной цены: выбранным товарам или всем по текущему фильтру списка."""
+    form = await request.form()
+    check_csrf(request, form.get("csrf"))
+    locked = form.get("op") == "lock"
+    back = "/products?" + urlencode({k: form.get(k) or "" for k in ("q", "store", "stock", "mark", "lock")})
+    if form.get("scope") == "all":
+        rows, _ = search_products((form.get("q") or "").strip() or None, parse_int(form.get("store") or "") or None,
+                                  {"yes": True, "no": False}.get(form.get("stock") or ""), 1_000_000, 0,
+                                  inv_mark=form.get("mark") if form.get("mark") in inventory.MARKS else None,
+                                  min_lock={"on": True, "off": False}.get(form.get("lock") or "")) or ([], 0)
+        ids = [r['id'] for r in rows]
+    else:
+        ids = [i for i in (parse_int(x) for x in str(form.get("ids") or "").split(",")) if i]
+    if not ids:
+        flash(request, "Выберите товары галочками или примените ко всем по фильтру.", "error")
+        return RedirectResponse(back, status_code=303)
+    ok, changed = set_min_price_lock(ids, locked)
+    if ok:
+        flash(request, (f"🔒 Запрет продажи ниже минимальной цены включён. Товаров: {len(ids)}." if locked else
+                        f"🔓 Запрет продажи ниже минимальной цены снят. Товаров: {len(ids)}."))
+    else:
+        flash(request, changed, "error")
+    return RedirectResponse(back, status_code=303)
 
 
 def _product_form_data(form):
@@ -345,6 +373,7 @@ def _product_form_data(form):
     data['quantity'] = qty or 0
     data['track_stock'] = 1 if form.get('track_stock') else 0
     data['is_marked'] = 1 if form.get('is_marked') else 0
+    data['min_price_lock'] = 1 if form.get('min_price_lock') else 0
     arrival = parse_date(form.get('arrival_date') or '')
     if form.get('arrival_date') and not arrival:
         errors.append("Дата поступления: ДД.ММ.ГГГГ или ГГГГ-ММ-ДД.")
@@ -1283,6 +1312,7 @@ def _product_json(p):
     return {"id": p['id'], "article": p['article_number'], "model": p['model'], "type": p['product_type'],
             "details": details_line(p), "inserts": p.get('inserts'), "store": p['Store'],
             "price": int(p['price']), "min_price": int(p['min_price']), "quantity": p['quantity'],
+            "min_lock": bool(p.get('min_price_lock')),
             **_photo_urls(p['id'])}
 
 
@@ -1347,8 +1377,8 @@ async def api_sale(request: Request, user=Depends(app_user)):
     if price is None or price <= 0:
         raise HTTPException(400, "Введите сумму продажи.")
     price = price.quantize(Decimal('1'))
-    if price < (product['min_price'] or 0):
-        raise HTTPException(400, f"Сумма ниже минимальной цены {money(product['min_price'])}.")
+    if min_price_blocked(product, price, user['role']):
+        raise HTTPException(400, min_price_message(product))
     if (product['quantity'] or 0) <= 0:
         raise HTTPException(400, "Товара нет в наличии.")
     if marking_required(product):

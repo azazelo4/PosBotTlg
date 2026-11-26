@@ -89,6 +89,7 @@ TABLES = {
           `cost_price` decimal(12,0) DEFAULT NULL,
           `is_marked` tinyint(1) NOT NULL DEFAULT 0,
           `barcode` varchar(64) DEFAULT NULL,
+          `min_price_lock` tinyint(1) NOT NULL DEFAULT 0,
           `inv_mark` enum('checked','added','moved','missing','resolved') DEFAULT NULL,
           `inv_mark_at` datetime DEFAULT NULL,
           `inv_mark_id` int DEFAULT NULL,
@@ -151,6 +152,7 @@ TABLES = {
           `list_price` decimal(12,0) DEFAULT NULL,
           `mark_code_id` int DEFAULT NULL,
           `source` varchar(16) DEFAULT NULL,
+          `below_min` tinyint(1) NOT NULL DEFAULT 0,
           PRIMARY KEY (`id`),
           KEY `idx_sales_receipt` (`receipt_id`),
           KEY `product_id` (`product_id`),
@@ -211,6 +213,7 @@ TABLES = {
           `store_id` int DEFAULT NULL,
           `trade_in_date` datetime NOT NULL,
           `new_mark_code_id` int DEFAULT NULL,
+          `below_min` tinyint(1) NOT NULL DEFAULT 0,
           PRIMARY KEY (`id`),
           KEY `idx_trade_ins_date` (`trade_in_date`),
           CONSTRAINT `trade_ins_user_fk` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
@@ -409,6 +412,10 @@ COLUMNS = [
     ("sales", "source", "varchar(16) DEFAULT NULL"),
     ("returns", "source", "varchar(16) DEFAULT NULL"),
     ("returns", "external_id", "varchar(96) DEFAULT NULL"),
+    # запрет продажи ниже минимальной цены — по товару; отметка «продано ниже минимальной»
+    ("products", "min_price_lock", "tinyint(1) NOT NULL DEFAULT 0"),
+    ("sales", "below_min", "tinyint(1) NOT NULL DEFAULT 0"),
+    ("trade_ins", "below_min", "tinyint(1) NOT NULL DEFAULT 0"),
     ("sales", "mark_code_id", "int DEFAULT NULL"),
     ("trade_ins", "new_mark_code_id", "int DEFAULT NULL"),
     # фискализация: заводской номер кассы Webkassa (ЗНК) у магазина

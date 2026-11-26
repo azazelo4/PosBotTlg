@@ -2,11 +2,11 @@
 import logging
 
 from handlers.buttons import (create_cancel_markup, create_confirmation_markup, _kb, PAYMENT_TYPES, BTN_CANCEL, BTN_CONFIRM)
-from core.database import record_receipt, MAX_RECEIPT_ITEMS
+from core.database import record_receipt, MAX_RECEIPT_ITEMS, min_price_blocked, min_price_message
 from handlers.common import (CASH_ROLES, in_state, is_button, user_ids, cash_menu, register_simple_cancel,
                              product_line, ask_money, read_money, resolve_for_sale)
 from utils import mark_codes
-from core.state import bot, user_state, get_op, start_op, end_op, cancel_current_operation
+from core.state import bot, user_state, user_data, get_op, start_op, end_op, cancel_current_operation
 from utils.common import money, h
 
 logger = logging.getLogger(__name__)
@@ -83,9 +83,8 @@ def on_price(message):
     if price is None:
         bot.send_message(chat_id, "Введите сумму числом, например 150000.", reply_markup=create_cancel_markup())
         return
-    min_price = op['product']['min_price'] or 0
-    if price < min_price:
-        bot.send_message(chat_id, f"Сумма {money(price)} ниже минимальной цены {money(min_price)}. Введите другую сумму.",
+    if min_price_blocked(op['product'], price, (user_data.get(chat_id) or {}).get('role')):
+        bot.send_message(chat_id, min_price_message(op['product']) + " Введите другую сумму.",
                          reply_markup=create_cancel_markup())
         return
     _cart(chat_id).append({'product': op.pop('product'), 'price': price, 'code': op.pop('code', None)})

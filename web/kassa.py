@@ -21,7 +21,7 @@ from fastapi.responses import StreamingResponse
 
 from core import config
 from handlers.buttons import PAYMENT_TYPES, ROLE_TITLES
-from core.database import (get_user_by_id, get_stores, get_product_by_article, record_receipt, MAX_RECEIPT_ITEMS, get_receipt,
+from core.database import (PRICE_OVERRIDE_ROLES, min_price_blocked, min_price_message, get_user_by_id, get_stores, get_product_by_article, record_receipt, MAX_RECEIPT_ITEMS, get_receipt,
                       find_by_mark_code, marking_required, SELLABLE_CODE, CODE_STATUS_TITLES, get_sales_for_return,
                       get_sale_details_by_id, create_return_record, create_buyback_record, create_trade_in_record,
                       create_cash_withdrawal_record, get_period_operations, create_kassa_login, consume_kassa_login, foreign_store_error, own_store)
@@ -193,6 +193,7 @@ def product_json(p, code=None):
     data = {"id": p['id'], "article": p['article_number'], "model": p['model'], "type": p['product_type'],
             "details": details_line(p), "inserts": p.get('inserts'), "store": p['Store'],
             "price": int(p['price'] or 0), "min_price": int(p['min_price'] or 0), "quantity": p['quantity'],
+            "min_lock": bool(p.get('min_price_lock')),
             "marked": marking_required(p)}
     photo = (photos.main_photos([p['id']]) or {}).get(p['id'])
     if photo:
@@ -231,6 +232,7 @@ def me(request: Request, user=Depends(kassa_user)):
         "payment_types": list(PAYMENT_TYPES), "metal_types": list(METAL_TYPES),
         "org": config.ORG_NAME or "",
         "inventory": [r['store'] for r in inventory.joinable(user, kassa_store_id(request, user))],
+        "can_below_min": user['role'] in PRICE_OVERRIDE_ROLES,
     }
 
 
@@ -285,9 +287,9 @@ def _for_sale(article):
     return p
 
 
-def _check_min(p, price):
-    if price < (p['min_price'] or 0):
-        raise HTTPException(400, f"Сумма ниже минимальной цены {money(p['min_price'])}.")
+def _check_min(p, price, user):
+    if min_price_blocked(p, price, user.get('role')):
+        raise HTTPException(400, min_price_message(p))
 
 
 def _item(data):
@@ -335,7 +337,7 @@ async def sale(request: Request, user=Depends(kassa_user), _=Depends(same_origin
         row = row if isinstance(row, dict) else {}
         p = _for_sale(row.get("article"))
         price = _money(row.get("price"), f"сумму для {p['article_number']}")
-        _check_min(p, price)
+        _check_min(p, price, user)
         code = str(row.get("code") or "").strip() or None
         items.append((p['id'], price, code))
         names.append(p['model'] or p['article_number'])
@@ -454,7 +456,7 @@ async def tradein(request: Request, user=Depends(kassa_user), _=Depends(same_ori
     if p['article_number'] == item['article']:
         raise HTTPException(400, "Новый товар не может совпадать со сдаваемым.")
     new_price = _money(body.get("new_price"), "цену нового товара")
-    _check_min(p, new_price)
+    _check_min(p, new_price, user)
     diff = new_price - old_value
     payment = _payment(body.get("payment")) if diff else None
     tradein_id = _result(*create_trade_in_record(

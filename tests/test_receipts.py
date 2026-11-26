@@ -31,8 +31,10 @@ def test_receipt_rules_in_db(tg):
     assert not ok and "Недостаточно товара B1" in msg                      # одна штука — дважды не продать
     ok, msg = record_receipt([(a100, 150000), (a200, 20000)], uid, "Kaspi")
     assert not ok and "одного магазина" in msg
-    ok, msg = record_receipt([(a100, 100000)], uid, "Kaspi")
-    assert not ok and "ниже минимальной" in msg
+    db_query("UPDATE products SET min_price_lock=1 WHERE id=%s", (a100,))
+    cashier = db_query("SELECT id FROM users WHERE role='cashier'")[0]['id']
+    ok, msg = record_receipt([(a100, 100000)], cashier, "Kaspi")
+    assert not ok and "ниже минимальной" in msg                             # 🔒: кассир не продаст дешевле
     assert db_query("SELECT COUNT(*) AS n FROM sales")[0]['n'] == 0      # ничего не записалось
 
     ok, r = record_receipt([(a100, 150000), (a100, 140000), (b1, 50000)], uid, "Наличные")
@@ -63,6 +65,7 @@ def test_kassa_cart_sale(tg, client):  # noqa: F811
     assert r.status_code == 200 and "Кольцо Классика" in r.json()["text"]
     # ошибки: пустой чек, цена ниже минимальной, нет в наличии
     assert "Чек пуст" in post(client, "sale", {"items": [], "payment": "Kaspi"}).json()["error"]
+    db_query("UPDATE products SET min_price_lock=1 WHERE article_number='B2'")
     assert "минимальной" in post(client, "sale", {"items": [{"article": "B2", "price": 1000}], "payment": "Kaspi"}).json()["error"]
     assert "нет в наличии" in post(client, "sale", {"items": [{"article": "A300", "price": 90000}], "payment": "Kaspi"}).json()["error"]
     shift = client.get("/kassa/api/shift").json()
