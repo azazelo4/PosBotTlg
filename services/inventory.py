@@ -225,6 +225,8 @@ def _classify(row, store):
         mark, note = 'added', "по базе было 0"
     else:
         mark, note = 'checked', (f"по базе было {qty} шт." if qty != 1 else "")
+    if row.get('sold_before_info'):
+        note = "; ".join(x for x in (note, "числится проданным " + row['sold_before_info']) if x)
     if sold:
         note = "; ".join(x for x in (note, "продано после скана") if x)
     return mark, note, max(0, 1 - sold)
@@ -232,7 +234,10 @@ def _classify(row, store):
 
 _FOUND_SQL = """SELECT p.id, p.article_number, p.model, p.weight, p.size, p.quantity, p.store_id, st.name AS store,
                        (SELECT COUNT(*) FROM sales sa LEFT JOIN returns r ON r.original_sale_id = sa.id
-                        WHERE sa.product_id = p.id AND sa.sale_date >= s.scanned_at AND r.id IS NULL) AS sold_after
+                        WHERE sa.product_id = p.id AND sa.sale_date >= s.scanned_at AND r.id IS NULL) AS sold_after,
+                       (SELECT sa.id FROM sales sa LEFT JOIN returns r ON r.original_sale_id = sa.id
+                        WHERE sa.product_id = p.id AND sa.sale_date < s.scanned_at AND r.id IS NULL
+                        ORDER BY sa.sale_date DESC, sa.id DESC LIMIT 1) AS sold_before
                 FROM inventory_scans s JOIN products p ON p.id = s.product_id
                 LEFT JOIN stores st ON st.id = p.store_id
                 WHERE s.inventory_id = %s ORDER BY p.article_number"""
@@ -240,6 +245,26 @@ _MISSING_SQL = """SELECT p.id, p.article_number, p.model, p.weight, p.size, p.qu
                   WHERE p.store_id = %s AND p.quantity > 0
                     AND NOT EXISTS (SELECT 1 FROM inventory_scans s WHERE s.inventory_id = %s AND s.product_id = p.id)
                   ORDER BY p.article_number"""
+
+
+def _attach_sold(cursor, rows):
+    """Найденные изделия, которые по базе проданы (остаток 0, продажа без возврата до скана): данные продажи."""
+    flagged = [r for r in rows if r.get('sold_before') and (r['quantity'] or 0) < 1]
+    ids = [r['sold_before'] for r in flagged]
+    if not ids:
+        return []
+    marks = ",".join(["%s"] * len(ids))
+    cursor.execute(f"""SELECT s.id, s.sale_date, s.sold_price, s.receipt_id, s.source, u.name AS user_name, st.name AS store
+                       FROM sales s LEFT JOIN users u ON u.id = s.user_id LEFT JOIN stores st ON st.id = s.store_id
+                       WHERE s.id IN ({marks})""", ids)
+    sales = {r['id']: r for r in cursor.fetchall()}
+    for r in flagged:
+        sale = sales.get(r['sold_before'])
+        if not sale:
+            continue
+        r['sold_sale'] = sale
+        r['sold_before_info'] = f"{sale['sale_date']:%d.%m.%Y}" + (f", чек №{sale['receipt_id']}" if sale['receipt_id'] else "")
+    return [r for r in flagged if r.get('sold_sale')]
 
 
 @with_connection
@@ -253,6 +278,7 @@ def summary(cursor, inventory_id):
     store = inv['store_id']
     cursor.execute(_FOUND_SQL, (inventory_id,))
     found = cursor.fetchall()
+    sold_found = _attach_sold(cursor, found)
     groups = {'checked': [], 'added': [], 'moved': [], 'reduced': []}
     for r in found:
         r['mark'], r['note'], r['new_qty'] = _classify(r, store)
@@ -273,6 +299,7 @@ def summary(cursor, inventory_id):
         "added": groups['added'],
         "moved": groups['moved'],
         "sold_after": [r for r in found if r['sold_after']],
+        "sold_found": sold_found,
         "unknown": unknown,
         "missing": missing,
     }
@@ -290,6 +317,7 @@ def apply(cursor, inventory_id, user_id):
     store, moment = inv['store_id'], now()
     cursor.execute(_FOUND_SQL + " FOR UPDATE", (inventory_id,))
     found = cursor.fetchall()
+    _attach_sold(cursor, found)
     if not found:
         raise BusinessError("Ничего не отсканировано — применять нечего.")
     counts = {'checked': 0, 'added': 0, 'moved': 0}

@@ -284,3 +284,32 @@ def test_photo_during_inventory(tg):
     r = manager.post(f"/api/inventory/{inv}/photo", data={"product_id": _pid("A100")},
                      files={"photo": ("p.jpg", _img(), "image/jpeg")}, headers=h)
     assert r.status_code in (400, 404)
+
+
+def test_sold_but_found(tg):
+    admin = _uid('admin')
+    assert record_receipt([(_pid("A200"), 20000)], admin, "Наличные")[0]       # A200 (Отау) продан, остаток 0
+    db_query("UPDATE sales SET sale_date = sale_date - INTERVAL 1 DAY")         # продан вчера
+    ok, inv = inventory.start(2, admin)
+    inventory.scan(inv, "A200", admin)                                          # а он лежит на витрине
+    summary = inventory.summary(inv)
+    assert [r['article_number'] for r in summary['sold_found']] == ["A200"]
+    assert summary['sold_found'][0]['sold_sale']['receipt_id']
+    client = _web(tg, MANAGER)
+    db_query("UPDATE users SET store_id=NULL WHERE role='manager'")
+    page = client.get(f"/inventory/{inv}/summary").text
+    assert "Числится проданным, но найдено (1)" in page
+    ok, result = inventory.apply(inv, admin)
+    row = db_query("SELECT quantity, inv_mark, inv_mark_note FROM products WHERE article_number='A200'")[0]
+    assert row['quantity'] == 1 and row['inv_mark'] == "added" and "числится проданным" in row['inv_mark_note']
+    # продажа с оформленным возвратом — не «проданное»
+    from core.database import create_return_record
+    db_query("UPDATE products SET quantity=1 WHERE article_number='A300'")
+    assert record_receipt([(_pid("A300"), 90000)], admin, "Наличные")[0]
+    sale_id = db_query("SELECT id FROM sales WHERE product_id=%s", (_pid("A300"),))[0]['id']
+    assert create_return_record(sale_id, "A300", 90000, "Наличные", admin, 1)[0]
+    db_query("UPDATE products SET quantity=0 WHERE article_number='A300'")
+    db_query("UPDATE sales SET sale_date = sale_date - INTERVAL 1 DAY WHERE id=%s", (sale_id,))
+    ok, inv2 = inventory.start(1, admin)
+    inventory.scan(inv2, "A300", admin)
+    assert inventory.summary(inv2)['sold_found'] == []
