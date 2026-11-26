@@ -1172,6 +1172,19 @@ def inventory_apply(request: Request, inventory_id: int, csrf: str = Form(""), u
     return RedirectResponse(f"/inventory/{inventory_id}", status_code=303)
 
 
+@app.post("/inventory/{inventory_id}/resume")
+def inventory_resume(request: Request, inventory_id: int, csrf: str = Form(""), user=Depends(current_user)):
+    check_csrf(request, csrf)
+    _inventory_or_404(inventory_id, user)
+    ok, result = inventory.resume(inventory_id, user['id'])
+    if ok:
+        flash(request, "Инвентаризация возобновлена, все сканы на месте."
+                       + (f" Перенесено сканов из начатой заново: {result}." if result else ""))
+    else:
+        flash(request, result, "error")
+    return RedirectResponse(f"/inventory/{inventory_id}", status_code=303)
+
+
 @app.post("/inventory/{inventory_id}/cancel")
 def inventory_cancel(request: Request, inventory_id: int, csrf: str = Form(""), user=Depends(current_user)):
     check_csrf(request, csrf)

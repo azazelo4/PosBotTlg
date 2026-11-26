@@ -330,6 +330,30 @@ def resolve(cursor, product_id, user_name):
 
 
 @with_transaction
+def resume(cursor, inventory_id, user_id):
+    """Вернуть в работу отменённую инвентаризацию со всеми сканами. Если в магазине уже начали новую — её сканы
+    переносятся сюда (повторы не дублируются), а новая закрывается. (True, перенесено сканов)."""
+    cursor.execute("SELECT id, store_id, status FROM inventories WHERE id = %s FOR UPDATE", (inventory_id,))
+    inv = cursor.fetchone()
+    if not inv or inv['status'] != 'cancelled':
+        raise BusinessError("Возобновить можно только отменённую инвентаризацию.")
+    cursor.execute("SELECT id FROM inventories WHERE store_id = %s AND status = 'open' AND id != %s FOR UPDATE",
+                   (inv['store_id'], inventory_id))
+    moved = 0
+    for other in cursor.fetchall():
+        cursor.execute("UPDATE IGNORE inventory_scans SET inventory_id = %s WHERE inventory_id = %s",
+                       (inventory_id, other['id']))
+        moved += cursor.rowcount
+        cursor.execute("DELETE FROM inventory_scans WHERE inventory_id = %s", (other['id'],))
+        cursor.execute("UPDATE inventories SET status = 'cancelled', finished_at = %s, finished_by = %s WHERE id = %s",
+                       (now(), user_id, other['id']))
+    cursor.execute("""UPDATE inventories SET status = 'open', finished_at = NULL, finished_by = NULL, notified = 1
+                      WHERE id = %s""", (inventory_id,))
+    logger.info("Инвентаризация #%s возобновлена пользователем %s (перенесено сканов: %s)", inventory_id, user_id, moved)
+    return True, moved
+
+
+@with_transaction
 def cancel(cursor, inventory_id, user_id):
     cursor.execute("UPDATE inventories SET status = 'cancelled', finished_at = %s, finished_by = %s "
                    "WHERE id = %s AND status = 'open'", (now(), user_id, inventory_id))
